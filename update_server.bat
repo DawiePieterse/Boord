@@ -35,7 +35,7 @@ set "FPR_FILE=%~dp0data\release_key.fpr"
 set "RELEASE_FPR="
 
 echo.
-echo ==> Checking this server can verify signed releases...
+echo ==^> Checking this server can verify signed releases...
 if not exist "%FPR_FILE%" (
     echo.
     echo No release key fingerprint found at:
@@ -62,7 +62,7 @@ if not defined RELEASE_FPR (
 echo     Only releases signed by !RELEASE_FPR! will be accepted.
 
 echo.
-echo ==> Fetching signed releases from GitHub...
+echo ==^> Fetching signed releases from GitHub...
 :: --force so a retagged release is picked up rather than silently keeping
 :: the stale local tag. It still has to pass the signature check below.
 git fetch --tags --force origin
@@ -100,7 +100,7 @@ if "!CURTAG!"=="!NEWTAG!" (
     echo     Already on the newest signed release - skipping the code update.
 ) else (
     echo.
-    echo ==> Verifying the signature on !NEWTAG!...
+    echo ==^> Verifying the signature on !NEWTAG!...
     :: --raw prints GPG's machine-readable status lines. A VALIDSIG line means
     :: the signature is good; requiring OUR fingerprint on that line is the
     :: part that matters, because a plain "good signature" only proves the tag
@@ -125,7 +125,7 @@ if "!CURTAG!"=="!NEWTAG!" (
     echo     Signature OK.
 
     echo.
-    echo ==> Updating to !NEWTAG!...
+    echo ==^> Updating to !NEWTAG!...
     :: --force so a half-finished edit on the server can't block a deploy.
     :: Anything under data\ is gitignored and is left alone; only tracked
     :: code files are reset to exactly what the signed tag contains.
@@ -140,7 +140,7 @@ if "!CURTAG!"=="!NEWTAG!" (
 )
 
 echo.
-echo ==> Installing any new dependencies...
+echo ==^> Installing any new dependencies...
 call "%~dp0backend\.venv\Scripts\activate.bat"
 pip install --quiet --disable-pip-version-check -r "%~dp0backend\requirements.txt"
 if %errorLevel% neq 0 (
@@ -150,14 +150,14 @@ if %errorLevel% neq 0 (
 )
 
 echo.
-echo ==> Restarting the server...
+echo ==^> Restarting the server...
 schtasks /query /tn "Boord Server" >nul 2>&1
 if %errorLevel% equ 0 (
     schtasks /end /tn "Boord Server" >nul 2>&1
     timeout /t 2 /nobreak >nul
 
     echo.
-    echo ==> Refreshing historical weather ^(2020-present^)...
+    echo ==^> Refreshing historical weather ^(2020-present^)...
     echo     This replaces recent days with Open-Meteo's finalized figures
     echo     ^(early readings start as provisional forecast-model values and
     echo     firm up over the following days/weeks^) - the Risk and Harvest
@@ -172,7 +172,7 @@ if %errorLevel% equ 0 (
     )
 
     echo.
-    echo ==> Refreshing older historical data ^(1987-2019^)...
+    echo ==^> Refreshing older historical data ^(1987-2019^)...
     echo     Annual harvest totals ^(reads the farm's own OES workbook,
     echo     already in this checkout - no internet needed^) and older
     echo     weather ^(from Open-Meteo's archive API^). Both are finalized,
@@ -203,7 +203,7 @@ if %errorLevel% equ 0 (
 )
 
 echo.
-echo ==> Done - now running !NEWTAG!. Remember: each phone still needs its
+echo ==^> Done - now running !NEWTAG!. Remember: each phone still needs its
 echo     app fully closed and reopened ^(not just backgrounded^) to pick up
 echo     the new version - see MANUAL.md chapter 12 if a device still shows
 echo     an old version.
