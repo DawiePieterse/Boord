@@ -464,9 +464,13 @@ what's already in place first.
    and the app's dependencies) and finish with the address to browse to
    from other devices. Press Enter to close the window when it says
    "Setup complete!".
-6. **Change the default admin password immediately** - the installer
-   does not do this for you. Log in with username `admin` and password
-   `ChangeMe123!`, then go to Settings → Change admin password.
+6. **Write down the admin password it prints.** There is no default
+   password: the server generates a random one for this install and the
+   installer prints it under "Setup complete!", next to the address. Log
+   in with username `admin` and that password - Boord then asks you to
+   replace it before it will open, and no Admin screen works until you
+   do. (If you miss it, it is also in `data\initial_admin_password.txt`
+   until you change the password, at which point Boord deletes it.)
 
 If the installer fails partway, or you'd rather understand/do each part
 by hand, use the manual steps below instead - they're exactly what the
@@ -895,7 +899,14 @@ database and seeds a clean starting baseline:
   devices
 - One supplier row representing the farm's own fruit ("Own Farm") - rename
   it to your farm under [Master Data](#9-admin---master-data)
-- A default admin login: **username `admin`, password `ChangeMe123!`**
+- An admin login: **username `admin`**, with a **random password generated
+  for this install** - printed by the installer, and kept in
+  `data\initial_admin_password.txt` until it is replaced. There is no
+  shared default password; the first sign-in forces you to set your own,
+  and every Admin screen refuses the account until you have. If the
+  password is lost before that first sign-in, delete
+  `data\initial_admin_password.txt` **and** `data\boord.db` on a server
+  that holds nothing yet - a new empty database generates a new password.
 
 **No wage rate.** Nothing is seeded, and **Calculate** under
 [Payments](#10-admin---payments) refuses with "No wage rate has been set"
@@ -2213,3 +2224,4 @@ keys below match `backend/models.py` exactly.
 |---|---|---|---|
 | `username` | text | `"admin"` | |
 | `password_hash` | text | (hashed) | Never shown or exported anywhere - only a hash is stored. |
+| `must_change_password` | yes/no | `no` | `yes` while the account still holds the password generated at install. Every admin endpoint refuses the account until it is replaced; only the password change itself is allowed through. |

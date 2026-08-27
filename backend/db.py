@@ -18,7 +18,61 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 DEFAULT_ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD = "ChangeMe123!"  # must be changed on first login
+
+# Where the password generated for this install is left for whoever is
+# standing at the machine. install.ps1 reads it back and prints it; it is
+# deleted the moment the password is changed (routers/auth.change_password).
+# data/ is gitignored, and backup.py only ever archives boord.db and photos/,
+# so this file never leaves the server.
+INITIAL_PASSWORD_FILE = os.path.join(DATA_DIR, "initial_admin_password.txt")
+
+# No I, O, 0 or 1: this password gets read off one screen and typed into
+# another, often a tablet, by someone who did not choose it.
+_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def generate_initial_password() -> str:
+    """A random password for this install - three groups of four, ~60 bits.
+
+    There used to be one shared password, `ChangeMe123!`, seeded into every
+    database and printed in both the manual and the installer's output. On a
+    single farm that is a note to self. Across twenty installs reachable over
+    Tailscale it is a published password on every one of them, and it made
+    the front door by far the softest part of a system whose update path is
+    GPG-signed and fingerprint-pinned.
+    """
+    groups = ("".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(4)) for _ in range(3))
+    return "-".join(groups)
+
+
+def _write_initial_password(password: str) -> None:
+    """Announce the generated password on the console and leave a copy on
+    disk. Both, because the console here is usually a Scheduled Task's, which
+    nobody ever sees, and because the installer needs somewhere to read it
+    from after the server has started."""
+    rule = "=" * 60
+    print(f"\n{rule}\n"
+          f" Boord created an admin account for this install:\n"
+          f"     username: {DEFAULT_ADMIN_USERNAME}\n"
+          f"     password: {password}\n"
+          f" You will be asked to replace this password at first sign-in.\n"
+          f"{rule}\n", flush=True)
+    try:
+        fd = os.open(INITIAL_PASSWORD_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(password + "\n")
+    except OSError as e:
+        print(f"[boord] could not write {INITIAL_PASSWORD_FILE} ({e!r}) - the password "
+              f"printed above is now the only copy of it", flush=True)
+
+
+def clear_initial_password_file() -> None:
+    """Called once the admin has set their own password. Keeping the file
+    after that point gains nothing and costs a plaintext password on disk."""
+    try:
+        os.remove(INITIAL_PASSWORD_FILE)
+    except OSError:
+        pass  # already gone, or never written - either way there is nothing to do
 
 
 def _column_ddl(column, dialect) -> str:
@@ -117,9 +171,12 @@ def seed_defaults() -> None:
             session.add(Supplier(name="Own Farm", is_own_farm=True))
 
         if not session.exec(select(AdminUser)).first():
+            initial_password = generate_initial_password()
             session.add(AdminUser(
                 username=DEFAULT_ADMIN_USERNAME,
-                password_hash=pwd_context.hash(DEFAULT_ADMIN_PASSWORD),
+                password_hash=pwd_context.hash(initial_password),
+                must_change_password=True,
             ))
+            _write_initial_password(initial_password)
 
         session.commit()

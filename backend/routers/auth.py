@@ -4,7 +4,7 @@ from sqlmodel import Session, SQLModel, select
 
 from db import get_session
 from models import AdminUser
-from security import create_access_token, get_current_admin, verify_password
+from security import create_access_token, get_admin_pending_password_change, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -26,17 +26,36 @@ def login(form: OAuth2PasswordRequestForm = Depends(), session: Session = Depend
     user = session.exec(select(AdminUser).where(AdminUser.username == form.username)).first()
     if not user or not verify_password(form.password, user.password_hash):
         raise HTTPException(401, "Invalid username or password")
-    return {"access_token": create_access_token(user.username), "token_type": "bearer"}
+    return {
+        "access_token": create_access_token(user.username),
+        "token_type": "bearer",
+        # A fresh install signs in with a password it generated for itself.
+        # The token is issued so the admin can call change-password with it,
+        # but get_current_admin refuses it everywhere else, so the app sends
+        # them straight to the "set your password" screen.
+        "must_change_password": user.must_change_password,
+    }
 
 
 @router.post("/change-password")
 def change_password(body: ChangePasswordIn, session: Session = Depends(get_session),
-                     current: AdminUser = Depends(get_current_admin)):
-    from db import pwd_context
+                     current: AdminUser = Depends(get_admin_pending_password_change)):
+    """The only endpoint an admin who still owes a password change can reach,
+    hence the pending-friendly dependency - anything stricter would lock a new
+    install out of the very step that unlocks it."""
+    from db import clear_initial_password_file, pwd_context
     new_password = body.new_password
     if len(new_password) < MIN_PASSWORD_LENGTH:
         raise HTTPException(400, f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
+    if verify_password(new_password, current.password_hash):
+        # Otherwise "change your password" is satisfiable by retyping the one
+        # the installer printed, which is exactly the password being retired.
+        raise HTTPException(400, "That is already this account's password - choose a different one")
     current.password_hash = pwd_context.hash(new_password)
+    current.must_change_password = False
     session.add(current)
     session.commit()
+    # The generated password no longer opens anything, so the copy left in
+    # data/ for the installer to print is now pure liability.
+    clear_initial_password_file()
     return {"ok": True}

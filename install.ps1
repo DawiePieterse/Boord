@@ -27,6 +27,9 @@ $PythonInstallerUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$
 $Gpg4winUrl = "https://files.gpg4win.org/gpg4win-latest.exe"
 $ReleaseKeyPath = Join-Path $RepoRoot "release-key.asc"
 $FprFile = Join-Path $RepoRoot "data\release_key.fpr"
+# Written by backend/db.py the first time the server builds its database, and
+# deleted by the server the moment the admin sets their own password.
+$InitialPasswordFile = Join-Path $RepoRoot "data\initial_admin_password.txt"
 
 function Write-Step($msg) {
     Write-Host ""
@@ -371,9 +374,21 @@ cd /d "$BackendDir"
         Write-Warn "Could not detect this PC's network address automatically - run 'ipconfig' and look for 'IPv4 Address'."
     }
     Write-Host ""
-    Write-Warn "Log in with username 'admin' and password 'ChangeMe123!', then"
-    Write-Warn "change the password immediately under Settings - this installer"
-    Write-Warn "does not do that step for you."
+    # No shared default password any more: the server generates one per
+    # install and leaves it here for exactly this moment. Printing it is the
+    # whole reason step 10 waits for the server to answer before getting here.
+    if (Test-Path $InitialPasswordFile) {
+        $initialPassword = (Get-Content $InitialPasswordFile -TotalCount 1).Trim()
+        Write-Host " Sign in as:                        admin"
+        Write-Host " With this password:                $initialPassword" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Warn "Write it down now. It was generated for this server alone, and Boord"
+        Write-Warn "will ask you to replace it the first time you sign in - nothing in the"
+        Write-Warn "Admin app opens until you do. Once you have, the copy in"
+        Write-Warn "data\initial_admin_password.txt is deleted automatically."
+    } else {
+        Write-Host " Sign in with the admin password already set on this server."
+    }
     Write-Host ""
     Write-Host " The server will now start automatically every time this PC turns on."
 

@@ -95,6 +95,14 @@ class AdminUser(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     username: str = Field(unique=True)
     password_hash: str
+    # True while the account still holds the password db.seed_defaults
+    # generated for this install. Every admin endpoint refuses the token of a
+    # user in that state - see security.get_current_admin - so the change is
+    # forced rather than merely advised. Existing databases get the column
+    # added as False by db._add_missing_columns, which is the right default:
+    # those farms were told to replace ChangeMe123! long ago, and locking
+    # them out of their own data on an upgrade would be the worse failure.
+    must_change_password: bool = False
 
 
 class SystemSetting(SQLModel, table=True):

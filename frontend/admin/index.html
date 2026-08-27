@@ -32,7 +32,24 @@
     <input id="loginPassword" type="password" placeholder="Password" class="w-full border border-slate-300 rounded-lg p-3 mb-4 text-lg">
     <button id="loginBtn" class="w-full boord-btn-primary rounded-lg py-3 font-semibold">Sign in</button>
     <div id="loginError" class="text-red-600 text-sm mt-3 hidden"></div>
-    <div class="text-xs text-slate-400 mt-4">Default admin / ChangeMe123! - change this in Settings after first login.</div>
+  </div>
+</div>
+
+<!-- Forced password change. A new install generates its own admin password
+     and the server refuses every other endpoint until it has been replaced
+     (backend/security.py), so this screen stands between sign-in and the app
+     rather than being a note the admin can scroll past. -->
+<div id="pwChangeScreen" class="min-h-screen flex items-center justify-center p-4 hidden">
+  <div class="bg-white rounded-2xl shadow p-6 w-full max-w-sm">
+    <div class="text-center mb-5">
+      <div class="text-2xl font-bold" style="color: var(--boord-blue)">Set your password</div>
+      <div class="text-sm text-slate-500 mt-2">This server is still using the password created when it was installed. Choose your own to continue.</div>
+    </div>
+    <input id="firstPassword" type="password" placeholder="New password" class="w-full border border-slate-300 rounded-lg p-3 mb-2 text-lg">
+    <input id="firstPasswordConfirm" type="password" placeholder="Repeat new password" class="w-full border border-slate-300 rounded-lg p-3 mb-4 text-lg">
+    <button id="firstPasswordBtn" class="w-full boord-btn-primary rounded-lg py-3 font-semibold">Save and continue</button>
+    <div id="firstPasswordError" class="text-red-600 text-sm mt-3 hidden"></div>
+    <div class="text-xs text-slate-400 mt-4">At least 8 characters. Nothing in the Admin app opens until this is set.</div>
   </div>
 </div>
 

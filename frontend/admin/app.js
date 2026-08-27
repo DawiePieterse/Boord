@@ -49,6 +49,7 @@ function initBanner() {
 async function init() {
   document.getElementById("loginBtn").addEventListener("click", login);
   document.getElementById("logoutBtn").addEventListener("click", logout);
+  document.getElementById("firstPasswordBtn").addEventListener("click", setFirstPassword);
 
   if (!Boord.getToken()) { showLogin(); return; }
   showApp();
@@ -59,17 +60,35 @@ async function init() {
     // Don't sign the admin out over a network blip - only a real rejection
     // from the server means the stored token is genuinely no good.
     if (Boord.isNetworkError(e)) { Boord.setOffline(true); return; }
-    sessionExpired();
+    sessionExpired(e);
   }
+}
+
+// The server answers 403 with security.PASSWORD_CHANGE_REQUIRED until the
+// admin replaces the password created at install. Matched on the text as
+// well as the status so an unrelated 403 can never strand someone on the
+// "set your password" screen.
+function _passwordChangeRequired(e) {
+  const message = String((e && e.message) || "");
+  return message.startsWith("403") && /new admin password/i.test(message);
 }
 
 function showLogin() {
   document.getElementById("loginScreen").classList.remove("hidden");
+  document.getElementById("pwChangeScreen").classList.add("hidden");
   document.getElementById("app").classList.add("hidden");
+}
+
+function showPasswordSetup() {
+  document.getElementById("loginScreen").classList.add("hidden");
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("pwChangeScreen").classList.remove("hidden");
+  document.getElementById("firstPassword").focus();
 }
 
 async function showApp() {
   document.getElementById("loginScreen").classList.add("hidden");
+  document.getElementById("pwChangeScreen").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
   bindTabs();
   bindCollapsibles();
@@ -101,8 +120,11 @@ async function login() {
   const password = document.getElementById("loginPassword").value;
   const errEl = document.getElementById("loginError");
   try {
-    await Boord.login(username, password);
+    const session = await Boord.login(username, password);
     errEl.classList.add("hidden");
+    // Correct password, but it is the one the installer generated - the
+    // token opens nothing except change-password until it is replaced.
+    if (session.must_change_password) { showPasswordSetup(); return; }
     await showApp();
   } catch (e) {
     errEl.textContent = "Invalid username or password";
@@ -115,10 +137,44 @@ function logout() {
   showLogin();
 }
 
+// First sign-in on a new install: replace the generated password before the
+// app will open. Same endpoint as Settings -> Change admin password; the
+// difference is only that there is no way past this screen.
+async function setFirstPassword() {
+  const password = document.getElementById("firstPassword").value;
+  const repeat = document.getElementById("firstPasswordConfirm").value;
+  const errEl = document.getElementById("firstPasswordError");
+  const fail = (message) => { errEl.textContent = message; errEl.classList.remove("hidden"); };
+
+  if (password.length < 8) { fail("Password must be at least 8 characters"); return; }
+  if (password !== repeat) { fail("The two passwords do not match"); return; }
+  try {
+    await Boord.api("/api/auth/change-password", {
+      method: "POST", auth: true, body: { new_password: password },
+    });
+  } catch (e) {
+    fail(Boord.isNetworkError(e) ? "Cannot reach the server - try again"
+                                  : (_apiErrorDetail(e) || "Could not set the password"));
+    return;
+  }
+  errEl.classList.add("hidden");
+  document.getElementById("firstPassword").value = "";
+  document.getElementById("firstPasswordConfirm").value = "";
+  await showApp();
+}
+
 // The stored token is no longer accepted (expired, or the server was
 // restarted). Drop it and ask for a sign-in rather than leaving the admin
 // looking at a dashboard that silently fails to load.
-function sessionExpired() {
+//
+// Takes the rejection, because one 403 is not an expired session: a valid
+// token is refused everywhere while the install's generated password stands.
+// Callers ALWAYS pass it - refreshDashboard() fires the moment showApp()
+// paints, so on a reload it reaches Boord.isAuthError before init()'s own
+// check does, and without this it would clear a perfectly good token and
+// strand the admin on the sign-in screen with the only password they have.
+function sessionExpired(e) {
+  if (_passwordChangeRequired(e)) { showPasswordSetup(); return; }
   Boord.clearToken();
   showLogin();
   Boord.toast("Session expired - sign in again");
@@ -203,7 +259,7 @@ async function refreshDashboard() {
     ]);
   } catch (e) {
     if (Boord.isNetworkError(e)) { Boord.setOffline(true); return; } // keep last data on screen
-    if (Boord.isAuthError(e)) { sessionExpired(); return; }
+    if (Boord.isAuthError(e)) { sessionExpired(e); return; }
     Boord.toast("Could not load the dashboard");
     return;
   }
@@ -342,7 +398,7 @@ async function openLotCrates(lotId) {
   try {
     data = await Boord.api(`/api/lots/${lotId}`, { auth: true });
   } catch (e) {
-    if (Boord.isAuthError(e)) { sessionExpired(); return; }
+    if (Boord.isAuthError(e)) { sessionExpired(e); return; }
     Boord.toast("Could not load this lot's crates - check connection");
     return;
   }
@@ -432,7 +488,7 @@ function editCrate(crate) {
         method: "PATCH", auth: true, body,
       });
     } catch (e) {
-      if (Boord.isAuthError(e)) { sessionExpired(); return; }
+      if (Boord.isAuthError(e)) { sessionExpired(e); return; }
       Boord.toast("Could not save: " + _apiErrorDetail(e));
       throw e; // the bindMasterData save handler only closes the modal on
       // success - rethrowing keeps it open so a bad number can be fixed

@@ -77,10 +77,32 @@ def _admin_for_credentials(credentials: Optional[HTTPAuthorizationCredentials]) 
         return session.exec(select(AdminUser).where(AdminUser.username == username)).first()
 
 
-def get_current_admin(credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme)) -> AdminUser:
+# What the server answers with while an admin still owes a password change.
+# The admin app matches on the 403 plus this text to send them to the
+# "set your password" screen rather than to the sign-in screen.
+PASSWORD_CHANGE_REQUIRED = "Set a new admin password before continuing"
+
+
+def get_admin_pending_password_change(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+) -> AdminUser:
+    """The signed-in admin, even if they have not yet replaced the password
+    generated at install. ONLY /api/auth/change-password may depend on this -
+    it is the one thing such an account is allowed to do. Everything else
+    takes get_current_admin, which turns them away."""
     user = _admin_for_credentials(credentials)
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+    return user
+
+
+def get_current_admin(credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme)) -> AdminUser:
+    user = get_admin_pending_password_change(credentials)
+    if user.must_change_password:
+        # Enforced here rather than in the browser: a warning on a login
+        # screen is a suggestion, and the whole point of generating a
+        # password per install is that nothing works until it is replaced.
+        raise HTTPException(status.HTTP_403_FORBIDDEN, PASSWORD_CHANGE_REQUIRED)
     return user
 
 
@@ -91,4 +113,10 @@ def get_optional_admin(
     back more once an admin IS signed in - see master_data.list_workers, which
     the unauthenticated Field app and badge printer both need, but which must
     not serve ID/bank numbers to them."""
-    return _admin_for_credentials(credentials)
+    user = _admin_for_credentials(credentials)
+    # An account still on its generated password counts as not signed in for
+    # this purpose. It would otherwise be the one route by which such a token
+    # could pull out every worker's ID number and bank details.
+    if user is not None and user.must_change_password:
+        return None
+    return user

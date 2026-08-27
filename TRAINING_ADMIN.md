@@ -7,9 +7,12 @@ For farm office staff managing workers, wages, reports, and settings.
 ## Signing in
 
 Open the Admin app, enter your username and password, and tap **Sign
-in**. If you're on a brand-new setup, the default login is username
-`admin`, password `ChangeMe123!` — change that immediately under
-**Settings → Change admin password** once you're in.
+in**. On a brand-new setup the username is `admin` and the password is
+the random one the installer printed when it set the server up — there
+is no shared default. Boord then asks you to choose your own password
+before it will open; nothing else works until you have. After that you
+can change it whenever you like under **Settings → Change admin
+password**.
 
 Once signed in, the top bar shows the farm name, today's date/time, and
 current weather. Five tabs run across the top: **Dashboard**,
