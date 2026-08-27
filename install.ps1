@@ -219,17 +219,33 @@ try {
         # terminating error here; and cmd /c strips quotes from a command that
         # starts with one, which "C:\Program Files\..." does. Start-Process
         # sidesteps both and returns a real exit code.
+        Write-Warn "Importing the release key (first gpg run can take a moment)..."
         try {
             $gpgLog = Join-Path $env:TEMP "boord-gpg-import.log"
+            # Not -Wait. GnuPG 2.5 starts keyboxd and gpg-agent on its first
+            # run, and on a machine whose keyring has just been created that
+            # start-up can hang indefinitely with its output redirected into a
+            # non-interactive process - which stalled the whole installer with
+            # no message explaining what it was waiting for. Importing the key
+            # is a convenience; it must never be able to block the install.
             $proc = Start-Process -FilePath $gpgExe `
                 -ArgumentList @("--batch", "--yes", "--import", $ReleaseKeyPath) `
-                -NoNewWindow -Wait -PassThru `
+                -NoNewWindow -PassThru `
                 -RedirectStandardError $gpgLog -RedirectStandardOutput "$gpgLog.out"
-            if ($proc.ExitCode -eq 0) {
-                Write-Ok "Imported the Boord release key"
+            if ($proc.WaitForExit(60000)) {
+                if ($proc.ExitCode -eq 0) {
+                    Write-Ok "Imported the Boord release key"
+                } else {
+                    Write-Warn "Importing release-key.asc failed (exit $($proc.ExitCode)) - see $gpgLog"
+                    Write-Warn "Import it by hand before running update_server.bat."
+                }
             } else {
-                Write-Warn "Importing release-key.asc failed (exit $($proc.ExitCode)) - see $gpgLog"
-                Write-Warn "Import it by hand before running update_server.bat."
+                try { $proc.Kill() } catch { }
+                Write-Warn "gpg did not finish within 60 seconds - skipped the key import."
+                Write-Warn "This is usually gpg's first run initialising its keyring. Run this"
+                Write-Warn "once in a Command Prompt, which lets it finish interactively:"
+                Write-Warn "    ""$gpgExe"" --import release-key.asc"
+                Write-Warn "Setup will carry on without it."
             }
             Remove-Item "$gpgLog.out" -ErrorAction SilentlyContinue
         } catch {
