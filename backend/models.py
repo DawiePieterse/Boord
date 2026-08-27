@@ -119,6 +119,35 @@ class SystemSetting(SQLModel, table=True):
     gps_lon: Optional[float] = None
 
 
+class SetupState(SQLModel, table=True):
+    """Single-row record of how far the first-run wizard got - see
+    routers/setup.py.
+
+    Deliberately its own table rather than two more columns on SystemSetting,
+    for the same reason OwnerViewToken is: SystemSetting is served publicly
+    to every unauthenticated device. It also gets round-tripped whole by
+    PUT /api/system-settings, which builds a fresh row from the request body
+    and merges it - so a field the Settings form does not know about is
+    silently blanked every time somebody presses Save. A completion marker
+    that erases itself on the farm's next settings change would put an
+    established farm back at step 1.
+
+    started_at is stamped the first time the wizard is shown, and it is what
+    makes the wizard resumable. Without it the wizard was offered on the
+    strength of a blank farm_name - which its own first step then fills in,
+    so closing the tab after step 1 dropped the admin into a half-configured
+    app with the remaining steps unreachable.
+
+    A database that predates this table has no row at all, which must never
+    on its own mean "not set up yet": see build_setup_state() for the two
+    further signs of an already-working farm that have to agree before the
+    wizard is offered.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
 class OwnerViewToken(SQLModel, table=True):
     """Single-row secret token gating the read-only Owner View dashboard
     (see routers/owner_view.py) - deliberately kept off SystemSetting,

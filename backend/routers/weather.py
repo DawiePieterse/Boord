@@ -1,13 +1,15 @@
 from datetime import date
+from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from db import get_session
-from models import WeatherHistory
+from models import HistoricalAnnualYield, HistoricalHarvest, WeatherHistory
 from security import get_current_admin
-from weather import farm_coords, fetch_weather, sync_recent_weather
+from weather import (HISTORY_START_DATE, farm_coords, fetch_historical_hourly, fetch_weather,
+                      parse_hourly_rows, sync_recent_weather)
 
 router = APIRouter(prefix="/api/weather", tags=["weather"])
 
@@ -116,3 +118,87 @@ def weather_history(session: Session = Depends(get_session), admin=Depends(get_c
     returns the full daily-aggregated history."""
     sync_recent_weather(session)
     return build_weather_history(session)
+
+
+@router.post("/history/backfill")
+def backfill_weather_history(session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+    """Pull the whole weather record for the farm's location, 2020 to today.
+
+    Same job as scripts/import_historical_weather.py, reachable from the
+    browser - the setup wizard offers it once GPS has been entered, because
+    a new customer has no shell on the server and no reason to know that
+    script exists. The ordering is the point: this cannot run before the
+    location step, so the "imported weather for the wrong place" failure
+    that farm_coords() refuses to allow never gets a chance to arise.
+
+    Deletes and reinserts HISTORY_START_DATE onward only, exactly like the
+    script, so it still composes with the 1987-2019 archive backfill
+    (scripts/import_historical_weather_archive.py) in either order and
+    however many times either runs.
+
+    Slow by nature - six years of hourly rows in one request - so callers
+    must use Boord.UPLOAD_TIMEOUT_MS, not the 8s default.
+
+    Known gap, unchanged by this: WeatherHistory carries no location of its
+    own, so rows fetched for one place are indistinguishable from another's.
+    A farm that MOVES its GPS and re-runs this ends up with two locations'
+    weather in one table. Fixing that needs a lat/lon column and a
+    cache-invalidating migration - non-additive, so it waits for Alembic
+    (NEXT_STEPS.md §4).
+    """
+    coords = farm_coords(session)
+    if coords is None:
+        # Not an error: the wizard offers this button before the location
+        # step is necessarily done, and "set your location first" is the
+        # honest answer rather than a 400.
+        return {"no_location": True, "imported": 0}
+    lat, lon = coords
+    end_date = date.today().isoformat()
+    try:
+        data = fetch_historical_hourly(lat, lon, HISTORY_START_DATE, end_date)
+        rows = [WeatherHistory(**r) for r in parse_hourly_rows(data)]
+    except Exception as e:
+        # The farm server's internet is genuinely unreliable. Say so and
+        # leave the existing history alone - a half-deleted table would be
+        # worse than no import.
+        raise HTTPException(502, f"Could not reach the weather service ({type(e).__name__}). "
+                                  f"Nothing was changed - try again later.")
+    session.exec(delete(WeatherHistory).where(
+        WeatherHistory.timestamp >= date.fromisoformat(HISTORY_START_DATE)))
+    session.add_all(rows)
+    session.commit()
+    return {"imported": len(rows), "start_date": HISTORY_START_DATE, "end_date": end_date,
+            "lat": lat, "lon": lon,
+            "archive_gap": _archive_gap(session)}
+
+
+def _archive_gap(session: Session) -> Optional[int]:
+    """The earliest harvest season this farm has imported, if that is before
+    the weather this endpoint can reach - otherwise None.
+
+    Worth reporting rather than leaving to be discovered. routers/risk.py
+    scores every reference season from REFERENCE_START_YEAR (2012) onward
+    that has yield data, and it needs weather for each one: a farm that
+    imports season totals back to, say, 2013 and then fills weather only
+    from 2020 gets a Risk indicator that raises "no weather data for
+    reference season 2013" instead of a score. Nothing warns them, because
+    each half looks like it worked.
+
+    The older range comes from a different Open-Meteo API and is fetched in
+    chunks over several minutes (see
+    scripts/import_historical_weather_archive.py), which is more than one
+    browser request should hold open - so this reports the gap and points
+    at update_server.bat rather than trying to close it here.
+    """
+    # Aggregated in SQL: HistoricalHarvest is one row per block per day and
+    # reaches back years, and this runs on a request that has already spent
+    # a minute or two on the network.
+    earliest = min(
+        (y for y in (session.exec(select(func.min(HistoricalHarvest.season_year))).one(),
+                     session.exec(select(func.min(HistoricalAnnualYield.season_year))).one())
+         if y is not None),
+        default=None,
+    )
+    if earliest is None:
+        return None
+    return earliest if earliest < date.fromisoformat(HISTORY_START_DATE).year else None

@@ -929,8 +929,38 @@ describes each column. Both `.csv` and `.xlsx` are accepted, and importing
 again updates blocks with a matching `id` rather than duplicating them, so
 it is safe to correct a mistake and re-import.
 
-> **⚠️ Change the default admin password immediately** after first login,
-> via [Settings → Change admin password](#12-admin---settings).
+### The setup wizard
+
+You do not have to hunt for any of the above. The first time you sign in to
+the Admin app on a new install — straight after choosing your own password —
+Boord shows a nine-step setup wizard instead of the usual tabs:
+
+1. **Whose farm is this** — farm name, location description, how your own
+   fruit is labelled as a supplier, and the current harvest season
+2. **Where is it** — GPS latitude and longitude, with a map to click on
+3. **What you pay per kilogram** — the wage rate
+4. **How long fruit may sit in transit** — the two urgency thresholds
+   (optional; the defaults suit most farms)
+5. **Your orchard blocks** — download `blocks.csv`, fill it in, load it back
+6. **Your people** — the worker import (optional)
+7. **Name your stations** — rename the eight device slots (optional)
+8. **Seasons before Boord** — historical harvest records, season totals, and
+   the weather history download (all optional)
+9. **Finish** — the address to open on your tablets, and the Owner View link
+
+Steps 1 to 3 are required, because nothing sensible can be guessed for them.
+The rest can be skipped and done later; the last screen lists anything still
+outstanding rather than letting you discover it in use.
+
+**It is safe to close half way through.** Reopening the Admin app returns you
+to the wizard at the first step you have not finished. It stops appearing
+once you press **Open Boord** on the last screen, and everything it collects
+can be changed afterwards under **Settings** and **Master Data** — nothing on
+that screen is decided permanently.
+
+An existing farm upgrading to this version never sees the wizard: Boord
+checks that the database has no farm name *and* no captured crates before
+offering it, so a server that has been running is left alone.
 
 ### ⚠️ Do not run `seed_demo.py` on a real farm database
 

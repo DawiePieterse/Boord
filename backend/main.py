@@ -6,8 +6,8 @@ from fastapi.staticfiles import StaticFiles
 
 from backup import start_backup_scheduler
 from db import PHOTOS_DIR, create_db_and_tables, seed_defaults
-from routers import (analysis, auth, backups, dashboard, devices, harvest_records, master_data, lots, owner_view,
-                      payments, processing, receiving, reports, risk, suppliers, sync, weather)
+from routers import (analysis, auth, backups, dashboard, devices, harvest_records, historical, master_data, lots,
+                      owner_view, payments, processing, receiving, reports, risk, setup, suppliers, sync, weather)
 
 app = FastAPI(title="Boord Harvest & Receiving")
 
@@ -35,6 +35,8 @@ app.include_router(weather.router)
 app.include_router(risk.router)
 app.include_router(backups.router)
 app.include_router(owner_view.router)
+app.include_router(historical.router)
+app.include_router(setup.router)
 
 
 @app.on_event("startup")
@@ -61,6 +63,23 @@ class NoCacheStaticFiles(StaticFiles):
 
 
 app.mount("/photos", StaticFiles(directory=PHOTOS_DIR), name="photos")
+
+# The blank import templates, so the setup wizard can hand a new customer the
+# file to fill in rather than describing its columns and hoping. Must be
+# mounted BEFORE "/" - that mount is a catch-all, and templates/ sits beside
+# frontend/ rather than inside it. Headings only, no rows: see
+# templates/README.md for why anything in these files would be imported as
+# somebody's real data.
+# Mounted only if it is actually there. StaticFiles checks the directory at
+# startup and raises if it is missing, which would turn "somebody deleted a
+# blank csv" into a farm server that refuses to boot. A missing template
+# should cost a 404 on a download link, nothing more.
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "..", "templates")
+if os.path.isdir(TEMPLATES_DIR):
+    app.mount("/templates", StaticFiles(directory=TEMPLATES_DIR), name="templates")
+else:
+    print(f"[boord] no templates directory at {TEMPLATES_DIR} - the import templates "
+          f"the setup wizard links to will 404", flush=True)
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 app.mount("/", NoCacheStaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

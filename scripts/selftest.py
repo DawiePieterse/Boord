@@ -29,12 +29,14 @@ import openpyxl
 BACKEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend")
 sys.path.insert(0, BACKEND_DIR)
 
+from sqlalchemy import inspect  # noqa: E402
 from sqlmodel import Session, func, select  # noqa: E402
 
 from db import engine  # noqa: E402
 from models import (Block, HarvestRecord, HistoricalAnnualYield,  # noqa: E402
-                    HistoricalHarvest, SystemSetting, WeatherHistory)
+                    HistoricalHarvest, SetupState, SystemSetting, WeatherHistory)
 from routers.analysis import build_analysis_summary  # noqa: E402
+from routers.setup import build_setup_state  # noqa: E402
 from routers.reports import historical_harvest_data_report  # noqa: E402
 from routers.risk import (DRIVERS, REFERENCE_START_YEAR,  # noqa: E402
                           REGRESSION_START_YEAR, _band, _compute_driver_state,
@@ -47,6 +49,16 @@ import routers.risk as risk_module  # noqa: E402
 
 _passed = 0
 _failed = []
+_skipped = []
+
+
+class Skip(Exception):
+    """Raised by a check that cannot run against this particular database.
+
+    Only for a genuinely absent precondition - a table the server has not
+    created yet, say - never for an assertion that is inconvenient. Skips
+    are counted and listed separately so they can't be mistaken for passes.
+    """
 
 
 class offline:
@@ -80,6 +92,9 @@ def check(name, fn):
     global _passed
     try:
         fn()
+    except Skip as exc:
+        _skipped.append((name, str(exc)))
+        print(f"  skip  {name}\n          {exc}")
     except Exception as exc:  # noqa: BLE001 - a failing check must not stop the run
         _failed.append((name, exc))
         print(f"  FAIL  {name}\n          {type(exc).__name__}: {exc}")
@@ -606,6 +621,80 @@ def test_selftest_writes_nothing():
 
 
 # ---------------------------------------------------------------------------
+# First-run setup wizard state
+#
+# The one thing worth asserting against a live database: that this farm is
+# NOT offered the wizard. Getting `required` wrong in that direction sits an
+# established farm in front of an empty setup form instead of its own
+# dashboard, and the check that prevents it deliberately does not trust a
+# single flag - so it is worth testing on a real database rather than only
+# on a contrived one.
+# ---------------------------------------------------------------------------
+def _require_setup_table():
+    """SetupState is created at server startup (main.on_startup ->
+    create_db_and_tables). A database no server has opened since this
+    release simply does not have it yet - that is not a failure, and on a
+    live farm server, which by definition has started, it never happens."""
+    if not inspect(engine).has_table("setupstate"):
+        raise Skip("no setupstate table yet - start the server against this "
+                    "database once, then re-run")
+
+
+def test_setup_not_required_on_a_configured_farm():
+    _require_setup_table()
+    with Session(engine) as s:
+        state = build_setup_state(s)
+        settings = s.exec(select(SystemSetting)).first()
+
+    if state["started_at"] and not state["completed_at"]:
+        # The wizard is open and unfinished - on this farm, right now,
+        # somebody is part way through it. Still being offered is correct
+        # here, and is the whole reason started_at exists: step 1 writes the
+        # farm name, so without it the remaining steps become unreachable on
+        # the next page load. Assert that rather than reading a half-done
+        # setup as a failure.
+        assert state["required"] is True, "an unfinished setup wizard stopped being offered"
+        return
+
+    named = bool(settings and (settings.farm_name or "").strip())
+    picked = state["harvest_records"] > 0
+    if not (named or picked or state["completed_at"]):
+        return  # a genuinely blank database - the wizard SHOULD be offered
+    assert state["required"] is False, (
+        f"this farm would be sent through the setup wizard "
+        f"(named={named}, crates={state['harvest_records']}, "
+        f"started={state['started_at']}, completed={state['completed_at']})")
+
+
+def test_setup_state_reports_every_step():
+    """Every step the wizard knows about has to come back with a verdict -
+    a missing key reads as "not done" in the browser and silently reopens
+    a step the farm has already finished."""
+    _require_setup_table()
+    with Session(engine) as s:
+        state = build_setup_state(s)
+    expected = {"identity", "location", "rate", "thresholds", "blocks",
+                "workers", "devices", "history"}
+    assert set(state["steps"]) == expected, f"steps drifted: {set(state['steps'])}"
+    for key, step in state["steps"].items():
+        assert isinstance(step.get("done"), bool), f"{key} has no boolean 'done'"
+
+
+def test_setup_state_writes_nothing():
+    """build_setup_state only reads. It runs on every admin page load, and
+    it must not be what creates the SetupState row - the absence of that row
+    is exactly how a database that predates the wizard is recognised."""
+    _require_setup_table()
+    with Session(engine) as s:
+        before = s.exec(select(func.count()).select_from(SetupState)).one()
+    with Session(engine) as s:
+        build_setup_state(s)
+    with Session(engine) as s:
+        after = s.exec(select(func.count()).select_from(SetupState)).one()
+    assert before == after, f"SetupState rows changed: {before} -> {after}"
+
+
+# ---------------------------------------------------------------------------
 # Report workbook
 # ---------------------------------------------------------------------------
 def _report_workbook():
@@ -791,12 +880,22 @@ def main():
                test_report_per_season_sheets_match_daily_table):
         check(fn.__name__, fn)
 
+    section("Setup state")
+    for fn in (test_setup_not_required_on_a_configured_farm,
+               test_setup_state_reports_every_step,
+               test_setup_state_writes_nothing):
+        check(fn.__name__, fn)
+
     section("Other endpoints")
     for fn in (test_analysis_and_weather_endpoints_build,
                test_analysis_unaffected_by_annual_import):
         check(fn.__name__, fn)
 
     print("\n" + "=" * 60)
+    if _skipped:
+        print(f"SKIPPED: {len(_skipped)}")
+        for name, why in _skipped:
+            print(f"  - {name}: {why}")
     if _failed:
         print(f"FAILED: {len(_failed)} of {_passed + len(_failed)} checks")
         for name, exc in _failed:

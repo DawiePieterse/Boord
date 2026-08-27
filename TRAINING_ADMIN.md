@@ -20,6 +20,28 @@ current weather. Five tabs run across the top: **Dashboard**,
 
 ---
 
+## The first time: the setup wizard
+
+On a brand-new server you will not see those tabs straight away. Boord
+shows a nine-step wizard instead, because a fresh install genuinely does
+not know whose farm it is — it has no name, no location, no blocks and no
+wage rate, and it will not invent any of them.
+
+Work through it: farm name and supplier name, GPS (there is a map to click
+on), the rate you pay per kilogram, the transit thresholds, then your
+blocks, your people, your station names, and any past seasons you have
+records for. The first three are required. The rest have a **Skip for now**
+button, and the last screen tells you what is still outstanding.
+
+If you have to stop, just close it. Next time you open the Admin app it
+picks up at the first step you have not done. When you press **Open
+Boord** on the last screen the wizard is finished with — everything on it
+lives under **Settings** and **Master Data** from then on.
+
+You will not see this on a farm that is already running Boord.
+
+---
+
 ## Dashboard — your daily overview
 
 This is where you check how the harvest is moving.

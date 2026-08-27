@@ -76,38 +76,80 @@ function _passwordChangeRequired(e) {
 function showLogin() {
   document.getElementById("loginScreen").classList.remove("hidden");
   document.getElementById("pwChangeScreen").classList.add("hidden");
+  document.getElementById("setupWizardScreen").classList.add("hidden");
   document.getElementById("app").classList.add("hidden");
 }
 
 function showPasswordSetup() {
   document.getElementById("loginScreen").classList.add("hidden");
   document.getElementById("app").classList.add("hidden");
+  document.getElementById("setupWizardScreen").classList.add("hidden");
   document.getElementById("pwChangeScreen").classList.remove("hidden");
   document.getElementById("firstPassword").focus();
 }
 
+// What the setup wizard needs to know before the app paints, or null when
+// the question can't be answered right now. Never signs anybody out: an
+// unreachable server is not a rejected token, and a genuinely expired one is
+// already caught by init()'s own validation call.
+async function fetchSetupState() {
+  try {
+    return await Boord.api("/api/setup/state", { auth: true });
+  } catch (e) {
+    if (Boord.isNetworkError(e)) { Boord.setOffline(true); return null; }
+    // A token belonging to an admin who still owes a password change is
+    // refused by every endpoint including this one. Send them to that screen
+    // rather than reading the 403 as "no setup needed".
+    if (_passwordChangeRequired(e)) { showPasswordSetup(); return { blocked: true }; }
+    return null;
+  }
+}
+
+// Called once per page load in every path except one: finishing the setup
+// wizard calls it a second time. Everything that attaches a listener
+// therefore has to run under _appBound, or every button in the app would be
+// bound twice and fire twice.
+let _appBound = false;
+
 async function showApp() {
   document.getElementById("loginScreen").classList.add("hidden");
   document.getElementById("pwChangeScreen").classList.add("hidden");
-  document.getElementById("app").classList.remove("hidden");
-  bindTabs();
-  bindCollapsibles();
-  bindDashboard();
-  bindMasterData();
-  bindPayments();
-  bindReports();
-  bindSettings();
-  bindSuppliers();
 
-  Boord.offlineBanner("Offline - data may be out of date");
-  Boord.onOfflineChange = (off) => { if (!off) refreshDashboard(); };
-  LWPTR.attach(async () => {
-    updateBannerWeather();
-    const active = document.querySelector(".tab-btn.active");
-    const tab = active ? active.dataset.tab : "dashboard";
-    if (tab === "dashboard") await refreshDashboard();
-    else if (tab === "masterdata") await loadAllMasterData();
-  });
+  // A database nobody has claimed yet gets the wizard instead of the tabs.
+  // Deliberately decided here rather than by the server refusing every
+  // endpoint the way it does for an unchanged install password: that pattern
+  // is right for a credential, where being locked out beats being wide open.
+  // The equivalent bug here would lock a farm out of its own harvest data
+  // over an unset threshold value, and the settings that genuinely cannot be
+  // guessed already refuse at the point of use.
+  const setup = await fetchSetupState();
+  if (setup && setup.blocked) return;
+  if (setup && setup.required) { await showSetupWizard(setup); return; }
+
+  document.getElementById("setupWizardScreen").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+
+  if (!_appBound) {
+    _appBound = true;
+    bindTabs();
+    bindCollapsibles();
+    bindDashboard();
+    bindMasterData();
+    bindPayments();
+    bindReports();
+    bindSettings();
+    bindSuppliers();
+
+    Boord.offlineBanner("Offline - data may be out of date");
+    Boord.onOfflineChange = (off) => { if (!off) refreshDashboard(); };
+    LWPTR.attach(async () => {
+      updateBannerWeather();
+      const active = document.querySelector(".tab-btn.active");
+      const tab = active ? active.dataset.tab : "dashboard";
+      if (tab === "dashboard") await refreshDashboard();
+      else if (tab === "masterdata") await loadAllMasterData();
+    });
+  }
 
   try { await loadSettingsForm(); } catch (e) { /* offline - keep defaults */ }
   initBanner();
@@ -1195,16 +1237,31 @@ async function downloadReport(key) {
 // ---------------------------------------------------------------------
 let _mapInstance = null;
 let _pickedLatLng = null;
+// Which pair of inputs the picker is currently editing. The map itself is
+// built once and reused, so the target has to be state rather than a closure
+// captured when it was created - Settings and the setup wizard both open it.
+let _mapTarget = { lat: "setGpsLat", lon: "setGpsLon" };
+let _mapModalBound = false;
+
+// The modal's own two buttons, bound separately from the Settings tab that
+// used to own them. The setup wizard opens the same modal without ever
+// running bindSettings(), which left Cancel and "Use this location" dead on
+// that screen - the pin could be dropped and then not applied.
+function bindMapModal() {
+  if (_mapModalBound) return;
+  _mapModalBound = true;
+  document.getElementById("closeMapBtn").addEventListener("click", closeMapModal);
+  document.getElementById("confirmMapBtn").addEventListener("click", confirmMapLocation);
+}
 
 function bindSettings() {
   document.getElementById("saveSystemSettingsBtn").addEventListener("click", saveSystemSettings);
   document.getElementById("saveRateSettingsBtn").addEventListener("click", saveRateSettings);
   document.getElementById("changePasswordBtn").addEventListener("click", changePassword);
-  document.getElementById("pickMapBtn").addEventListener("click", openMapModal);
-  document.getElementById("closeMapBtn").addEventListener("click", closeMapModal);
-  document.getElementById("confirmMapBtn").addEventListener("click", confirmMapLocation);
+  document.getElementById("pickMapBtn").addEventListener("click", () => openMapModal("setGpsLat", "setGpsLon"));
+  bindMapModal();
   document.getElementById("runBackupBtn").addEventListener("click", runBackupNow);
-  document.getElementById("copyOwnerViewLinkBtn").addEventListener("click", copyOwnerViewLink);
+  document.getElementById("copyOwnerViewLinkBtn").addEventListener("click", () => copyOwnerViewLink("ownerViewLink"));
   document.getElementById("regenerateOwnerViewLinkBtn").addEventListener("click", regenerateOwnerViewLink);
 }
 
@@ -1217,8 +1274,13 @@ async function loadOwnerViewLink() {
   document.getElementById("ownerViewLink").value = _ownerViewUrl(token);
 }
 
-async function copyOwnerViewLink() {
-  const input = document.getElementById("ownerViewLink");
+// Takes the id of the field to copy from, so the setup wizard's own copy of
+// the link works too. Reading "ownerViewLink" unconditionally meant the
+// wizard's button copied the Settings tab's field - empty if that load had
+// failed - and its select() fallback landed on a hidden input, so a failed
+// copy left the user with nothing at all.
+async function copyOwnerViewLink(inputId = "ownerViewLink") {
+  const input = document.getElementById(inputId);
   try {
     await navigator.clipboard.writeText(input.value);
     Boord.toast("Link copied");
@@ -1332,14 +1394,21 @@ async function changePassword() {
   Boord.toast("Password changed");
 }
 
-// GPS map modal
-function openMapModal() {
+// GPS map modal. Takes the ids of the two inputs to write into so the setup
+// wizard can reuse it rather than growing a second copy of a map picker.
+function openMapModal(latInputId = "setGpsLat", lonInputId = "setGpsLon") {
+  _mapTarget = { lat: latInputId, lon: lonInputId };
   document.getElementById("mapModal").classList.remove("hidden");
   document.getElementById("mapModal").classList.add("flex");
 
+  // isNaN rather than `|| default`: latitude 0 and longitude 0 are real
+  // places, and a farm on either would be silently recentred elsewhere.
+  const setLat = parseFloat(document.getElementById(latInputId).value);
+  const setLon = parseFloat(document.getElementById(lonInputId).value);
+  const lat = isNaN(setLat) ? -29.0 : setLat;
+  const lon = isNaN(setLon) ? 30.0 : setLon;
+
   if (!_mapInstance) {
-    const lat = parseFloat(document.getElementById("setGpsLat").value) || -29.0;
-    const lon = parseFloat(document.getElementById("setGpsLon").value) || 30.0;
     _mapInstance = L.map("mapContainer").setView([lat, lon], 13);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors",
@@ -1352,12 +1421,14 @@ function openMapModal() {
       _mapInstance.eachLayer((layer) => { if (layer instanceof L.Marker) _mapInstance.removeLayer(layer); });
       L.marker(e.latlng).addTo(_mapInstance);
     });
-
-    if (parseFloat(document.getElementById("setGpsLat").value)) {
-      L.marker([lat, lon]).addTo(_mapInstance);
-    }
+  } else {
+    // Reopened, possibly against the other screen's inputs - recentre on
+    // whatever those hold rather than on the last screen's pin.
+    _mapInstance.setView([lat, lon], 13);
+    _mapInstance.eachLayer((layer) => { if (layer instanceof L.Marker) _mapInstance.removeLayer(layer); });
   }
 
+  if (!isNaN(setLat) && !isNaN(setLon)) L.marker([lat, lon]).addTo(_mapInstance);
   setTimeout(() => _mapInstance.invalidateSize(), 200);
 }
 
@@ -1368,8 +1439,8 @@ function closeMapModal() {
 
 function confirmMapLocation() {
   if (_pickedLatLng) {
-    document.getElementById("setGpsLat").value = _pickedLatLng.lat.toFixed(6);
-    document.getElementById("setGpsLon").value = _pickedLatLng.lng.toFixed(6);
+    document.getElementById(_mapTarget.lat).value = _pickedLatLng.lat.toFixed(6);
+    document.getElementById(_mapTarget.lon).value = _pickedLatLng.lng.toFixed(6);
     _pickedLatLng = null;
   }
   closeMapModal();

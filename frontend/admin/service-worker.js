@@ -2,12 +2,13 @@
 // loads if the connection briefly drops. Data (dashboard, reports, etc.)
 // always goes over the network when available.
 const CACHE_PREFIX = "boord-admin-";
-const CACHE = "boord-admin-v43";
+const CACHE = "boord-admin-v44";
 const REVALIDATE_TIMEOUT_MS = 10000;
 const SHELL = [
   "./",
   "./index.html",
   "./app.js",
+  "./setup.js",
   "./manifest.json",
   "../shared/styles.css",
   "../shared/api.js",

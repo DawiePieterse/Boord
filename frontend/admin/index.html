@@ -53,6 +53,260 @@
   </div>
 </div>
 
+<!-- First-run setup wizard. A fresh database is deliberately nobody's farm -
+     no name, no location, no blocks, no wage rate (db.seed_defaults) - and
+     until this existed, making it yours meant finding five unrelated fields
+     across Settings and Master Data with nothing saying which one you had
+     missed. Shown instead of the tabs while GET /api/setup/state reports
+     required; the steps themselves just call the ordinary endpoints, so
+     anything done here can equally be done (or undone) in Settings later. -->
+<div id="setupWizardScreen" class="min-h-screen hidden p-4">
+  <div class="max-w-3xl mx-auto">
+
+    <div class="text-center py-6">
+      <div class="text-3xl font-bold" style="color: var(--boord-blue)">Set up your farm</div>
+      <div id="wizIntro" class="text-sm text-slate-500 mt-2">
+        This server is running, but it does not know whose farm it is yet.
+        Nine short steps and it will.
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow overflow-hidden">
+      <div class="px-5 pt-4">
+        <div class="flex items-center justify-between text-xs text-slate-500">
+          <span id="wizStepCount">Step 1 of 9</span>
+          <span id="wizStepOptional" class="hidden text-slate-400">Optional</span>
+        </div>
+        <div class="h-1.5 bg-slate-200 rounded-full mt-2 overflow-hidden">
+          <div id="wizProgress" class="h-full rounded-full transition-all" style="background: var(--boord-blue); width: 11%"></div>
+        </div>
+      </div>
+
+      <div class="p-5 space-y-4">
+
+        <!-- 1. Identity -->
+        <section class="wiz-step" data-step="identity">
+          <div class="font-bold text-lg">Whose farm is this?</div>
+          <div class="text-sm text-slate-500 mt-1 mb-4">
+            The farm name appears in every screen header, on picking slips and
+            on every report. The supplier name is how the farm's own fruit is
+            labelled where it sits alongside other growers' deliveries.
+          </div>
+          <div class="space-y-3">
+            <div><label class="text-xs text-slate-500 block">Farm name</label>
+              <input id="wizFarmName" placeholder="e.g. Blaauwkrantz Estate" class="w-full border border-slate-300 rounded-lg p-3 text-lg"></div>
+            <div><label class="text-xs text-slate-500 block">Location description <span class="text-slate-400">(optional)</span></label>
+              <input id="wizFarmLocation" placeholder="e.g. Hazyview, Mpumalanga" class="w-full border border-slate-300 rounded-lg p-3"></div>
+            <div><label class="text-xs text-slate-500 block">Your own fruit is delivered as</label>
+              <input id="wizOwnSupplier" class="w-full border border-slate-300 rounded-lg p-3">
+              <div class="text-xs text-slate-400 mt-1">Starts as "Own Farm". Anything you pack for other growers gets its own supplier later.</div></div>
+            <div><label class="text-xs text-slate-500 block">Current harvest season (year)</label>
+              <input type="number" id="wizHarvestYear" class="w-full border border-slate-300 rounded-lg p-3"></div>
+          </div>
+        </section>
+
+        <!-- 2. Location -->
+        <section class="wiz-step hidden" data-step="location">
+          <div class="font-bold text-lg">Where is it?</div>
+          <div class="text-sm text-slate-500 mt-1 mb-4">
+            Every crate is stamped with the weather at the moment it was
+            captured, and the Risk indicator and Harvest Forecast are built
+            from this location's history. Boord will not guess at coordinates:
+            weather for the wrong place looks completely normal and quietly
+            feeds numbers about somewhere else.
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="text-xs text-slate-500 block">Latitude</label>
+              <input type="number" step="any" id="wizGpsLat" placeholder="-28.123456" class="w-full border border-slate-300 rounded-lg p-3"></div>
+            <div><label class="text-xs text-slate-500 block">Longitude</label>
+              <input type="number" step="any" id="wizGpsLon" placeholder="31.456789" class="w-full border border-slate-300 rounded-lg p-3"></div>
+          </div>
+          <button id="wizPickMapBtn" class="mt-3 px-4 py-2 bg-slate-200 rounded-lg text-sm">
+            <i class="fa-solid fa-map-location-dot"></i> Pick on a map
+          </button>
+        </section>
+
+        <!-- 3. Wage rate -->
+        <section class="wiz-step hidden" data-step="rate">
+          <div class="font-bold text-lg">What do you pay per kilogram?</div>
+          <div class="text-sm text-slate-500 mt-1 mb-4">
+            There is no default rate, and there will not be one. A wrong block
+            list is obvious the moment somebody opens the Field app; a wrong
+            wage rate produces a perfectly ordinary-looking payslip at the
+            wrong number, and the person most likely to notice is the one being
+            underpaid. Until a rate exists, Payments refuses to calculate at all.
+          </div>
+          <div><label class="text-xs text-slate-500 block">Rate per kg (R)</label>
+            <input type="number" step="0.01" id="wizRatePerKg" placeholder="0.00" class="w-full border border-slate-300 rounded-lg p-3 text-lg"></div>
+          <div class="text-xs text-slate-400 mt-2">You can change this any time under Settings - rates are kept as a dated history, so past wage sheets keep the rate they were calculated at.</div>
+        </section>
+
+        <!-- 4. Thresholds -->
+        <section class="wiz-step hidden" data-step="thresholds">
+          <div class="font-bold text-lg">How long may fruit sit in transit?</div>
+          <div class="text-sm text-slate-500 mt-1 mb-4">
+            The pack house queue is ordered oldest-first and colour-coded by how
+            long a load has been waiting. These are the two boundaries. The
+            defaults suit most farms - change them if your run to the pack house
+            is unusually long or short.
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="text-xs text-slate-500 block">Green → Yellow (minutes)</label>
+              <input type="number" id="wizGreenYellow" class="w-full border border-slate-300 rounded-lg p-3"></div>
+            <div><label class="text-xs text-slate-500 block">Yellow → Red (minutes)</label>
+              <input type="number" id="wizYellowRed" class="w-full border border-slate-300 rounded-lg p-3"></div>
+          </div>
+        </section>
+
+        <!-- 5. Blocks -->
+        <section class="wiz-step hidden" data-step="blocks">
+          <div class="font-bold text-lg">Your orchard blocks</div>
+          <div class="text-sm text-slate-500 mt-1 mb-4">
+            A block register is the shape of one particular orchard - its
+            labels, varieties, tree counts and hectares - so a new install
+            starts with none. Until these are loaded the Field app has nothing
+            to pick from.
+          </div>
+          <div class="bg-slate-50 rounded-lg p-3 text-sm">
+            <div class="font-semibold mb-1">1. Start from the template</div>
+            <a href="/templates/blocks.csv" download class="text-blue-700 underline text-sm">Download blocks.csv</a>
+            <span class="text-slate-400 text-xs"> - columns: id, name, variety, trees, hectares, active</span>
+            <div class="font-semibold mt-3 mb-1">2. Fill it in and load it here</div>
+            <label class="inline-block px-4 py-2 boord-btn-primary rounded-lg cursor-pointer">
+              Choose file <input type="file" id="wizBlocksFile" class="hidden" accept=".csv,.xlsx">
+            </label>
+            <span class="text-xs text-slate-400 ml-2">.csv or .xlsx</span>
+          </div>
+          <div id="wizBlocksResult" class="mt-3 text-sm"></div>
+        </section>
+
+        <!-- 6. Workers -->
+        <section class="wiz-step hidden" data-step="workers">
+          <div class="font-bold text-lg">Your people</div>
+          <div class="text-sm text-slate-500 mt-1 mb-4">
+            Load the workforce now or add people one at a time under Master
+            Data - either works. These records hold ID numbers and bank
+            details, so they never leave the server and are never served to an
+            unauthenticated device.
+          </div>
+          <div class="bg-slate-50 rounded-lg p-3 text-sm">
+            <div class="text-xs text-slate-500 mb-2">Columns: emp_nr, first_name, last_name, id_number, bank, account, whatsapp_number, supplier_id, active</div>
+            <label class="inline-block px-4 py-2 boord-btn-primary rounded-lg cursor-pointer">
+              Choose file <input type="file" id="wizWorkersFile" class="hidden" accept=".csv,.xlsx">
+            </label>
+            <span class="text-xs text-slate-400 ml-2">.csv or .xlsx</span>
+          </div>
+          <div id="wizWorkersResult" class="mt-3 text-sm"></div>
+        </section>
+
+        <!-- 7. Devices -->
+        <section class="wiz-step hidden" data-step="devices">
+          <div class="font-bold text-lg">Name your stations</div>
+          <div class="text-sm text-slate-500 mt-1 mb-4">
+            Eight device slots are ready. Rename them to the places they will
+            actually stand, so a picking slip says where it came from. Each
+            tablet picks its slot once, from this list, the first time it opens
+            the app.
+          </div>
+          <div id="wizDevicesList" class="space-y-2 text-sm"></div>
+        </section>
+
+        <!-- 8. History -->
+        <section class="wiz-step hidden" data-step="history">
+          <div class="font-bold text-lg">Seasons before Boord</div>
+          <div class="text-sm text-slate-500 mt-1 mb-4">
+            Optional, and easy to do later. Past harvests are what the Analysis
+            tab compares this season against, and what the Risk indicator and
+            Harvest Forecast are fitted to - without them those screens work,
+            they just have nothing to measure against yet.
+          </div>
+
+          <div class="bg-slate-50 rounded-lg p-3 text-sm space-y-2">
+            <div class="font-semibold">Daily harvest records</div>
+            <div class="text-xs text-slate-500">One row per block per day.
+              <a href="/templates/historical_harvest.csv" download class="text-blue-700 underline">Download the template</a>
+              - columns: block_id, date, kg, estimated.</div>
+            <label class="inline-block px-4 py-2 bg-slate-200 rounded-lg cursor-pointer">
+              Choose file <input type="file" id="wizHistDailyFile" class="hidden" accept=".csv,.xlsx">
+            </label>
+            <div id="wizHistDailyResult"></div>
+          </div>
+
+          <div class="bg-slate-50 rounded-lg p-3 text-sm space-y-2 mt-3">
+            <div class="font-semibold">Season totals, further back</div>
+            <div class="text-xs text-slate-500">One row per season, block optional.
+              <a href="/templates/historical_annual_yield.csv" download class="text-blue-700 underline">Download the template</a>
+              - columns: season_year, kg, block_id, estimated.</div>
+            <label class="inline-block px-4 py-2 bg-slate-200 rounded-lg cursor-pointer">
+              Choose file <input type="file" id="wizHistAnnualFile" class="hidden" accept=".csv,.xlsx">
+            </label>
+            <div id="wizHistAnnualResult"></div>
+          </div>
+
+          <div class="bg-slate-50 rounded-lg p-3 text-sm space-y-2 mt-3">
+            <div class="font-semibold">Weather history</div>
+            <div class="text-xs text-slate-500">Downloads every hour of weather at
+              the location you entered, back to 2020. Takes a minute or two and
+              needs internet. You can do this later from Settings.</div>
+            <button id="wizWeatherBackfillBtn" class="px-4 py-2 bg-slate-200 rounded-lg text-sm">
+              <i class="fa-solid fa-cloud-arrow-down"></i> Fetch weather history
+            </button>
+            <div id="wizWeatherResult"></div>
+          </div>
+
+          <div class="text-xs text-slate-400 mt-3">
+            Each import replaces everything previously loaded into that table
+            rather than adding to it, so a corrected sheet can simply be
+            imported again.
+          </div>
+        </section>
+
+        <!-- 9. Finish -->
+        <section class="wiz-step hidden" data-step="finish">
+          <div class="font-bold text-lg">That is the farm set up</div>
+          <div id="wizOutstanding" class="hidden mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800"></div>
+
+          <div class="mt-4 space-y-3 text-sm">
+            <div class="bg-slate-50 rounded-lg p-3">
+              <div class="font-semibold mb-1">Add your tablets</div>
+              <div class="text-slate-500 text-xs mb-2">Open this address in the tablet's browser, pick its station, then add it to the home screen.</div>
+              <input id="wizServerUrl" readonly class="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white">
+            </div>
+
+            <div class="bg-slate-50 rounded-lg p-3">
+              <div class="font-semibold mb-1">Owner View link</div>
+              <div class="text-slate-500 text-xs mb-2">A read-only dashboard, no login, no wage data. Anyone holding the link can open it, so send it directly to the people it is meant for.</div>
+              <div class="flex gap-2">
+                <input id="wizOwnerLink" readonly class="flex-1 min-w-0 border border-slate-300 rounded-lg p-2 text-sm bg-white">
+                <button id="wizCopyOwnerLinkBtn" class="px-3 py-2 bg-slate-200 rounded-lg text-sm whitespace-nowrap">Copy</button>
+              </div>
+            </div>
+
+            <div class="bg-slate-50 rounded-lg p-3">
+              <div class="font-semibold mb-1">Keeping it up to date</div>
+              <div class="text-slate-500 text-xs">Run <code class="bg-white px-1 rounded">update_server.bat</code> on this PC to install new releases. Backups run by themselves every night at 02:00 and the last 14 are kept - see Settings.</div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <div class="border-t px-5 py-4 flex items-center gap-2">
+        <button id="wizBackBtn" class="px-4 py-3 rounded-lg bg-slate-100 text-sm">Back</button>
+        <div class="flex-1"></div>
+        <button id="wizSkipBtn" class="px-4 py-3 rounded-lg text-slate-500 text-sm hidden">Skip for now</button>
+        <button id="wizNextBtn" class="px-6 py-3 boord-btn-primary rounded-lg font-semibold">Continue</button>
+      </div>
+      <div id="wizError" class="px-5 pb-4 text-red-600 text-sm hidden"></div>
+    </div>
+
+    <div class="text-center text-xs text-slate-400 mt-4">
+      Everything here also lives under Settings and Master Data - nothing is
+      decided permanently on this screen.
+    </div>
+  </div>
+</div>
+
 <!-- Main app -->
 <div id="app" class="hidden">
   <div class="boord-header p-4">
@@ -411,5 +665,6 @@
 </div>
 
 <script src="app.js"></script>
+<script src="setup.js"></script>
 </body>
 </html>
