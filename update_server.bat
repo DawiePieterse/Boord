@@ -130,20 +130,42 @@ if "!CURTAG!"=="!NEWTAG!" (
     :: the signature is good; requiring OUR fingerprint on that line is the
     :: part that matters, because a plain "good signature" only proves the tag
     :: was signed by *some* key present in this machine's keyring.
-    git verify-tag --raw "!NEWTAG!" 2>&1 | findstr /C:"VALIDSIG" | findstr /I /C:"!RELEASE_FPR!" >nul
+    :: Written to a file rather than piped through findstr twice. A pipe makes
+    :: cmd spawn a child shell per stage, and worse, it throws away the output
+    :: needed to tell WHY a check failed - so a missing key and a tampered
+    :: repository produced the same alarming message.
+    set "VERIFY_OUT=%TEMP%\boord_verify.txt"
+    git verify-tag --raw "!NEWTAG!" > "!VERIFY_OUT!" 2>&1
+    findstr /C:"VALIDSIG" "!VERIFY_OUT!" > "!VERIFY_OUT!.sig"
+    findstr /I /C:"!RELEASE_FPR!" "!VERIFY_OUT!.sig" >nul
     if errorlevel 1 (
-        echo.
-        echo *** SIGNATURE CHECK FAILED for !NEWTAG! ***
-        echo.
-        echo This release is not signed by the key this server trusts. That
-        echo means one of:
-        echo   - the release key was rotated and this server wasn't told
-        echo   - the release genuinely wasn't signed
-        echo   - someone tampered with the repository
-        echo.
-        echo Nothing has been changed. The server has NOT been restarted and
-        echo is still running !CURTAG!. Do not work around this by checking
-        echo the tag out by hand - find out why it failed first.
+        findstr /C:"NO_PUBKEY" "!VERIFY_OUT!" >nul
+        if not errorlevel 1 (
+            echo.
+            echo The release key is not in this server's keyring, so !NEWTAG!
+            echo cannot be checked. This is NOT a sign of tampering - the key
+            echo simply has not been imported on this machine yet.
+            echo.
+            echo Import it and run this again:
+            echo     "!GPG_PROG!" --import release-key.asc
+            echo.
+            echo Nothing has been changed. The server is still running !CURTAG!.
+        ) else (
+            echo.
+            echo *** SIGNATURE CHECK FAILED for !NEWTAG! ***
+            echo.
+            echo This release is not signed by the key this server trusts. That
+            echo means one of:
+            echo   - the release key was rotated and this server wasn't told
+            echo   - the release genuinely wasn't signed
+            echo   - someone tampered with the repository
+            echo.
+            echo Full gpg output: !VERIFY_OUT!
+            echo.
+            echo Nothing has been changed. The server has NOT been restarted and
+            echo is still running !CURTAG!. Do not work around this by checking
+            echo the tag out by hand - find out why it failed first.
+        )
         pause
         exit /b 1
     )
