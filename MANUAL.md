@@ -441,6 +441,18 @@ zip file. Either way, place it somewhere permanent and easy to find, e.g.
 `C:\Boord`. Avoid Desktop or Downloads, since those are more
 likely to get tidied up or deleted by accident.
 
+> **Never put the app folder inside a synced cloud drive** - Google Drive,
+> OneDrive, Dropbox or iCloud. Two things go wrong. The sync client keeps
+> file handles open, which blocks updates and folder deletion (this is a
+> real one: it took a reboot to work out why a folder refused to delete).
+> More seriously, `data\` holds a live SQLite database plus every worker's
+> ID number, bank details and photograph - syncing a database file while
+> it is being written is a known way to corrupt it, and uploading worker
+> records to a personal cloud account is a data-protection problem you do
+> not want. Back up *to* a cloud drive by all means (chapter 14) - a
+> backup zip is a finished file, which is exactly what sync is good at.
+> Just do not run the app from one.
+
 **Step 2 - Install Python.**
 
 1. Go to `python.org` in a browser and download the latest Python 3
