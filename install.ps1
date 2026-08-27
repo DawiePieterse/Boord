@@ -232,11 +232,25 @@ try {
                 -ArgumentList @("--batch", "--yes", "--import", $ReleaseKeyPath) `
                 -NoNewWindow -PassThru `
                 -RedirectStandardError $gpgLog -RedirectStandardOutput "$gpgLog.out"
+            # Touching .Handle forces .NET to keep the process handle open.
+            # Without it, Start-Process -PassThru used without -Wait leaves
+            # .ExitCode reading as $null once the process has gone, and
+            # `$null -eq 0` is false - so a perfectly good import was reported
+            # as "failed (exit )", with the exit code missing from the message
+            # because there was never one to print.
+            try { $null = $proc.Handle } catch { }
             if ($proc.WaitForExit(60000)) {
-                if ($proc.ExitCode -eq 0) {
+                $exit = $null
+                try { $exit = $proc.ExitCode } catch { }
+                if ($exit -eq 0) {
                     Write-Ok "Imported the Boord release key"
+                } elseif ($null -eq $exit) {
+                    # Report honestly rather than guessing either way.
+                    Write-Warn "gpg finished but Windows did not report its exit code."
+                    Write-Warn "The import probably worked. Confirm with:"
+                    Write-Warn "    ""$gpgExe"" --list-keys"
                 } else {
-                    Write-Warn "Importing release-key.asc failed (exit $($proc.ExitCode)) - see $gpgLog"
+                    Write-Warn "Importing release-key.asc failed (exit $exit) - see $gpgLog"
                     Write-Warn "Import it by hand before running update_server.bat."
                 }
             } else {
