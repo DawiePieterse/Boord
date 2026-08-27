@@ -208,6 +208,14 @@ async function loadBlocks() {
 function renderBlockOptions(blocks) {
   const select = document.getElementById("blockSelect");
   const current = select.value;
+  if (!blocks || !blocks.length) {
+    // A new install has no blocks until someone imports them (Admin ->
+    // Master Data). Without this the dropdown just renders empty, which is
+    // indistinguishable from the list having failed to load - and saveCrate
+    // would then only say "Select a worker and block" with nothing to pick.
+    select.innerHTML = `<option value="">(no blocks set up yet - add them in Admin)</option>`;
+    return;
+  }
   select.innerHTML = blocks.map((b) => `<option value="${b.id}">${b.name || b.id}</option>`).join("");
   if (current && Array.from(select.options).some((o) => o.value === current)) {
     select.value = current;

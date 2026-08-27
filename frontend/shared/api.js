@@ -8,7 +8,7 @@ const Boord = {
   // actually up to date - especially useful given the service workers'
   // cache-first strategy (see field/packhouse/admin service-worker.js).
   // Reset to 2.0 on 2026-08-26 for the Boord rename and clean reinstall.
-  VERSION: "2.3",
+  VERSION: "2.4",
 
   getDeviceId() { return localStorage.getItem("boord_device_id"); },
   setDeviceId(id) { localStorage.setItem("boord_device_id", id); },

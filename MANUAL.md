@@ -863,16 +863,28 @@ database and seeds a clean starting baseline:
 
 - Two teams: **Span A** and **Span B** (indunas left blank - fill in via
   [Master Data](#9-admin---master-data))
-- The farm's **21 real blocks** (7, 8a, 8b, 9, 10a, 10b, 11, 12, 13, 14,
-  15, 16, 17a, 17b, 18, 19a, 19b, 22, 23, 34, 35), each with its real
-  name, variety, tree count, and hectares already filled in
 - **8 devices**: `device-01` through `device-05` (field), `device-06` and
   `device-07` (pack house), and `admin-pc` (admin) - see
   [chapter 3](#3-device-setup) for how these get assigned to physical
   devices
-- A default wage rate of **R3.00/kg**
-- One supplier row representing the farm's own fruit ("Own Farm")
+- A starting wage rate of **R3.00/kg** - change it under
+  [Payments](#10-admin---payments) before running a wage calculation
+- One supplier row representing the farm's own fruit ("Own Farm") - rename
+  it to your farm under [Master Data](#9-admin---master-data)
 - A default admin login: **username `admin`, password `ChangeMe123!`**
+
+**No blocks.** A new database has an empty block register, and the Field
+app's Block dropdown reads "(no blocks set up yet - add them in Admin)"
+until you fill it in. That is deliberate: a block register is the shape of
+one particular orchard - its labels, varieties, tree counts and hectares -
+and no two farms share one.
+
+Import yours via **Admin → Master Data → Blocks → Import**, using
+`templates/blocks.csv` in the project folder for the column headings
+(`id`, `name`, `variety`, `trees`, `hectares`, `active`). `templates/README.md`
+describes each column. Both `.csv` and `.xlsx` are accepted, and importing
+again updates blocks with a matching `id` rather than duplicating them, so
+it is safe to correct a mistake and re-import.
 
 > **⚠️ Change the default admin password immediately** after first login,
 > via [Settings → Change admin password](#12-admin---settings).
