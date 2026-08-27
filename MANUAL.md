@@ -237,6 +237,26 @@ token would mean code execution on every farm running Boord.
 For that check to work, the server needs to know two things - the public
 key itself, and which fingerprint to insist on.
 
+**Step 0 - Install GnuPG on the server.** Get **Gpg4win** from
+`gpg4win.org` and run the installer; the defaults are fine.
+
+> Git for Windows ships a `gpg.exe` at
+> `C:\Program Files\Git\usr\bin\gpg.exe`, and it does **not** work for
+> this. It is a build that keeps its keys in a `keyboxd` daemon which the
+> Git distribution does not include, so importing a key fails with
+> `error running '/usr/lib/gnupg/keyboxd': probably not installed` and
+> `Total number processed: 0`. Do not point `gpg.program` at it.
+
+Then tell git which gpg to use, or `git verify-tag` will not find one.
+Check where the installer put it and set that path:
+```bat
+where gpg
+git config --global gpg.program "C:/Program Files/GnuPG/bin/gpg.exe"
+```
+Forward slashes, and keep the quotes - the space in "Program Files" breaks
+it otherwise. Open a **new** Command Prompt afterwards, since PATH changes
+do not reach an already-open window.
+
 **Step 1 - Import the public key.** On the developer's machine, export it:
 ```bash
 gpg --armor --export <KEY-ID> > boord-release-key.asc

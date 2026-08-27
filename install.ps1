@@ -130,9 +130,20 @@ cd /d "$BackendDir"
 
     # --- Step 6: Scheduled task (auto-start at boot, no login needed) ---
     Write-Step "Registering the server to start automatically with Windows..."
-    schtasks /query /tn "$TaskName" >$null 2>&1
+    # Route schtasks through cmd so its stderr never reaches PowerShell.
+    # $ErrorActionPreference = "Stop" (top of this file) turns a native
+    # command's stderr into a TERMINATING error when it is redirected with
+    # 2>&1 - and schtasks /query writes "ERROR: The system cannot find the
+    # file specified." to stderr whenever the task is absent. That is the
+    # normal state on a first-time install, so the installer completed every
+    # other step and then died right here, on new machines only. On a
+    # reinstall the task already existed, /query succeeded silently, and
+    # nothing looked wrong - which is exactly why this survived so long.
+    cmd /c "schtasks /query /tn ""$TaskName"" >nul 2>&1"
     if ($LASTEXITCODE -eq 0) {
-        schtasks /end /tn "$TaskName" >$null 2>&1
+        # /end likewise complains to stderr when the task exists but is not
+        # running, so it gets the same treatment.
+        cmd /c "schtasks /end /tn ""$TaskName"" >nul 2>&1"
         Start-Sleep -Seconds 1
         schtasks /delete /tn "$TaskName" /f | Out-Null
     }
