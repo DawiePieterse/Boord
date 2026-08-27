@@ -1,13 +1,11 @@
 import os
 import secrets
-from datetime import date
 
 from passlib.context import CryptContext
 from sqlalchemy import inspect, text
 from sqlmodel import SQLModel, Session, create_engine, select
 
-from models import (AdminUser, Device, DeviceRole, OwnerViewToken, RateSetting, RateType, Supplier,
-                     SystemSetting, Team)
+from models import AdminUser, Device, DeviceRole, OwnerViewToken, Supplier, SystemSetting, Team
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -101,13 +99,13 @@ def seed_defaults() -> None:
             session.add(Device(id="device-07", station="Packhouse Receiving 2", role=DeviceRole.packhouse))
             session.add(Device(id="admin-pc", station="Pack house office", role=DeviceRole.admin))
 
-        if not session.exec(select(RateSetting)).first():
-            session.add(RateSetting(
-                effective_date=date.today(),
-                rate_type=RateType.per_kg,
-                default_rate_per_kg=3.00,
-                tier_rates_json='{"1": 2.5, "1.5": 3.5, "2": 4.5}',
-            ))
+        # No wage rate is seeded either. This used to default to R3.00/kg -
+        # one farm's actual rate. A wrong block list is obvious the moment
+        # somebody opens the Field app; a wrong wage rate produces a
+        # perfectly plausible payslip at the wrong number, which is the kind
+        # of mistake that is only found by the person being underpaid. With
+        # no rate row, routers/payments.py refuses to calculate wages at all
+        # until one is entered under Admin -> Settings.
 
         if not session.exec(select(SystemSetting)).first():
             session.add(SystemSetting())

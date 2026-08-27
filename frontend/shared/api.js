@@ -8,7 +8,7 @@ const Boord = {
   // actually up to date - especially useful given the service workers'
   // cache-first strategy (see field/packhouse/admin service-worker.js).
   // Reset to 2.0 on 2026-08-26 for the Boord rename and clean reinstall.
-  VERSION: "2.4",
+  VERSION: "2.5",
 
   getDeviceId() { return localStorage.getItem("boord_device_id"); },
   setDeviceId(id) { localStorage.setItem("boord_device_id", id); },
@@ -47,6 +47,23 @@ const Boord = {
   // "rejected" - e.g. Owner View must not treat a dead network as a bad key.
   isNetworkError(e) {
     return e instanceof TypeError || (!!e && (e.name === "AbortError" || e.name === "TimeoutError"));
+  },
+
+  // The human-readable half of a server rejection. api() throws
+  // `${status} ${body}` and FastAPI puts its message in a JSON "detail"
+  // field, so showing e.message raw hands the user a status code and a lump
+  // of JSON. Falls back to the whole message when it isn't shaped that way.
+  errorDetail(e, fallback = "Something went wrong") {
+    // Read .message directly rather than `e.message || e`: an Error with an
+    // empty message would otherwise stringify to the bare word "Error" and
+    // that would win over the caller's fallback.
+    const raw = e && typeof e.message === "string" ? e.message : String(e || "");
+    const body = raw.replace(/^\d{3}\s*/, "");
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed && typeof parsed.detail === "string") return parsed.detail;
+    } catch (_) { /* not JSON - fall through to the raw text */ }
+    return body.trim() || fallback;
   },
 
   // True when the server actively rejected the caller's credentials. api()

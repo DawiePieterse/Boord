@@ -36,7 +36,10 @@ def dashboard_summary(period_start: date, period_end: date, supplier_id: Optiona
         if r.worker_id:
             crate_counts[r.worker_id] = crate_counts.get(r.worker_id, 0) + 1
 
-    totals, _ = _worker_totals(session, period_start, period_end, supplier_id)
+    # Keep the rate row: with none configured _worker_totals values every
+    # worker at 0.00, and a dashboard showing R0.00 as though it were a real
+    # figure is worse than one that says no rate is set.
+    totals, rate_setting = _worker_totals(session, period_start, period_end, supplier_id)
     workers_by_id = {w.id: w for w in session.exec(select(Worker)).all()}
     suppliers_by_id = {s.id: s for s in session.exec(select(Supplier)).all()}
     own_id = get_own_supplier_id(session)
@@ -84,6 +87,10 @@ def dashboard_summary(period_start: date, period_end: date, supplier_id: Optiona
         "active_teams": len(active_teams),
         "active_workers": len(active_workers),
         "active_blocks": len(active_blocks),
+        # False on a new install until a wage rate is entered. Every
+        # amount_due above is 0.00 in that state, and the UI needs to be able
+        # to say so rather than presenting zeroes as real earnings.
+        "rate_configured": rate_setting is not None,
         "workers": workers,
         "blocks": blocks,
     }

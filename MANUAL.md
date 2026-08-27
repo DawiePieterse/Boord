@@ -867,11 +867,17 @@ database and seeds a clean starting baseline:
   `device-07` (pack house), and `admin-pc` (admin) - see
   [chapter 3](#3-device-setup) for how these get assigned to physical
   devices
-- A starting wage rate of **R3.00/kg** - change it under
-  [Payments](#10-admin---payments) before running a wage calculation
 - One supplier row representing the farm's own fruit ("Own Farm") - rename
   it to your farm under [Master Data](#9-admin---master-data)
 - A default admin login: **username `admin`, password `ChangeMe123!`**
+
+**No wage rate.** Nothing is seeded, and **Calculate** under
+[Payments](#10-admin---payments) refuses with "No wage rate has been set"
+until you enter one under [Settings](#12-admin---settings). A wrong block
+list is obvious the moment somebody opens the Field app; a wrong wage rate
+produces a perfectly ordinary-looking payslip at the wrong number, and the
+person most likely to notice is the one being underpaid. So the app will
+not guess, and it will not quietly calculate everyone at R0.00 either.
 
 **No blocks.** A new database has an empty block register, and the Field
 app's Block dropdown reads "(no blocks set up yet - add them in Admin)"

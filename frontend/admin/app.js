@@ -956,8 +956,17 @@ async function calculatePayments() {
   const end = document.getElementById("payEnd").value;
   const supplierId = document.getElementById("paySupplierFilter").value;
   const supplierParam = supplierId ? `&supplier_id=${supplierId}` : "";
-  const payments = await Boord.api(`/api/payments/calculate?period_start=${start}&period_end=${end}${supplierParam}`, { method: "POST", auth: true });
-  renderPayments(payments);
+  try {
+    const payments = await Boord.api(`/api/payments/calculate?period_start=${start}&period_end=${end}${supplierParam}`, { method: "POST", auth: true });
+    renderPayments(payments);
+  } catch (e) {
+    // A new install has no wage rate and the server refuses to calculate
+    // until one is set. Without this the rejection went nowhere and the
+    // button simply appeared to do nothing.
+    Boord.toast(Boord.isNetworkError(e)
+      ? "No connection - could not calculate wages"
+      : Boord.errorDetail(e, "Could not calculate wages"));
+  }
 }
 
 function supplierNameForWorker(worker, suppliers) {

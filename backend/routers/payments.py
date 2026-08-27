@@ -2,7 +2,7 @@ import json
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlmodel import Session, select
 
@@ -92,7 +92,19 @@ def _worker_totals(session: Session, period_start: date, period_end: date, suppl
 def calculate_payments(period_start: date, period_end: date, supplier_id: Optional[int] = None,
                         session: Session = Depends(get_session), admin=Depends(get_current_admin)):
     totals, setting = _worker_totals(session, period_start, period_end, supplier_id)
-    rate_applied = setting.default_rate_per_kg if setting else 0.0
+    if setting is None:
+        # No wage rate has ever been set on this install. Refuse rather than
+        # fall through to _worker_totals' 0.0 default and write a full set of
+        # Payment rows at R0.00 - those are stored records that look like a
+        # completed wage run, and "everyone earned nothing" is a far more
+        # expensive thing to discover late than an error here. A seeded
+        # default rate would be worse still: it would produce a plausible
+        # payslip at another farm's number.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No wage rate has been set. Add one under Settings before calculating wages.",
+        )
+    rate_applied = setting.default_rate_per_kg
     results = []
     for worker_id, data in totals.items():
         existing = session.exec(
