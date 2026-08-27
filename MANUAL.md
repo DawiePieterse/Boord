@@ -380,6 +380,37 @@ Either way, remember that each phone/tablet's installed app also needs a
 full close-and-reopen afterward to pick up the update - see
 [Confirming devices picked up an update](#confirming-devices-picked-up-an-update-version-numbers).
 
+### Removing Boord from a PC
+
+Double-click **`uninstall.bat`**. It stops and unregisters the auto-start
+Scheduled Task, removes the heartbeat task and the firewall rule, deletes
+the generated `start_server.bat`, and removes the Python virtual
+environment. It then prints what is still on the machine.
+
+**It does not delete `data\`, and it does not delete the project folder.**
+That folder holds the harvest database, worker photos and ID numbers, the
+wage history, every backup, and the release-key fingerprint - a season of
+records that reinstalling does not bring back. Deleting it stays a
+deliberate act, so the uninstaller prints the commands rather than running
+them:
+
+```bat
+xcopy /E /I "C:\Boord\data" "%USERPROFILE%\Desktop\boord-data-backup"
+rmdir /s /q "C:\Boord"
+```
+
+Copy first, and run the second one from a folder outside `C:\Boord` -
+a Command Prompt sitting inside it will block its own delete.
+
+Python, Git, Gpg4win, your GnuPG keyring and git's `gpg.program` setting
+are all left alone: other things on the PC may depend on them.
+
+> **If a folder refuses to delete**, something still has a file open in it.
+> Open Resource Monitor (`resmon`), go to the CPU tab, expand **Associated
+> Handles** and search for the folder name - it will name the process.
+> Cloud sync clients are the usual culprit, which is one more reason not to
+> run the app from a synced folder.
+
 ### Stopping, starting, and restarting the server (Task Scheduler)
 
 If the server was set up via `install.bat` (or manual Step 12), it runs as

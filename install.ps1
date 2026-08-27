@@ -42,6 +42,20 @@ function Write-Err($msg) {
     Write-Host "    $msg" -ForegroundColor Red
 }
 
+function Get-SmartAppControlState {
+    # Windows 11's Smart App Control blocks executables whose publisher it
+    # cannot verify - including installers downloaded by scripts like this
+    # one. Worth knowing about before blaming ourselves for a failed install.
+    #   0 = off   1 = on, enforcing   2 = evaluation mode   -1 = not present
+    try {
+        $v = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" `
+                              -Name VerifiedAndReputablePolicyState -ErrorAction Stop
+        return [int]$v.VerifiedAndReputablePolicyState
+    } catch {
+        return -1
+    }
+}
+
 function Test-PythonOk($exe) {
     if (-not $exe -or -not (Test-Path $exe)) { return $false }
     try {
@@ -120,6 +134,11 @@ try {
         Write-Ok "Found GnuPG at $gpgExe"
     } else {
         Write-Warn "No usable GnuPG found - downloading Gpg4win..."
+        $sac = Get-SmartAppControlState
+        if ($sac -eq 1) {
+            Write-Warn "Note: Smart App Control is on. It may block this installer -"
+            Write-Warn "if it does, the message below will say so."
+        }
         try {
             $gpgInstaller = Join-Path $env:TEMP "gpg4win-latest.exe"
             Invoke-WebRequest -Uri $Gpg4winUrl -OutFile $gpgInstaller -UseBasicParsing
@@ -132,8 +151,20 @@ try {
             )) {
                 if (Test-Path $candidate) { $gpgExe = $candidate; break }
             }
-            if ($gpgExe) { Write-Ok "Installed GnuPG at $gpgExe" }
-            else { Write-Warn "Gpg4win installed but gpg.exe was not found in the usual places." }
+            if ($gpgExe) {
+                Write-Ok "Installed GnuPG at $gpgExe"
+            } elseif ($sac -eq 1) {
+                # Do not report this as our failure. Nothing was installed,
+                # and the reason is a Windows policy, not a broken download.
+                Write-Warn "Windows Smart App Control blocked the Gpg4win installer."
+                Write-Warn "Nothing was installed. Install it by hand from https://gpg4win.org"
+                Write-Warn "and allow it when Windows asks, then re-run this installer."
+                Write-Warn "Do NOT switch Smart App Control off to get around this - on"
+                Write-Warn "Windows 11 it cannot be switched back on without resetting Windows."
+            } else {
+                Write-Warn "Gpg4win ran but gpg.exe was not found in the usual places."
+                Write-Warn "Install it by hand from https://gpg4win.org and re-run this installer."
+            }
         } catch {
             Write-Warn "Could not install Gpg4win automatically: $($_.Exception.Message)"
             Write-Warn "Install it by hand from https://gpg4win.org, then re-run this installer."
@@ -329,6 +360,9 @@ cd /d "$BackendDir"
     Write-Host " update_server.bat   - pulls the latest code from GitHub and"
     Write-Host "                       restarts the server in one step, for"
     Write-Host "                       future updates."
+    Write-Host " uninstall.bat       - unregisters the server from Windows and"
+    Write-Host "                       removes the virtual environment. Never"
+    Write-Host "                       touches data\ or this folder."
     Write-Host " setup_heartbeat.bat - emails you if the server goes down for"
     Write-Host "                       more than an hour (needs a free"
     Write-Host "                       healthchecks.io account first)."
