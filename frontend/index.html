@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Boord</title>
+<link rel="manifest" href="field/manifest.json">
+<script src="shared/tailwind.js"></script>
+<link rel="stylesheet" href="shared/styles.css">
+<script src="shared/api.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen flex items-center justify-center p-4">
+
+<div id="setup" class="bg-white rounded-2xl shadow p-6 w-full max-w-sm">
+  <div class="text-center mb-6">
+    <div class="text-2xl font-bold" style="color: var(--boord-blue)">Boord</div>
+    <div class="text-sm text-slate-500">Device Setup</div>
+  </div>
+  <label class="block text-sm font-medium text-slate-700 mb-1">This device's ID</label>
+  <select id="deviceIdSelect" class="w-full border border-slate-300 rounded-lg p-3 mb-2 text-lg hidden"></select>
+  <input id="deviceIdInput" placeholder="e.g. device-01"
+         class="w-full border border-slate-300 rounded-lg p-3 mb-2 text-lg hidden">
+  <div id="deviceListStatus" class="text-xs text-slate-400 mb-2">Loading the device list...</div>
+  <div class="text-xs text-slate-400 mb-4">Ask the admin which ID belongs to this device. This is only needed once - the device remembers it after that.</div>
+  <button id="continueBtn" class="w-full boord-btn-primary rounded-lg py-3 font-semibold">Continue</button>
+  <div id="setupError" class="text-red-600 text-sm mt-3 hidden"></div>
+</div>
+
+<script>
+function destinationFor(config) {
+  return {
+    field: "field/",
+    packhouse: "packhouse/",
+    admin: "admin/",
+  }[config.role] || "admin/";
+}
+
+async function routeDevice(deviceId) {
+  const config = await Boord.fetchDeviceConfig(deviceId);
+  Boord.setDeviceId(deviceId);
+  location.href = destinationFor(config);
+}
+
+// The list comes from the server so a device added in Master Data can be
+// picked straight away. If the list can't be fetched the screen falls back to
+// typing the id by hand, which is all setup ever really needs.
+async function loadDeviceOptions() {
+  const select = document.getElementById("deviceIdSelect");
+  const input = document.getElementById("deviceIdInput");
+  const status = document.getElementById("deviceListStatus");
+  try {
+    const devices = await Boord.api("/api/devices/setup-options");
+    if (!devices.length) throw new Error("no devices configured");
+    select.innerHTML = devices.map((d) => {
+      const label = d.station ? `${d.id} - ${d.station}` : d.id;
+      return `<option value="${d.id}">${label}</option>`;
+    }).join("");
+    select.classList.remove("hidden");
+    status.classList.add("hidden");
+  } catch (e) {
+    input.classList.remove("hidden");
+    status.textContent = Boord.isNetworkError(e)
+      ? "Can't reach the server - type this device's ID to continue."
+      : "No device list available - type this device's ID to continue.";
+  }
+}
+
+function chosenDeviceId() {
+  const select = document.getElementById("deviceIdSelect");
+  if (!select.classList.contains("hidden")) return select.value;
+  return document.getElementById("deviceIdInput").value.trim();
+}
+
+(async function init() {
+  const existing = Boord.getDeviceId();
+  if (existing) {
+    try {
+      await routeDevice(existing);
+      return;
+    } catch (e) {
+      // Only a server that answered "unknown" invalidates the saved id - an
+      // unreachable one must not wipe a device's setup and strand it.
+      if (!Boord.isNetworkError(e)) Boord.clearDeviceId();
+      else {
+        // Server unreachable. A device that has been set up before already
+        // knows its role, so send it straight to its screen - that screen is
+        // cached and works offline. Dropping through to the setup form here
+        // would strand a picker at a "type your device ID" prompt in the
+        // middle of the orchard, with no way to reach the capture screen.
+        const cached = Boord.getCachedDeviceConfig(existing);
+        if (cached) { location.href = destinationFor(cached); return; }
+      }
+    }
+  }
+  await loadDeviceOptions();
+  document.getElementById("continueBtn").addEventListener("click", async () => {
+    const id = chosenDeviceId();
+    const errEl = document.getElementById("setupError");
+    errEl.classList.add("hidden");
+    if (!id) return;
+    try {
+      await routeDevice(id);
+    } catch (e) {
+      errEl.textContent = Boord.isNetworkError(e)
+        ? "Can't reach the server - check the connection and try again."
+        : "Unknown device id. Check with the admin, or add this device in Master Data.";
+      errEl.classList.remove("hidden");
+    }
+  });
+})();
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("service-worker.js").catch(() => {});
+}
+</script>
+</body>
+</html>

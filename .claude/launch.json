@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "cwd": "backend",
+      "runtimeExecutable": ".venv/bin/python3",
+      "runtimeArgs": ["run_preview.py"],
+      "port": 8811,
+      "autoPort": true
+    },
+    {
+      "name": "boord-preview",
+      "runtimeExecutable": "/tmp/boord_lite_venv/bin/python3",
+      "runtimeArgs": ["/tmp/boord_lite_launcher.py"],
+      "port": 8823
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Boord Veld</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Veld">
+<meta name="theme-color" content="#0A2F6B">
+<script src="../shared/tailwind.js"></script>
+<link rel="stylesheet" href="../shared/vendor/fontawesome/css/all.min.css">
+<link rel="stylesheet" href="../shared/styles.css">
+<script src="../shared/api.js"></script>
+<script src="../shared/ptr.js"></script>
+<script src="idb.js"></script>
+<script src="../shared/vendor/html5-qrcode.min.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen pb-6">
+
+<div class="boord-header p-3">
+  <div class="flex items-center justify-between">
+    <div>
+      <div class="font-bold text-lg">Boord Veld</div>
+      <div class="text-xs opacity-80" id="stationLabel">Station</div>
+    </div>
+    <div class="text-right text-xs">
+      <div id="syncStatus" class="px-2 py-1 rounded-full bg-white/20">checking...</div>
+      <div id="appVersion" class="opacity-60 mt-1"></div>
+    </div>
+  </div>
+</div>
+
+<div class="p-3 max-w-md mx-auto space-y-3">
+
+  <!-- Current lot summary -->
+  <div id="lotCard" class="rounded-xl p-3 bg-white shadow urgency-green">
+    <div class="flex justify-between items-center">
+      <div>
+        <div class="text-2xl font-bold" id="crateCount">0 crates</div>
+        <div class="text-slate-600" id="totalKg">0.0 kg</div>
+      </div>
+      <div class="text-right">
+        <div class="text-xs text-slate-500">Elapsed</div>
+        <div class="text-xl font-semibold" id="elapsed">--:--</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Worker & block selection -->
+  <div class="bg-white rounded-xl p-3 shadow space-y-2">
+    <button id="scanBtn" class="w-full boord-btn-primary rounded-xl py-3 text-lg font-bold flex items-center justify-center gap-3">
+      <i class="fa-solid fa-qrcode text-2xl"></i>
+      <span>Scan Worker QR</span>
+    </button>
+    <div class="flex items-center justify-between px-1">
+      <div>
+        <div class="text-xs text-slate-400">Worker</div>
+        <div id="workerName" class="text-lg font-semibold text-slate-400">—</div>
+      </div>
+      <i class="fa-solid fa-user-check text-2xl text-slate-200" id="workerCheckIcon"></i>
+    </div>
+    <select id="workerSelect" class="hidden"></select>
+    <div>
+      <label class="text-xs font-medium text-slate-500">Block</label>
+      <select id="blockSelect" class="w-full border border-slate-300 rounded-lg p-2 text-lg"></select>
+    </div>
+  </div>
+
+  <!-- Weight keypad -->
+  <div class="bg-white rounded-xl p-3 shadow">
+    <div class="text-center text-3xl font-bold mb-2 h-10" id="weightDisplay">0</div>
+    <div class="grid grid-cols-3 gap-1.5">
+      <button class="keypad-btn" data-k="1">1</button>
+      <button class="keypad-btn" data-k="2">2</button>
+      <button class="keypad-btn" data-k="3">3</button>
+      <button class="keypad-btn" data-k="4">4</button>
+      <button class="keypad-btn" data-k="5">5</button>
+      <button class="keypad-btn" data-k="6">6</button>
+      <button class="keypad-btn" data-k="7">7</button>
+      <button class="keypad-btn" data-k="8">8</button>
+      <button class="keypad-btn" data-k="9">9</button>
+      <button class="keypad-btn" data-k=".">.</button>
+      <button class="keypad-btn" data-k="0">0</button>
+      <button class="keypad-btn" data-k="back"><i class="fa-solid fa-delete-left"></i></button>
+    </div>
+    <button id="saveCrateBtn" class="w-full boord-btn-primary rounded-xl py-3 text-lg font-bold mt-2">
+      <i class="fa-solid fa-plus"></i> Save Crate
+    </button>
+  </div>
+
+  <button id="sendSlipBtn" class="w-full boord-btn-danger rounded-xl py-3 text-lg font-bold">
+    <i class="fa-solid fa-truck"></i> Send Picking Slip
+  </button>
+
+  <!-- Success banner (hidden until slip sent) -->
+  <div id="slipSuccessBanner" class="hidden rounded-xl p-3 shadow text-white" style="background: #16a34a;">
+    <div class="flex items-center gap-3">
+      <i class="fa-solid fa-circle-check text-3xl"></i>
+      <div>
+        <div class="font-bold text-lg">Picking Slip Sent</div>
+        <div class="text-sm opacity-90" id="slipSuccessDetail"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent crates -->
+  <div class="bg-white rounded-xl p-3 shadow">
+    <div class="text-sm font-semibold text-slate-500 mb-2">Recent crates</div>
+    <div id="recentList" class="space-y-1 text-sm"></div>
+  </div>
+
+  <!-- Dispatched lots today -->
+  <div class="bg-white rounded-xl p-3 shadow">
+    <div class="text-sm font-semibold text-slate-500 mb-2">Dispatched today from this station</div>
+    <div id="dispatchedList" class="space-y-1 text-xs"></div>
+    <div id="dispatchedSummary" class="text-xs font-semibold text-slate-600 mt-2 pt-2 border-t hidden"></div>
+  </div>
+</div>
+
+<!-- QR scan modal -->
+<div id="scanModal" class="fixed inset-0 bg-black/70 hidden items-center justify-center p-4 z-40">
+  <div class="bg-white rounded-xl p-4 w-full max-w-sm">
+    <div class="font-bold mb-2">Scan worker QR code</div>
+    <div id="qrReader" class="w-full"></div>
+    <button id="closeScanBtn" class="w-full rounded-lg py-3 bg-slate-100 mt-3">Cancel</button>
+  </div>
+</div>
+
+<!-- Driver name modal -->
+<div id="driverModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4">
+  <div class="bg-white rounded-xl p-5 w-full max-w-sm">
+    <div class="font-bold text-lg mb-3">Send Picking Slip</div>
+    <label class="text-xs text-slate-500">Crates going now</label>
+    <input id="cratesGoingInput" type="number" inputmode="numeric" min="1"
+           class="w-full border border-slate-300 rounded-lg p-3 text-lg mb-1">
+    <div id="offlineSplitHint" class="hidden text-xs text-amber-600 mb-3">
+      Partial loads need a connection - reconnect to split, or send everything now.
+    </div>
+    <label class="text-xs text-slate-500">Driver name</label>
+    <input id="driverInput" class="w-full border border-slate-300 rounded-lg p-3 text-lg mb-4">
+    <div class="flex gap-2">
+      <button id="cancelSlipBtn" class="flex-1 rounded-lg py-3 bg-slate-100">Cancel</button>
+      <button id="confirmSlipBtn" class="flex-1 boord-btn-primary rounded-lg py-3 font-semibold">Send</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

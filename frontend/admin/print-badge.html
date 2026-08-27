@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Worker ID Badges</title>
+<script src="../shared/qrcode.min.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #eee; }
+  .toolbar { padding: 16px; text-align: center; }
+  .toolbar button { padding: 10px 24px; font-size: 16px; cursor: pointer; border: 1px solid #333; border-radius: 8px; background: #f0f0f0; }
+  .toolbar .hint { margin-top: 8px; font-size: 13px; color: #555; }
+  /* Plain flow layout (not flex/grid) so the browser's print engine can
+     paginate badges across multiple A4 sheets correctly - flex/grid
+     containers aren't fragmentation-aware and can cut or overlap rows
+     across page boundaries even with page-break-inside: avoid on children. */
+  #badgesContainer { padding: 2mm; font-size: 0; }
+
+  /* Sized to the physical card holders the farm uses: 60mm x 80mm,
+     portrait. Every dimension below is in mm and adds up to that on
+     purpose - see the budget in the .badge-qr rule - so a badge cut on the
+     dashed line slides straight into a holder with no trimming. Don't
+     switch these to px or %: a browser's px is 1/96in only in theory, and
+     the whole point here is that the print comes out the size it says. */
+  .badge {
+    display: inline-block; vertical-align: top;
+    width: 60mm; height: 80mm; box-sizing: border-box;
+    margin: 1mm;
+    border: 1px dashed #999; border-radius: 2mm;
+    background: white;
+    overflow: hidden;
+    page-break-inside: avoid; break-inside: avoid;
+    padding: 2.5mm;
+    font-size: 16px; /* reset the container's font-size:0 whitespace-collapse trick */
+  }
+  .badge-inner {
+    display: flex; flex-direction: column; align-items: center; height: 100%;
+  }
+  .badge-farm { flex: none; font-size: 8pt; color: #666; text-align: center; line-height: 1.1; height: 3.5mm; }
+  /* Photo and identity sit side by side in a short header strip. Stacking
+     them, as this used to, spent 22mm of height on the photo alone and
+     left the QR only 28mm - and the QR is the part a picker's badge gets
+     used for every single day, in sunlight, at arm's length. */
+  .badge-head { flex: none; display: flex; align-items: center; width: 100%; height: 17mm; margin-top: 1mm; }
+  .badge-photo {
+    width: 17mm; height: 17mm; flex: none;
+    border-radius: 1.5mm; overflow: hidden; background: #ddd;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .badge-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .badge-photo .placeholder { color: #999; font-size: 22px; }
+  .badge-id { flex: 1; min-width: 0; padding-left: 2mm; overflow: hidden; }
+  /* Two lines of a long name at most, then clip - a third line would push
+     the employee number out of the header strip. */
+  .badge-name {
+    font-size: 8.5pt; font-weight: bold; line-height: 1.15;
+    max-height: 7mm; overflow: hidden;
+  }
+  .badge-emp {
+    font-size: 16pt; font-weight: bold; letter-spacing: 1px; color: #111;
+    line-height: 1.1; margin-top: 0.5mm; white-space: nowrap; overflow: hidden;
+  }
+  /* margin-top:auto pins the QR to the bottom of the card and lets any
+     slack collect above it, so a worker with a one-line name and one with
+     a two-line name still get the QR in the same place. Vertical budget
+     inside the 2.5mm padding (75mm of usable height):
+     3.5 farm + 1 + 17 header + 50 QR = 71.5mm. */
+  .badge-qr { flex: none; margin-top: auto; }
+  /* Vector, not a canvas bitmap - it prints at whatever the printer's own
+     resolution is instead of at a fixed pixel count, and a full-workforce
+     run doesn't hold a megabyte-plus canvas per worker in memory. */
+  .badge-qr svg { display: block; width: 50mm; height: 50mm; }
+  .no-data { padding: 24px; text-align: center; color: #666; }
+  /* 3 badges across (3 x 62mm = 186mm) and 3 down (3 x 82mm = 246mm) on an
+     A4 sheet with these margins - 9 to a page. */
+  @page { size: A4; margin: 8mm; }
+  @media print {
+    .no-print { display: none; }
+    body { background: white; }
+    #badgesContainer { padding: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="toolbar no-print">
+  <button onclick="window.print()">Print</button>
+  <div class="hint">Each badge is 60 x 80 mm, sized for the ID card holders - cut along the dashed lines.<br>
+    In the print dialog set <b>Scale</b> to 100% (not &quot;Fit to page&quot;), or they'll come out the wrong size.</div>
+</div>
+<div id="badgesContainer"></div>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const ids = (params.get("ids") || "").split(",").map((s) => s.trim()).filter(Boolean);
+
+  async function init() {
+    const container = document.getElementById("badgesContainer");
+    if (!ids.length) {
+      container.innerHTML = '<div class="no-data">No workers specified.</div>';
+      return;
+    }
+    const [workers, settings] = await Promise.all([
+      fetch("/api/workers").then((r) => r.json()),
+      fetch("/api/system-settings").then((r) => r.json()).catch(() => null),
+    ]);
+    const farmName = (settings && settings.farm_name) || "Boord";
+    const byId = new Map(workers.map((w) => [w.id, w]));
+    const selected = ids.map((id) => byId.get(id)).filter(Boolean);
+
+    if (!selected.length) {
+      container.innerHTML = '<div class="no-data">No matching workers found.</div>';
+      return;
+    }
+
+    container.innerHTML = selected.map((w) => `<div class="badge"><div class="badge-inner">
+        <div class="badge-farm">${farmName}</div>
+        <div class="badge-head">
+          <div class="badge-photo">
+            ${w.photo_filename
+              ? `<img src="/photos/${w.photo_filename}">`
+              : '<span class="placeholder">&#9787;</span>'}
+          </div>
+          <div class="badge-id">
+            <div class="badge-name">${w.first_name || ""} ${w.last_name || w.name || ""}</div>
+            <div class="badge-emp">#${w.id}</div>
+          </div>
+        </div>
+        <div class="badge-qr" id="qr-${w.id}"></div>
+      </div></div>`).join("");
+
+    // toString() is this build's SVG renderer (shape-rendering="crispEdges"),
+    // so the code stays hard-edged at any size the printer works at - no
+    // pixel count to outgrow the way a canvas has.
+    //
+    // Error correction H (30% recoverable) rather than the library's default
+    // M (15%): these badges live in pockets and get rained on, scratched and
+    // thumbed. Employee numbers are short enough ("001") that even at H this
+    // is still a 21x21 version-1 code, so the extra redundancy costs nothing
+    // in module size - at 50mm each module is about 2mm across.
+    selected.forEach((w) => {
+      QRCode.toString(w.id, { errorCorrectionLevel: "H", margin: 2 }, (err, svg) => {
+        if (err) return console.error(err);
+        document.getElementById(`qr-${w.id}`).innerHTML = svg;
+      });
+    });
+  }
+
+  init();
+</script>
+</body>
+</html>
