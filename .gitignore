@@ -12,3 +12,4 @@ data/reports/
 .DS_Store
 *.pyc
 heartbeat_url.txt
+NEXT_STEPS.md
