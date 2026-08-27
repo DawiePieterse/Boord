@@ -61,6 +61,31 @@ if not defined RELEASE_FPR (
 )
 echo     Only releases signed by !RELEASE_FPR! will be accepted.
 
+:: Probe that git can actually run gpg before relying on it. A missing or
+:: broken GnuPG makes verify-tag fail exactly like a bad signature does, so
+:: without this check a farm with no gpg installed is told its release looks
+:: tampered with - which sends them looking for an attacker instead of an
+:: installer. Git for Windows' own bundled gpg fails this way too: it stores
+:: keys in a keyboxd daemon the Git distribution does not ship.
+set "GPG_PROG="
+for /f "delims=" %%G in ('git config --get gpg.program 2^>nul') do set "GPG_PROG=%%G"
+if not defined GPG_PROG set "GPG_PROG=gpg"
+"%GPG_PROG%" --version >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo GnuPG is not working on this server, so signed releases cannot be
+    echo checked. Nothing has been updated.
+    echo.
+    echo Tried: !GPG_PROG!
+    echo.
+    echo Install Gpg4win from https://gpg4win.org, then point git at it:
+    echo     git config --global gpg.program "C:/Program Files/GnuPG/bin/gpg.exe"
+    echo.
+    echo Re-running install.bat does both of these for you.
+    pause
+    exit /b 1
+)
+
 echo.
 echo ==^> Fetching signed releases from GitHub...
 :: --force so a retagged release is picked up rather than silently keeping

@@ -20,6 +20,13 @@ $TaskName = "Boord Server"
 $FirewallRuleName = "Boord Server"
 $PythonVersion = "3.11.9"
 $PythonInstallerUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
+# Gpg4win is what verifies signed releases in update_server.bat. Git for
+# Windows bundles a gpg.exe, but it is unusable here: it keeps keys in a
+# keyboxd daemon that the Git distribution does not ship, so importing a key
+# fails with "probably not installed" and processes zero keys.
+$Gpg4winUrl = "https://files.gpg4win.org/gpg4win-latest.exe"
+$ReleaseKeyPath = Join-Path $RepoRoot "release-key.asc"
+$FprFile = Join-Path $RepoRoot "data\release_key.fpr"
 
 function Write-Step($msg) {
     Write-Host ""
@@ -91,7 +98,96 @@ try {
         }
     }
 
-    # --- Step 2: Create the virtual environment ---
+    # --- Step 2: Git (needed by update_server.bat, not by the server) ---
+    Write-Step "Checking for Git..."
+    $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    if ($gitCmd) {
+        Write-Ok "Found Git at $($gitCmd.Source)"
+    } else {
+        Write-Warn "Git is not installed. The server itself will still run, but"
+        Write-Warn "update_server.bat cannot fetch releases without it."
+        Write-Warn "Install it from https://git-scm.com/download/win and re-run this."
+    }
+
+    # --- Step 3: GnuPG, for verifying signed releases ---
+    Write-Step "Checking for GnuPG (verifies signed releases)..."
+    $gpgExe = $null
+    $gpgCmd = Get-Command gpg -ErrorAction SilentlyContinue
+    # Git's bundled gpg is deliberately rejected - see $Gpg4winUrl above. It is
+    # on PATH inside Git Bash and would otherwise look like a working answer.
+    if ($gpgCmd -and $gpgCmd.Source -notlike "*\Git\usr\bin\*") {
+        $gpgExe = $gpgCmd.Source
+        Write-Ok "Found GnuPG at $gpgExe"
+    } else {
+        Write-Warn "No usable GnuPG found - downloading Gpg4win..."
+        try {
+            $gpgInstaller = Join-Path $env:TEMP "gpg4win-latest.exe"
+            Invoke-WebRequest -Uri $Gpg4winUrl -OutFile $gpgInstaller -UseBasicParsing
+            Write-Warn "Installing Gpg4win (this can take a minute)..."
+            Start-Process -FilePath $gpgInstaller -ArgumentList "/S" -Wait
+            Remove-Item $gpgInstaller -ErrorAction SilentlyContinue
+            foreach ($candidate in @(
+                (Join-Path $env:ProgramFiles "GnuPG\bin\gpg.exe"),
+                (Join-Path ${env:ProgramFiles(x86)} "GnuPG\bin\gpg.exe")
+            )) {
+                if (Test-Path $candidate) { $gpgExe = $candidate; break }
+            }
+            if ($gpgExe) { Write-Ok "Installed GnuPG at $gpgExe" }
+            else { Write-Warn "Gpg4win installed but gpg.exe was not found in the usual places." }
+        } catch {
+            Write-Warn "Could not install Gpg4win automatically: $($_.Exception.Message)"
+            Write-Warn "Install it by hand from https://gpg4win.org, then re-run this installer."
+        }
+    }
+
+    # Everything below talks to native tools that report success on stderr.
+    # With $ErrorActionPreference = "Stop", Windows PowerShell turns a native
+    # command's redirected stderr into a TERMINATING error - the exact bug
+    # that killed this installer at the schtasks step. gpg is worse than most:
+    # "Total number processed: 1" goes to stderr even on a clean import. So
+    # these run through cmd, which keeps their stderr away from PowerShell,
+    # and the whole block is non-fatal - a farm can import the key by hand.
+    if ($gpgExe -and $gitCmd) {
+        try {
+            $gpgForGit = $gpgExe -replace '\\', '/'
+            cmd /c "git config --global gpg.program ""$gpgForGit"" >nul 2>&1"
+            Write-Ok "Told git to use this gpg for signature checks"
+        } catch {
+            Write-Warn "Could not set git's gpg.program - set it by hand (MANUAL.md chapter 2)."
+        }
+    }
+
+    if ($gpgExe -and (Test-Path $ReleaseKeyPath)) {
+        # Importing the public key from the repo is safe: what actually decides
+        # which releases are trusted is the fingerprint in data\release_key.fpr,
+        # which lives outside the repo. A swapped key would not match it and
+        # update_server.bat would refuse the release.
+        #
+        # Start-Process rather than a direct call or cmd /c. gpg reports even a
+        # successful import on stderr, which PowerShell would turn into a
+        # terminating error here; and cmd /c strips quotes from a command that
+        # starts with one, which "C:\Program Files\..." does. Start-Process
+        # sidesteps both and returns a real exit code.
+        try {
+            $gpgLog = Join-Path $env:TEMP "boord-gpg-import.log"
+            $proc = Start-Process -FilePath $gpgExe `
+                -ArgumentList @("--batch", "--yes", "--import", $ReleaseKeyPath) `
+                -NoNewWindow -Wait -PassThru `
+                -RedirectStandardError $gpgLog -RedirectStandardOutput "$gpgLog.out"
+            if ($proc.ExitCode -eq 0) {
+                Write-Ok "Imported the Boord release key"
+            } else {
+                Write-Warn "Importing release-key.asc failed (exit $($proc.ExitCode)) - see $gpgLog"
+                Write-Warn "Import it by hand before running update_server.bat."
+            }
+            Remove-Item "$gpgLog.out" -ErrorAction SilentlyContinue
+        } catch {
+            Write-Warn "Could not import release-key.asc: $($_.Exception.Message)"
+            Write-Warn "Import it by hand before running update_server.bat."
+        }
+    }
+
+    # --- Step 4: Create the virtual environment ---
     Write-Step "Setting up the app's virtual environment..."
     if (-not (Test-Path $VenvDir)) {
         & $pythonExe -m venv $VenvDir
@@ -102,7 +198,7 @@ try {
     $venvPython = Join-Path $VenvDir "Scripts\python.exe"
     $venvPip = Join-Path $VenvDir "Scripts\pip.exe"
 
-    # --- Step 3: Install dependencies ---
+    # --- Step 5: Install dependencies ---
     Write-Step "Installing app dependencies (this can take a few minutes on first run)..."
     & $venvPip install --quiet --disable-pip-version-check -r (Join-Path $BackendDir "requirements.txt")
     if ($LASTEXITCODE -ne 0) {
@@ -111,7 +207,7 @@ try {
     }
     Write-Ok "Dependencies installed"
 
-    # --- Step 4: Write the launcher script ---
+    # --- Step 6: Write the launcher script ---
     Write-Step "Creating the server launcher..."
     $launcherPath = Join-Path $RepoRoot "start_server.bat"
     $launcherContent = @"
@@ -122,13 +218,13 @@ cd /d "$BackendDir"
     Set-Content -Path $launcherPath -Value $launcherContent -Encoding ASCII
     Write-Ok "Created $launcherPath"
 
-    # --- Step 5: Firewall rule ---
+    # --- Step 7: Firewall rule ---
     Write-Step "Allowing the app through Windows Firewall..."
     netsh advfirewall firewall delete rule name="$FirewallRuleName" | Out-Null
     netsh advfirewall firewall add rule name="$FirewallRuleName" dir=in action=allow protocol=TCP localport=$Port | Out-Null
     Write-Ok "Firewall rule set for port $Port"
 
-    # --- Step 6: Scheduled task (auto-start at boot, no login needed) ---
+    # --- Step 8: Scheduled task (auto-start at boot, no login needed) ---
     Write-Step "Registering the server to start automatically with Windows..."
     # Route schtasks through cmd so its stderr never reaches PowerShell.
     # $ErrorActionPreference = "Stop" (top of this file) turns a native
@@ -150,13 +246,33 @@ cd /d "$BackendDir"
     schtasks /create /tn "$TaskName" /tr "`"$launcherPath`"" /sc onstart /ru SYSTEM /rl highest /f | Out-Null
     Write-Ok "Scheduled task '$TaskName' registered (runs at every startup, no one needs to log in)"
 
-    # --- Step 7: Start it now ---
+    # --- Step 9: Start it now ---
     Write-Step "Starting the server now..."
     schtasks /run /tn "$TaskName" | Out-Null
-    Start-Sleep -Seconds 3
-    Write-Ok "Server starting in the background"
 
-    # --- Step 8: Report the address ---
+    # --- Step 10: Confirm it actually answers ---
+    # The installer used to sleep three seconds and declare success, so a
+    # server that died on startup - a missing dependency, a port already in
+    # use - still produced "Setup complete!". Poll until it responds instead,
+    # and say plainly if it never does.
+    $serverUp = $false
+    for ($i = 0; $i -lt 20; $i++) {
+        Start-Sleep -Seconds 1
+        try {
+            $resp = Invoke-WebRequest -Uri "http://localhost:$Port/" -UseBasicParsing -TimeoutSec 3
+            if ($resp.StatusCode -eq 200) { $serverUp = $true; break }
+        } catch { }
+    }
+    if ($serverUp) {
+        Write-Ok "Server is up and answering on port $Port"
+    } else {
+        Write-Warn "The server did not answer on port $Port within 20 seconds."
+        Write-Warn "It may still be starting. If it never comes up, run start_server.bat"
+        Write-Warn "directly in a window - errors are printed there rather than swallowed"
+        Write-Warn "by the Scheduled Task."
+    }
+
+    # --- Step 11: Report the address ---
     Write-Step "Finding this PC's network address..."
     $ip = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" -and $_.PrefixOrigin -ne "WellKnown" } |
@@ -179,6 +295,29 @@ cd /d "$BackendDir"
     Write-Warn "does not do that step for you."
     Write-Host ""
     Write-Host " The server will now start automatically every time this PC turns on."
+
+    # The one thing this installer cannot do for you. The fingerprint is what
+    # decides which releases this server will accept, so it has to be typed in
+    # by a person from a source they trust - not read from the repository,
+    # which is the very thing it exists to check.
+    if (-not (Test-Path $FprFile)) {
+        Write-Host ""
+        Write-Host "================================================" -ForegroundColor Yellow
+        Write-Host " One step left: trust the release key" -ForegroundColor Yellow
+        Write-Host "================================================" -ForegroundColor Yellow
+        Write-Host " update_server.bat will refuse to install anything until this"
+        Write-Host " server knows which signing key to trust. In this folder, run:"
+        Write-Host ""
+        Write-Host "     echo <FINGERPRINT>> data\release_key.fpr" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host " ...with the 40-character fingerprint from whoever maintains"
+        Write-Host " this install. Note there is NO space before the > - echo would"
+        Write-Host " write one into the file and the fingerprint would not match."
+        Write-Host " See MANUAL.md chapter 2, 'Trusting the release key'."
+    } else {
+        $fpr = (Get-Content $FprFile -TotalCount 1).Trim()
+        Write-Ok "Release key fingerprint on file: $fpr"
+    }
 
     Write-Host ""
     Write-Host "================================================" -ForegroundColor Cyan

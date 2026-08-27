@@ -235,58 +235,53 @@ matters because the server runs as SYSTEM: without this, a stolen GitHub
 token would mean code execution on every farm running Boord.
 
 For that check to work, the server needs to know two things - the public
-key itself, and which fingerprint to insist on.
+key itself, and which fingerprint to insist on. Only the second is manual.
 
-**Step 0 - Install GnuPG on the server.** Get **Gpg4win** from
-`gpg4win.org` and run the installer; the defaults are fine.
+`install.bat` does most of this for you. It installs Gpg4win if GnuPG is
+missing, points git at it, and imports the release key that ships in the
+repository as `release-key.asc`. What it cannot do is decide **which** key
+to trust - that is the one step a person has to perform.
 
-> Git for Windows ships a `gpg.exe` at
-> `C:\Program Files\Git\usr\bin\gpg.exe`, and it does **not** work for
-> this. It is a build that keeps its keys in a `keyboxd` daemon which the
-> Git distribution does not include, so importing a key fails with
-> `error running '/usr/lib/gnupg/keyboxd': probably not installed` and
-> `Total number processed: 0`. Do not point `gpg.program` at it.
+**The only manual step: record the fingerprint.** In the project folder:
+```bat
+echo 67C64CFDD584DD140E58AF6E329C9B9DD0562A9D> data\release_key.fpr
+```
+Substitute the fingerprint you were given by whoever maintains this
+install. **There is no space before the `>`** - `echo foo > file` writes a
+trailing space into the file and the fingerprint will not match. Check it:
+```bat
+type data\release_key.fpr
+```
+40 characters, nothing else.
 
-Then tell git which gpg to use, or `git verify-tag` will not find one.
-Check where the installer put it and set that path:
+> **Why the key can ship in the repository but the fingerprint cannot.**
+> They do different jobs. The key is just a key; the fingerprint is the
+> decision about which key counts. An attacker who could push to the
+> repository could swap `release-key.asc` for their own key and sign a
+> release with it - and `data\release_key.fpr` is what catches that,
+> because their fingerprint would not match the one on file. It lives in
+> `data\`, which is gitignored, so no update can rewrite it. Treat that
+> file as the thing that actually protects the farm, and change it only
+> when you deliberately rotate the key.
+
+If `data\release_key.fpr` is missing, `update_server.bat` stops and updates
+nothing. That is intentional: a server that cannot tell a genuine release
+from a tampered one should not be installing either. It also checks that
+GnuPG actually runs before trusting any signature check, so a missing gpg
+reports itself as a missing gpg rather than as a failed signature.
+
+**Doing it by hand.** If you are not using `install.bat`, install Gpg4win
+from `gpg4win.org` (Git for Windows bundles a `gpg.exe` that does **not**
+work here - it keeps keys in a `keyboxd` daemon the Git distribution does
+not ship, so importing fails with `probably not installed` and processes
+zero keys). Then:
 ```bat
 where gpg
 git config --global gpg.program "C:/Program Files/GnuPG/bin/gpg.exe"
+gpg --import release-key.asc
 ```
-Forward slashes, and keep the quotes - the space in "Program Files" breaks
-it otherwise. Open a **new** Command Prompt afterwards, since PATH changes
-do not reach an already-open window.
-
-**Step 1 - Import the public key.** On the developer's machine, export it:
-```bash
-gpg --armor --export <KEY-ID> > boord-release-key.asc
-```
-Copy that file to the server (USB is fine - it is public), then in Command
-Prompt on the server:
-```bat
-gpg --import boord-release-key.asc
-```
-
-**Step 2 - Record the fingerprint the server will trust.** Get the
-40-character fingerprint:
-```bat
-gpg --fingerprint <KEY-ID>
-```
-Write it, with no spaces, into `data\release_key.fpr`:
-```bat
-echo A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0> data\release_key.fpr
-```
-
-> This file deliberately lives in `data\`, not in the checkout. A
-> fingerprint stored inside the repository would be rewritten by the very
-> update it is supposed to be vouching for - so anyone who could push
-> could also swap in their own key. `data\` is gitignored, so a checkout
-> never touches it. Treat this file as the thing that actually protects
-> the farm, and only change it when you deliberately rotate the key.
-
-If `data\release_key.fpr` is missing, `update_server.bat` stops and
-updates nothing. That is intentional: a server that cannot tell a genuine
-release from a tampered one should not be installing either.
+Open a new Command Prompt after installing, since PATH changes do not reach
+an already-open window.
 
 **Pulling future updates.**
 Once a new signed release is tagged and pushed, update an already-running
