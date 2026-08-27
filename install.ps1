@@ -133,23 +133,43 @@ try {
         $gpgExe = $gpgCmd.Source
         Write-Ok "Found GnuPG at $gpgExe"
     } else {
-        Write-Warn "No usable GnuPG found - downloading Gpg4win..."
+        Write-Warn "No usable GnuPG found - installing Gpg4win..."
         $sac = Get-SmartAppControlState
-        if ($sac -eq 1) {
-            Write-Warn "Note: Smart App Control is on. It may block this installer -"
-            Write-Warn "if it does, the message below will say so."
-        }
-        try {
-            $gpgInstaller = Join-Path $env:TEMP "gpg4win-latest.exe"
-            Invoke-WebRequest -Uri $Gpg4winUrl -OutFile $gpgInstaller -UseBasicParsing
-            Write-Warn "Installing Gpg4win (this can take a minute)..."
-            Start-Process -FilePath $gpgInstaller -ArgumentList "/S" -Wait
-            Remove-Item $gpgInstaller -ErrorAction SilentlyContinue
+
+        function Find-InstalledGpg {
             foreach ($candidate in @(
                 (Join-Path $env:ProgramFiles "GnuPG\bin\gpg.exe"),
                 (Join-Path ${env:ProgramFiles(x86)} "GnuPG\bin\gpg.exe")
             )) {
-                if (Test-Path $candidate) { $gpgExe = $candidate; break }
+                if (Test-Path $candidate) { return $candidate }
+            }
+            return $null
+        }
+
+        try {
+            # winget first. Smart App Control blocks executables a script
+            # downloaded itself, but it treats Microsoft's own package manager
+            # differently - so on a machine with SAC enforcing this is the path
+            # that actually works. It is also not a way around the policy:
+            # winget checks the package the same way any other install does.
+            $winget = Get-Command winget -ErrorAction SilentlyContinue
+            if ($winget) {
+                Write-Warn "Trying winget..."
+                cmd /c "winget install --id GnuPG.Gpg4win --silent --accept-package-agreements --accept-source-agreements >nul 2>&1"
+                $gpgExe = Find-InstalledGpg
+            }
+
+            if (-not $gpgExe) {
+                if ($sac -eq 1) {
+                    Write-Warn "Smart App Control is on - a downloaded installer may be blocked."
+                }
+                Write-Warn "Downloading Gpg4win directly..."
+                $gpgInstaller = Join-Path $env:TEMP "gpg4win-latest.exe"
+                Invoke-WebRequest -Uri $Gpg4winUrl -OutFile $gpgInstaller -UseBasicParsing
+                Write-Warn "Installing Gpg4win (this can take a minute)..."
+                Start-Process -FilePath $gpgInstaller -ArgumentList "/S" -Wait
+                Remove-Item $gpgInstaller -ErrorAction SilentlyContinue
+                $gpgExe = Find-InstalledGpg
             }
             if ($gpgExe) {
                 Write-Ok "Installed GnuPG at $gpgExe"
