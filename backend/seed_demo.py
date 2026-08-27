@@ -1,10 +1,10 @@
 """Populate a running Boord server with demo data for local
 testing only. Never imported by main.py/db.py and never run automatically -
 run by hand against an empty dev database when you want something to click
-through (e.g. python3 seed_demo.py).
+through.
 
 Usage:
-    python3 seed_demo.py [base_url]
+    ALLOW_DEMO_SEED=1 python3 seed_demo.py [base_url]
 
 Defaults to http://localhost:8811. Posts through the normal API (not the DB
 directly), so it works against any running instance: workers/suppliers via
@@ -13,16 +13,32 @@ external deliveries via /api/lots/external, check-ins via /api/receiving,
 and pre-pack pulls via /api/processing/prepack.
 
 Safe to re-run: workers/suppliers upsert by id/name, crates upsert by uuid.
+
+DANGEROUS against a real farm, which is why it now asks twice. Nothing used
+to stop this being pointed at a live database, where it overwrites the farm's
+GPS location, its two teams and five of its blocks, and files eight invented
+people - complete with fabricated SA ID numbers and bank account numbers -
+into the same worker list that the payroll run reads. Hence:
+
+  * ALLOW_DEMO_SEED=1 must be set, so it can never be an accidental
+    up-arrow-and-enter against the wrong window; and
+  * refuse_unless_safe() checks, before writing a single row, that everything
+    this script would overwrite is either absent or something it put there
+    itself.
+
+The admin password comes from BOORD_ADMIN_PASSWORD, or - when seeding a
+fresh install on this machine - from data/initial_admin_password.txt.
 """
 import json
+import os
 import random
 import sys
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8811"
-ADMIN_USER = "admin"
-ADMIN_PASSWORD = "ChangeMe123!"
+ADMIN_USER = os.environ.get("BOORD_ADMIN_USER", "admin")
 
 random.seed(42)  # deterministic demo data on re-runs
 
@@ -46,8 +62,36 @@ def api(path, body=None, method=None, token=None, form=False):
         return json.loads(resp.read() or "null")
 
 
+def admin_password():
+    """BOORD_ADMIN_PASSWORD, or the one the install generated for itself.
+
+    There is no shared default password any more - db.seed_defaults() makes a
+    random one per install and leaves it in data/initial_admin_password.txt
+    until it is replaced, so a freshly created local database needs nothing
+    passed in."""
+    from_env = os.environ.get("BOORD_ADMIN_PASSWORD")
+    if from_env:
+        return from_env
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data",
+                         "initial_admin_password.txt")
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        sys.exit("No admin password to sign in with. Either run this on the same machine\n"
+                 "as a fresh install (where data/initial_admin_password.txt still holds the\n"
+                 "generated one), or set BOORD_ADMIN_PASSWORD=<password>.")
+
+
 def login():
-    result = api("/api/auth/login", f"username={ADMIN_USER}&password={ADMIN_PASSWORD}", form=True)
+    # urlencode, not an f-string: a generated password is not guaranteed to
+    # survive being pasted into a form body unescaped.
+    body = urllib.parse.urlencode({"username": ADMIN_USER, "password": admin_password()})
+    result = api("/api/auth/login", body, form=True)
+    if result.get("must_change_password"):
+        sys.exit("This server is still on the admin password it generated at install, and\n"
+                 "refuses every other endpoint until that is replaced. Open the Admin app,\n"
+                 "set a password, then re-run with BOORD_ADMIN_PASSWORD=<that password>.")
     return result["access_token"]
 
 
@@ -73,8 +117,65 @@ DRIVERS = ["Johan", "Themba", "Frikkie", "Sello"]
 INDUNAS = {"A": "Samuel Mthembu", "B": "Petrus Mokoena"}
 
 
+DEMO_WORKER_IDS = {emp for emp, _first, _last in WORKERS}
+DEMO_BLOCK_IDS = set(BLOCK_DETAILS)
+DEMO_GPS = (-25.45, 30.95)  # White River - what this script sets below
+
+
+def refuse_unless_safe(token):
+    """Stop before writing anything if this database holds a real farm's data.
+
+    Each check is scoped to what this script would actually overwrite, and
+    ignores what it put there itself, so re-running against a demo database
+    stays fine. It is deliberately more suspicious than "are there crates?":
+    a farm that has imported its workers and blocks but not yet picked
+    anything is the case where fabricated ID numbers would land quietly in
+    among real ones."""
+    reasons = []
+
+    counts = api("/api/harvest-records/counts", token=token)
+    foreign_crates = counts["total"] - counts["demo"]
+    if foreign_crates:
+        reasons.append(f"{foreign_crates} harvest record(s) this script did not create")
+
+    other_workers = sorted({w["id"] for w in api("/api/workers", token=token)} - DEMO_WORKER_IDS)
+    if other_workers:
+        reasons.append(f"{len(other_workers)} worker(s) that are not the demo eight "
+                       f"({', '.join(other_workers[:3])}...)")
+
+    other_blocks = sorted({b["id"] for b in api("/api/blocks")} - DEMO_BLOCK_IDS)
+    if other_blocks:
+        reasons.append(f"{len(other_blocks)} block(s) that are not the demo five "
+                       f"({', '.join(other_blocks[:3])}...)")
+
+    settings = api("/api/system-settings") or {}
+    if settings.get("farm_name"):
+        reasons.append(f"a farm name: {settings['farm_name']!r}")
+    gps = (settings.get("gps_lat"), settings.get("gps_lon"))
+    if gps != (None, None) and gps != DEMO_GPS:
+        reasons.append(f"a GPS location this script did not set: {gps[0]}, {gps[1]}")
+
+    if not reasons:
+        return
+    print(f"Refusing to seed {BASE} - this looks like a real farm's database.", file=sys.stderr)
+    for reason in reasons:
+        print(f"  - it holds {reason}", file=sys.stderr)
+    print("\nTo get a demo database instead: stop the server, move data/boord.db aside,\n"
+          "start it again (a new one is created empty), and re-run this script.",
+          file=sys.stderr)
+    sys.exit(1)
+
+
 def main():
+    if os.environ.get("ALLOW_DEMO_SEED") != "1":
+        sys.exit("Refusing to run without ALLOW_DEMO_SEED=1.\n\n"
+                 "This writes invented people, ID numbers and bank details into the target\n"
+                 "database and overwrites its farm location, teams and blocks. Confirm the\n"
+                 f"target is a throwaway database ({BASE}) with:\n\n"
+                 "    ALLOW_DEMO_SEED=1 python3 seed_demo.py [base_url]")
+
     token = login()
+    refuse_unless_safe(token)
     print(f"Seeding demo data into {BASE}")
 
     # --- Farm GPS location (White River, Mpumalanga - litchi country) ---

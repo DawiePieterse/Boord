@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlmodel import Session, SQLModel, select
 
 from db import get_session
@@ -11,6 +12,29 @@ from security import get_current_admin
 from timeutil import to_local
 
 router = APIRouter(prefix="/api/harvest-records", tags=["harvest-records"])
+
+# Every crate seed_demo.py invents is given a uuid starting with this. Real
+# crates carry a uuid minted by the field device (Boord.uuid()), so the
+# prefix is what tells demo data apart from a farm's own.
+DEMO_UUID_PREFIX = "demo-"
+
+
+@router.get("/counts")
+def harvest_record_counts(session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+    """How many crates this database holds, and how many of those the demo
+    seeder wrote.
+
+    seed_demo.py calls this before it writes anything: a database holding
+    crates it did not create belongs to a real farm, and seeding it would
+    overwrite the farm's GPS and blocks and file fake workers with invented
+    ID numbers and bank details alongside real people. The split is what lets
+    the seeder stay safe to re-run against its own demo database."""
+    total = session.exec(select(func.count()).select_from(HarvestRecord)).one()
+    demo = session.exec(
+        select(func.count()).select_from(HarvestRecord)
+        .where(HarvestRecord.uuid.startswith(DEMO_UUID_PREFIX))
+    ).one()
+    return {"total": total, "demo": demo}
 
 
 class HarvestRecordEdit(SQLModel):
