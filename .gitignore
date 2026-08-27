@@ -5,6 +5,7 @@ data/*.db
 data/*.db-journal
 data/.secret_key
 data/release_key.fpr
+data/imports/
 data/photos/
 data/backups/
 data/reports/

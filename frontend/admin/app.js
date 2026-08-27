@@ -21,7 +21,12 @@ async function updateBannerWeather() {
   if (!el) return;
   try {
     const w = await Boord.api("/api/weather/current");
-    if (w && w.temp !== undefined && w.temp !== null) {
+    if (w && w.no_location) {
+      // The farm's GPS isn't set. Say so rather than leaving the strip blank:
+      // Weather, Risk and the Harvest Forecast all stay empty until it is,
+      // and a silent gap gives no clue why.
+      el.innerHTML = `<i class="fa-solid fa-location-dot"></i> Set farm location in Settings`;
+    } else if (w && w.temp !== undefined && w.temp !== null) {
       const icon = Boord.weatherIcon(w.condition);
       el.innerHTML = `<i class="fa-solid ${icon}"></i> ${Math.round(w.temp)}°C · ${w.condition}${w.humidity != null ? ` · ${w.humidity}% humidity` : ""}`;
     }

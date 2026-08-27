@@ -4,6 +4,7 @@ import time as _time
 import urllib.error
 import urllib.request
 from datetime import datetime
+from typing import Optional
 
 from sqlmodel import Session, select
 
@@ -83,16 +84,28 @@ HOURLY_FIELDS = ",".join([
     "sunshine_duration",
 ])
 
-# Falls back to the same testing coordinates as routers/weather.py's /current
-# route if the farm's GPS hasn't been set in Settings yet.
-_FALLBACK_LAT, _FALLBACK_LON = -25.572747, 31.606722
+def farm_coords(session: Session) -> Optional[tuple]:
+    """The farm's GPS position from Settings, or None if it isn't set yet.
 
+    This used to fall back to a fixed pair of coordinates when Settings was
+    blank. That was survivable while there was one farm, because the fallback
+    WAS that farm. As a product it is a silent correctness bug: a farm that
+    hasn't filled in its location gets a different farm's weather, and since
+    the Risk indicator and Harvest Forecast are computed from that weather,
+    they produce confident scores describing somewhere else entirely. Nothing
+    errors, nothing looks wrong, and the numbers are simply about the wrong
+    place.
 
-def farm_coords(session: Session) -> tuple:
+    So there is no fallback. Every caller has to decide what to do with no
+    location, and none of them is allowed to invent one.
+
+    Note the `is not None` checks: a plain truthiness test treats latitude 0
+    (the equator) and longitude 0 (Greenwich) as "unset".
+    """
     settings = session.exec(select(SystemSetting)).first()
-    if settings and settings.gps_lat and settings.gps_lon:
+    if settings and settings.gps_lat is not None and settings.gps_lon is not None:
         return settings.gps_lat, settings.gps_lon
-    return _FALLBACK_LAT, _FALLBACK_LON
+    return None
 
 
 def fetch_historical_hourly(lat: float, lon: float, start_date: str, end_date: str, timeout: int = 120) -> dict:
@@ -219,7 +232,12 @@ def sync_recent_weather(session: Session) -> dict:
             return {"synced": 0}
 
         start_date = latest.date().isoformat() if latest else HISTORY_START_DATE
-        lat, lon = farm_coords(session)
+        coords = farm_coords(session)
+        if coords is None:
+            # No location set: append nothing rather than guess. Callers
+            # surface this as "set your farm location", not as an error.
+            return {"synced": 0, "no_location": True}
+        lat, lon = coords
         data = fetch_historical_hourly(lat, lon, start_date, now.date().isoformat(), timeout=3)
         rows = parse_hourly_rows(data)
         new_rows = [WeatherHistory(**r) for r in rows if latest is None or r["timestamp"] > latest]

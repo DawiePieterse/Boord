@@ -35,7 +35,15 @@ from weather import HISTORY_START_DATE, farm_coords, fetch_historical_hourly, pa
 def main():
     create_db_and_tables()
     with Session(engine) as session:
-        lat, lon = farm_coords(session)
+        coords = farm_coords(session)
+    if coords is None:
+        print("No farm location set - skipping the weather import.\n"
+              "Set the farm's GPS latitude/longitude in Admin -> Settings first,\n"
+              "then run this again. Nothing was imported: weather fetched for the\n"
+              "wrong place would look completely normal and quietly feed the Risk\n"
+              "indicator and Harvest Forecast.")
+        return
+    lat, lon = coords
     end_date = date.today().isoformat()
     data = fetch_historical_hourly(lat, lon, HISTORY_START_DATE, end_date)
     rows = [WeatherHistory(**r) for r in parse_hourly_rows(data)]

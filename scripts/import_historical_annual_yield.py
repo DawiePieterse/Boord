@@ -3,7 +3,8 @@
 HistoricalAnnualYield table, extending the farm's history further back than
 HistoricalHarvest's daily records (which only go back to 2020).
 
-Two sources, both in "Actual farm data/OES 2025 21 Nov.xlsx":
+Two sources, both in data/imports/"OES 2025 21 Nov.xlsx"
+(gitignored - per-farm data, not shipped with the app):
 
 - "Produksie" sheet, 2012-2019: the farm's own annual PER-BLOCK production
   summary, using today's block ids. Unlike the daily 2020-2025 workbook,
@@ -52,8 +53,16 @@ from sqlmodel import Session, delete  # noqa: E402
 from db import create_db_and_tables, engine  # noqa: E402
 from models import HistoricalAnnualYield  # noqa: E402
 
-XLSX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Actual farm data",
+# The source workbook lives in data/imports/, which is gitignored, NOT in the
+# repository. It used to be committed - which meant every install carried one
+# particular farm's harvest records, and a new customer's server would clone
+# down another farm's business data and import it. data/ is where per-farm
+# material belongs; the repository ships code.
+#
+# Pass a different path as the first argument if the workbook is elsewhere.
+DEFAULT_XLSX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "imports",
                           "OES 2025 21 Nov.xlsx")
+XLSX_PATH = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_XLSX
 PRODUKSIE_SHEET = "Produksie"
 PRODUKSIE_YEARS = range(2012, 2020)  # 2020+ already covered by HistoricalHarvest at daily granularity
 
@@ -128,6 +137,13 @@ def load_rows():
 
 
 def main():
+    if not os.path.exists(XLSX_PATH):
+        print(f"No source workbook at {XLSX_PATH} - skipping the annual yield import.\n"
+              "This is normal on a new install: the workbook holds one farm's own\n"
+              "historical records and is not shipped with the app. Put yours in\n"
+              "data/imports/, or pass its path as the first argument, then re-run.\n"
+              "Nothing was changed.")
+        return
     create_db_and_tables()
     records = load_rows()
     with Session(engine) as session:

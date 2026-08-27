@@ -2,7 +2,8 @@
 """One-off import of pre-app historical harvest data (2020-2025) into the
 HistoricalHarvest table, powering the admin Analysis tab.
 
-Source: "Actual farm data/Harvest Data 2020-2025 (Clean, Split by Block).xlsx"
+Source: data/imports/"Harvest Data 2020-2025 (Clean, Split by Block).xlsx"
+(gitignored - per-farm data, not shipped with the app)
 (itself derived from the farm's original "Daaglikse Oes data 2020 - 2025.xlsx" -
 see that clean workbook's own Notes sheet for the block-split-by-hectare-ratio
 and column-typo caveats that carry through to the season_year/block_id/
@@ -28,8 +29,16 @@ from sqlmodel import Session, delete  # noqa: E402
 from db import create_db_and_tables, engine  # noqa: E402
 from models import HistoricalHarvest  # noqa: E402
 
-XLSX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Actual farm data",
+# The source workbook lives in data/imports/, which is gitignored, NOT in the
+# repository. It used to be committed - which meant every install carried one
+# particular farm's harvest records, and a new customer's server would clone
+# down another farm's business data and import it. data/ is where per-farm
+# material belongs; the repository ships code.
+#
+# Pass a different path as the first argument if the workbook is elsewhere.
+DEFAULT_XLSX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "imports",
                           "Harvest Data 2020-2025 (Clean, Split by Block).xlsx")
+XLSX_PATH = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_XLSX
 YEAR_SHEETS = ["2020", "2021", "2022", "2023", "2024", "2025"]
 SPLIT_BLOCKS = {"8a", "8b", "10a", "10b", "17a", "17b", "19a", "19b"}
 
@@ -58,6 +67,13 @@ def load_rows():
 
 
 def main():
+    if not os.path.exists(XLSX_PATH):
+        print(f"No source workbook at {XLSX_PATH} - skipping the daily harvest import.\n"
+              "This is normal on a new install: the workbook holds one farm's own\n"
+              "historical records and is not shipped with the app. Put yours in\n"
+              "data/imports/, or pass its path as the first argument, then re-run.\n"
+              "Nothing was changed.")
+        return
     create_db_and_tables()
     records = load_rows()
     with Session(engine) as session:

@@ -473,6 +473,14 @@ likely to get tidied up or deleted by accident.
 > backup zip is a finished file, which is exactly what sync is good at.
 > Just do not run the app from one.
 
+> **Set the farm's GPS location before importing any weather.** Weather,
+> the Risk indicator and the Harvest Forecast are all computed for the
+> coordinates in **Admin → Settings**, and until those are filled in the
+> app will not fetch weather at all - the header reads "Set farm location
+> in Settings" and the import scripts skip with a message. That is
+> deliberate. Guessing a location produces confident Risk scores for
+> somewhere else, which looks completely normal and is completely wrong.
+
 **Step 2 - Install Python.**
 
 1. Go to `python.org` in a browser and download the latest Python 3
@@ -1366,6 +1374,15 @@ app, compared against the harvest year set in
 [Settings](#12-admin---settings).
 
 ### Re-importing historical data on a server
+
+> **The source workbooks are not shipped with the app.** They hold one
+> farm's own harvest records, so they live in `data\imports\` - which is
+> gitignored and per-farm - rather than in the repository. A new install
+> has no workbooks and the two harvest import scripts simply skip, which is
+> correct: a farm should never be importing another farm's history. To load
+> your own, put the workbook in `data\imports\` (or pass its path as the
+> first argument to the script) and re-run.
+
 
 The historical import is a one-off script, not something an update
 carries over - the source workbook and the script that reads it are both

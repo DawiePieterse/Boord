@@ -93,7 +93,15 @@ def main():
                   f"{(date.fromisoformat(HISTORY_START_DATE) - timedelta(days=1)).isoformat()} - skipping "
                   f"(pass --force to re-fetch).")
             return
-        lat, lon = farm_coords(session)
+        coords = farm_coords(session)
+    if coords is None:
+        print("No farm location set - skipping the weather import.\n"
+              "Set the farm's GPS latitude/longitude in Admin -> Settings first,\n"
+              "then run this again. Nothing was imported: weather fetched for the\n"
+              "wrong place would look completely normal and quietly feed the Risk\n"
+              "indicator and Harvest Forecast.")
+        return
+    lat, lon = coords
     rows = load_rows(lat, lon)
     with Session(engine) as session:
         session.exec(delete(WeatherHistory).where(WeatherHistory.timestamp < date.fromisoformat(HISTORY_START_DATE)))

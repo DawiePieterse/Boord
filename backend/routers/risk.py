@@ -554,7 +554,14 @@ def build_harvest_forecast(session: Session) -> dict:
     forecast_unavailable = False
     forecast_by_date = defaultdict(list)
     try:
-        lat, lon = farm_coords(session)
+        coords = farm_coords(session)
+        if coords is None:
+            # No farm location set - there is nothing to forecast for. This
+            # would also be caught by the except below (unpacking None raises),
+            # but relying on that would report "the provider is unreachable"
+            # for what is really "nobody has said where this farm is".
+            raise ValueError("farm location not set")
+        lat, lon = coords
         # Short timeout (not the 30s default): this runs inside the same
         # request the frontend gives up on after 8s (Boord.NETWORK_TIMEOUT_MS),
         # and a slow forecast call already degrades gracefully below via
