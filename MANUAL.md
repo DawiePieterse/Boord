@@ -205,7 +205,20 @@ a connection you control, not on someone else's WiFi.
 
 **Cutting a new release (developer).**
 Farm servers install signed tags, so pushing to `main` deploys nothing on
-its own. Use the helper rather than tagging by hand:
+its own.
+
+The whole release in one command, runnable from any directory:
+
+```bash
+~/Documents/Boord/scripts/ship.sh v2.14
+```
+
+It pushes `main`, offers the `frontend/shared/api.js` version bump if it is
+still on the old number, runs the signing helper below, and asks once more
+before pushing the tag - that last pause is where you check the fingerprint.
+
+To do the signing step on its own, or to see exactly what it refuses and
+why, use the helper directly rather than tagging by hand:
 ```bash
 scripts/release.sh v2.1
 ```
