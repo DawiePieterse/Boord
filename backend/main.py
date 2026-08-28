@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backup import start_backup_scheduler
-from db import PHOTOS_DIR, create_db_and_tables, seed_defaults
+from db import PHOTOS_DIR, seed_defaults
+from migrate import run_migrations
 from routers import (analysis, auth, backups, dashboard, devices, harvest_records, historical, master_data, lots,
                       owner_view, payments, processing, receiving, reports, risk, setup, suppliers, sync, weather)
 
@@ -41,7 +42,9 @@ app.include_router(setup.router)
 
 @app.on_event("startup")
 def on_startup():
-    create_db_and_tables()
+    # Migrations first, always. seed_defaults() writes rows through the
+    # models, so it has to be looking at the schema those models describe.
+    run_migrations()
     seed_defaults()
     start_backup_scheduler()
 

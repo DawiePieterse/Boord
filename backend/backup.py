@@ -240,6 +240,52 @@ def create_backup(skip_if_unchanged: bool = False) -> Optional[str]:
     return filename
 
 
+# Copies taken immediately before a schema migration, by migrate.py. Kept
+# separate from the nightly archives in every way that matters:
+#
+# - Uncompressed .db, not a zip. A rollback wants a file you can copy back
+#   over boord.db with the server stopped, at the moment something has gone
+#   wrong and nobody is in the mood to work out an archive layout.
+# - WeatherHistory intact. The nightly archive empties it deliberately, and
+#   refilling it means re-running two import scripts against Open-Meteo -
+#   fine for a restore, wrong for a rollback that is supposed to put the
+#   database back exactly as it was thirty seconds ago.
+# - Its own retention. _backup_filenames() only ever matches backup_*.zip,
+#   so the nightly pruner cannot reach these, and they cannot crowd the
+#   fourteen rolling backups out either.
+PRE_MIGRATION_PREFIX = "pre_migration_"
+PRE_MIGRATION_KEEP = 3
+
+
+def _pre_migration_filenames() -> list[str]:
+    return sorted(
+        f for f in os.listdir(BACKUPS_DIR)
+        if f.startswith(PRE_MIGRATION_PREFIX) and f.endswith(".db")
+    )
+
+
+def snapshot_before_migration(label: str) -> str:
+    """Full consistent copy of the database, returned as its path.
+
+    Raises rather than returning None on any failure - a caller that cannot
+    get this copy must not migrate, so a quiet failure here would defeat the
+    entire point of taking it.
+    """
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)[:40]
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(BACKUPS_DIR, f"{PRE_MIGRATION_PREFIX}{timestamp}_{safe}.db")
+
+    _snapshot_db(path)
+
+    # Only prune once the new copy is safely on disk. Pruning first would, on
+    # a full disk, delete the oldest rollback point and then fail to write
+    # the new one - leaving the farm with fewer copies than it started with
+    # at the exact moment it was about to need one.
+    for stale in _pre_migration_filenames()[:-PRE_MIGRATION_KEEP]:
+        os.remove(os.path.join(BACKUPS_DIR, stale))
+    return path
+
+
 def list_backups() -> list[dict]:
     result = []
     for name in reversed(_backup_filenames()):

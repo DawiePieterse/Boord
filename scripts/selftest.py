@@ -19,7 +19,10 @@ Exits non-zero if anything fails.
 """
 import io
 import os
+import shutil
+import sqlite3
 import sys
+import tempfile
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
@@ -29,12 +32,18 @@ import openpyxl
 BACKEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend")
 sys.path.insert(0, BACKEND_DIR)
 
-from sqlalchemy import inspect  # noqa: E402
-from sqlmodel import Session, func, select  # noqa: E402
+from alembic.autogenerate import compare_metadata  # noqa: E402
+from alembic.migration import MigrationContext  # noqa: E402
+from alembic.script import ScriptDirectory  # noqa: E402
+from sqlalchemy import create_engine, inspect  # noqa: E402
+from sqlmodel import Session, SQLModel, func, select  # noqa: E402
 
-from db import engine  # noqa: E402
-from models import (Block, HarvestRecord, HistoricalAnnualYield,  # noqa: E402
-                    HistoricalHarvest, SetupState, SystemSetting, WeatherHistory)
+import backup  # noqa: E402
+from db import DB_PATH, engine, legacy_schema_catch_up  # noqa: E402
+from migrate import (BASELINE_REVISION, _config, current_revision,  # noqa: E402
+                     head_revision, run_migrations)
+from models import (AdminUser, Block, HarvestRecord, HistoricalAnnualYield,  # noqa: E402
+                    HistoricalHarvest, SetupState, SystemSetting, Worker, WeatherHistory)
 from routers.analysis import build_analysis_summary  # noqa: E402
 from routers.setup import build_setup_state  # noqa: E402
 from routers.reports import historical_harvest_data_report  # noqa: E402
@@ -621,6 +630,215 @@ def test_selftest_writes_nothing():
 
 
 # ---------------------------------------------------------------------------
+# Schema migrations
+#
+# Two kinds of check here. The ones that build a database do it in a
+# temporary directory and throw it away - this suite is read-only against
+# the server's own database and stays that way. The last two look at the
+# live database, and only read.
+#
+# Worth having because the migration path is the one piece of this app that
+# runs against a farm's only copy of its data, at the exact moment a release
+# changes what that data looks like, on a machine nobody is watching.
+# ---------------------------------------------------------------------------
+def _table_shape(path):
+    """The structure of every table in a SQLite file.
+
+    Compared as structure rather than as CREATE TABLE text on purpose:
+    Alembic emits foreign keys alphabetically and SQLModel.create_all emits
+    them in the order the model declares them, so two identical schemas
+    have different SQL. Column order is left out for the same reason.
+    """
+    insp = inspect(create_engine(f"sqlite:///{path}"))
+    shape = {}
+    for table in sorted(insp.get_table_names()):
+        if table == "alembic_version":
+            continue
+        shape[table] = {
+            "columns": {c["name"]: (str(c["type"]), c["nullable"]) for c in insp.get_columns(table)},
+            "pk": tuple(sorted(insp.get_pk_constraint(table)["constrained_columns"])),
+            "fks": sorted((tuple(f["constrained_columns"]), f["referred_table"],
+                           tuple(f["referred_columns"])) for f in insp.get_foreign_keys(table)),
+            "unique": sorted((u["name"], tuple(u["column_names"]))
+                             for u in insp.get_unique_constraints(table)),
+            "indexes": sorted((i["name"], tuple(i["column_names"]), bool(i["unique"]))
+                              for i in insp.get_indexes(table)),
+        }
+    return shape
+
+
+def _drift(target_engine):
+    with target_engine.connect() as conn:
+        return compare_metadata(MigrationContext.configure(conn), SQLModel.metadata)
+
+
+def test_migrations_build_what_the_models_describe():
+    """A new install gets its schema from the migrations, not from
+    create_all - so the migrations have to produce exactly what create_all
+    would have. If they ever stop agreeing, a fresh farm quietly gets a
+    different database from an upgraded one, and the difference shows up as
+    a "no such column" months later on whichever of the two nobody tested."""
+    tmp = tempfile.mkdtemp()
+    try:
+        by_migration = os.path.join(tmp, "migrated.db")
+        by_models = os.path.join(tmp, "created.db")
+        run_migrations(create_engine(f"sqlite:///{by_migration}"), snapshot=False)
+        SQLModel.metadata.create_all(create_engine(f"sqlite:///{by_models}"))
+
+        migrated, created = _table_shape(by_migration), _table_shape(by_models)
+        assert set(migrated) == set(created), (
+            f"tables only one way builds: {set(migrated) ^ set(created)}")
+        for table in migrated:
+            assert migrated[table] == created[table], (
+                f"{table} differs\n  migrations: {migrated[table]}\n"
+                f"  models:     {created[table]}")
+        assert not _drift(create_engine(f"sqlite:///{by_migration}")), (
+            "a database built from the migrations does not match models.py - "
+            "a migration is missing")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_a_database_from_before_migrations_is_caught_up_and_stamped():
+    """The upgrade path every existing farm takes exactly once.
+
+    Built here the way those databases were built, then damaged the way a
+    farm several releases behind is damaged - a table and a column it never
+    received - and it has to come out at the baseline with its rows
+    untouched. A farm that skipped four releases is the case this has to
+    survive, not a farm that updates weekly.
+    """
+    tmp = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmp, "old.db")
+        old_engine = create_engine(f"sqlite:///{path}")
+        legacy_schema_catch_up(old_engine)
+        with Session(old_engine) as s:
+            s.add(Block(id="15", name="Blok 15", variety="Mauritius", trees=100, hectares=1.5))
+            s.add(Worker(id="001", first_name="Thandi", last_name="N", name="Thandi N"))
+            s.commit()
+
+        con = sqlite3.connect(path)
+        con.execute("DROP TABLE setupstate")
+        con.execute("ALTER TABLE adminuser DROP COLUMN must_change_password")
+        con.commit()
+        con.close()
+
+        assert current_revision(old_engine) is None, "a pre-Alembic database claimed a revision"
+        run_migrations(old_engine, snapshot=False)
+
+        assert current_revision(old_engine) == BASELINE_REVISION, (
+            "an existing farm database was not stamped at the baseline - it would be "
+            "replayed through the baseline migration and fail on the first CREATE TABLE")
+        insp = inspect(old_engine)
+        assert insp.has_table("setupstate"), "a table the farm never received was not restored"
+        assert "must_change_password" in {c["name"] for c in insp.get_columns("adminuser")}, \
+            "a column the farm never received was not restored"
+        with Session(old_engine) as s:
+            assert s.exec(select(func.count()).select_from(Block)).one() == 1
+            assert s.exec(select(func.count()).select_from(Worker)).one() == 1
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_migrating_an_up_to_date_database_changes_nothing():
+    """Startup runs migrations every time. All but the first must be a no-op."""
+    tmp = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmp, "current.db")
+        run_migrations(create_engine(f"sqlite:///{path}"), snapshot=False)
+        before = _table_shape(path)
+        run_migrations(create_engine(f"sqlite:///{path}"), snapshot=False)
+        run_migrations(create_engine(f"sqlite:///{path}"), snapshot=False)
+        assert _table_shape(path) == before, "re-running migrations altered the schema"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_baseline_is_still_the_root_revision():
+    """BASELINE_REVISION is what pre-Alembic farms get stamped at. Pointed at
+    anything other than the root, it would stamp an old farm as though
+    migrations it never received had already run - and those migrations
+    would then never run, silently."""
+    script = ScriptDirectory.from_config(_config(engine))
+    baseline = script.get_revision(BASELINE_REVISION)
+    assert baseline is not None, f"{BASELINE_REVISION} is not in migrations/versions"
+    assert baseline.down_revision is None, (
+        f"the baseline {BASELINE_REVISION} is no longer the root revision "
+        f"(it now follows {baseline.down_revision})")
+    assert len(script.get_heads()) == 1, (
+        f"the migration history has branched: {script.get_heads()} - farms would apply "
+        f"whichever head Alembic happened to pick")
+
+
+def test_pre_migration_snapshot_is_a_faithful_full_copy():
+    """The copy taken before a migration is a rollback point, so it keeps the
+    weather history the nightly archive deliberately throws away - a restore
+    can re-download 42 MB of weather from Open-Meteo, a rollback at the wrong
+    moment on an update night cannot."""
+    tmp = tempfile.mkdtemp()
+    real_db, real_backups = backup.DB_PATH, backup.BACKUPS_DIR
+    try:
+        path = os.path.join(tmp, "farm.db")
+        backup.DB_PATH = path
+        backup.BACKUPS_DIR = os.path.join(tmp, "backups")
+        os.makedirs(backup.BACKUPS_DIR)
+
+        temp_engine = create_engine(f"sqlite:///{path}")
+        legacy_schema_catch_up(temp_engine)
+        with Session(temp_engine) as s:
+            s.add(Block(id="15", name="Blok 15", variety="Mauritius", trees=100, hectares=1.5))
+            for hour in range(48):
+                s.add(WeatherHistory(timestamp=datetime(2025, 1, 1 + hour // 24, hour % 24),
+                                      temp_c=20.0 + hour))
+            s.commit()
+
+        copy = backup.snapshot_before_migration("selftest")
+        con = sqlite3.connect(copy)
+        try:
+            assert con.execute("SELECT count(*) FROM weatherhistory").fetchone()[0] == 48, \
+                "the pre-migration copy dropped the weather history"
+            assert con.execute("SELECT count(*) FROM block").fetchone()[0] == 1
+        finally:
+            con.close()
+
+        for i in range(5):
+            backup.snapshot_before_migration(f"selftest{i}")
+        kept = backup._pre_migration_filenames()
+        assert len(kept) == backup.PRE_MIGRATION_KEEP, f"retention kept {len(kept)}: {kept}"
+        assert backup._backup_filenames() == [], (
+            "the nightly pruner can see the pre-migration copies - it would delete "
+            "rollback points to make room for backups")
+    finally:
+        backup.DB_PATH, backup.BACKUPS_DIR = real_db, real_backups
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_this_server_is_at_the_newest_revision():
+    if not os.path.exists(DB_PATH):
+        raise Skip("no database yet - start the server once")
+    if not inspect(engine).has_table("alembic_version"):
+        raise Skip("this database has not been migrated yet - start the server against "
+                    "it once, which stamps it at the baseline, then re-run")
+    current, head = current_revision(), head_revision()
+    assert current == head, (
+        f"this database is at {current} but the code here is at {head} - the server "
+        f"has not been restarted since the update, so it is running new code against "
+        f"an old schema")
+
+
+def test_this_server_matches_the_models():
+    """Read-only drift check on the live database. The same comparison
+    migrate.py prints at startup, asserted here so it cannot scroll past
+    unnoticed in a Scheduled Task's console."""
+    if not inspect(engine).has_table("alembic_version"):
+        raise Skip("this database has not been migrated yet")
+    diff = _drift(engine)
+    assert not diff, "the live schema does not match models.py: " + "; ".join(
+        str(entry) for entry in diff)
+
+
+# ---------------------------------------------------------------------------
 # First-run setup wizard state
 #
 # The one thing worth asserting against a live database: that this farm is
@@ -632,7 +850,7 @@ def test_selftest_writes_nothing():
 # ---------------------------------------------------------------------------
 def _require_setup_table():
     """SetupState is created at server startup (main.on_startup ->
-    create_db_and_tables). A database no server has opened since this
+    run_migrations). A database no server has opened since this
     release simply does not have it yet - that is not a failure, and on a
     live farm server, which by definition has started, it never happens."""
     if not inspect(engine).has_table("setupstate"):
@@ -878,6 +1096,16 @@ def main():
                test_report_year_on_year_only_for_consecutive_seasons,
                test_report_filename_spans_whole_workbook,
                test_report_per_season_sheets_match_daily_table):
+        check(fn.__name__, fn)
+
+    section("Schema migrations")
+    for fn in (test_migrations_build_what_the_models_describe,
+               test_a_database_from_before_migrations_is_caught_up_and_stamped,
+               test_migrating_an_up_to_date_database_changes_nothing,
+               test_baseline_is_still_the_root_revision,
+               test_pre_migration_snapshot_is_a_faithful_full_copy,
+               test_this_server_is_at_the_newest_revision,
+               test_this_server_matches_the_models):
         check(fn.__name__, fn)
 
     section("Setup state")

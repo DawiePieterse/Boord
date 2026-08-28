@@ -1,6 +1,10 @@
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 sqlmodel==0.0.22
+# Schema migrations - see backend/migrate.py. Pinned like everything else
+# here, and 1.14.1 runs on Python 3.9, which is the minimum install.ps1
+# accepts on a farm that already had a Python.
+alembic==1.14.1
 python-multipart==0.0.20
 openpyxl==3.1.5
 pandas==2.2.3

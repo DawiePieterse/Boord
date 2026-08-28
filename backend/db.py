@@ -90,15 +90,26 @@ def _column_ddl(column, dialect) -> str:
     return f"{ddl} NOT NULL DEFAULT {literal}"
 
 
-def _add_missing_columns() -> None:
-    """Bring an existing database up to the current models.
+def legacy_schema_catch_up(target_engine=None) -> None:
+    """The pre-Alembic schema maintenance, kept for exactly one purpose.
 
-    create_all() only ever creates whole tables, so a server upgraded in place
-    would keep its old columns and every query touching a new field would fail
-    with "no such column". This adds them. Strictly additive - it never drops
-    or alters an existing column, so downgrading is just running the old code.
+    This was how every Boord database was built and upgraded before
+    migrations existed: create_all() for whole tables, then a strictly
+    additive ADD COLUMN pass for fields added to existing ones. It could not
+    rename, retype, drop or backfill anything, which is why it was replaced.
+
+    It survives because it is the only thing that can bring a database from
+    *any* pre-Alembic release up to the baseline revision, whichever release
+    that farm last ran. migrate._adopt_existing_database() calls it once,
+    then stamps the database and never calls it again. Nothing else should
+    call it: a schema change made this way is invisible to Alembic, and the
+    next migration to touch that table will be reasoning about a schema that
+    is not what it thinks.
     """
-    inspector = inspect(engine)
+    target_engine = target_engine or engine
+    SQLModel.metadata.create_all(target_engine)
+
+    inspector = inspect(target_engine)
     live_tables = set(inspector.get_table_names())
     for table in SQLModel.metadata.sorted_tables:
         if table.name not in live_tables:
@@ -106,15 +117,11 @@ def _add_missing_columns() -> None:
         present = {c["name"] for c in inspector.get_columns(table.name)}
         missing = [c for c in table.columns if c.name not in present]
         for column in missing:
-            with engine.begin() as conn:
+            with target_engine.begin() as conn:
                 conn.execute(text(
-                    f'ALTER TABLE "{table.name}" ADD COLUMN {_column_ddl(column, engine.dialect)}'))
+                    f'ALTER TABLE "{table.name}" ADD COLUMN '
+                    f'{_column_ddl(column, target_engine.dialect)}'))
             print(f"[migration] {table.name}: added column {column.name}")
-
-
-def create_db_and_tables() -> None:
-    SQLModel.metadata.create_all(engine)
-    _add_missing_columns()
 
 
 def get_session():

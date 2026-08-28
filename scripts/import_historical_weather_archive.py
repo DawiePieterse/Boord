@@ -47,7 +47,8 @@ sys.path.insert(0, BACKEND_DIR)
 
 from sqlmodel import Session, delete, select  # noqa: E402
 
-from db import create_db_and_tables, engine  # noqa: E402
+from db import engine  # noqa: E402
+from migrate import run_migrations  # noqa: E402
 from models import WeatherHistory  # noqa: E402
 from weather import HISTORY_START_DATE, farm_coords, fetch_archive_hourly, parse_hourly_rows  # noqa: E402
 
@@ -85,7 +86,7 @@ def load_rows(lat, lon):
 
 
 def main():
-    create_db_and_tables()
+    run_migrations()
     force = "--force" in sys.argv
     with Session(engine) as session:
         if not force and already_imported(session):

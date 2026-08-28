@@ -316,11 +316,25 @@ checkout - that is the whole point of the exercise. The checkout leaves
 git in "detached HEAD" state, which is normal and correct here: the server
 tracks releases, not a branch.
 
-This only touches the app's code - the database, worker photos, and
-backups all live in the gitignored `data/` folder and are never affected
-by an update. If `backend/requirements.txt` changed, re-run the installer
-(`install.bat`) or `pip install -r requirements.txt` to pick up any new
-dependencies. Optionally refresh historical data too (`update_server.bat`
+Doing it by hand, remember the database step as well, with the server
+stopped:
+```bat
+backend\.venv\Scripts\python.exe backend\migrate.py
+```
+
+The checkout itself only touches the app's code - the database, worker
+photos and backups all live in the gitignored `data/` folder, and no
+checkout ever writes there. If `backend/requirements.txt` changed, re-run
+the installer (`install.bat`) or `pip install -r requirements.txt` to pick
+up any new dependencies. Since Boord started using proper schema
+migrations, that is not optional any more: a release that changes the
+database cannot run without them, so `update_server.bat` now stops rather
+than starting a server it knows will fail.
+
+Then bring the database itself up to date - see
+[Database changes on update](#database-changes-on-update) below.
+
+Optionally refresh historical data too (`update_server.bat`
 does all three of these automatically - see below for why it matters):
 ```bat
 backend\.venv\Scripts\python.exe scripts\import_historical_weather.py
@@ -341,6 +355,44 @@ Then restart the server (see
 [Stopping, starting, and restarting the server](#stopping-starting-and-restarting-the-server-task-scheduler)
 below).
 
+### Database changes on update
+
+Some releases change the shape of the database - a new column, a renamed
+one, a table that did not exist before. The server applies those changes
+itself the first time it starts on the new release, so an ordinary update
+needs nothing from you.
+
+`update_server.bat` does it a moment earlier, on purpose: with the server
+stopped, in its own window, while you are still standing there. A database
+change is the one part of an update that touches the farm's own records
+rather than just the code, and it should happen where somebody can see it
+go wrong - not inside a Scheduled Task at seven in the morning.
+
+**Nothing is changed until a copy has been made.** Immediately before any
+database change, Boord writes a complete copy of the database to
+`data\backups\pre_migration_<date>_<time>_<what>.db` and keeps the three
+most recent. If that copy cannot be written - a full disk, almost always -
+the update stops and the database is left exactly as it was, which means
+the release you were already running still works.
+
+These copies are deliberately different from the nightly backups next to
+them: they are plain `.db` files rather than zips, so putting one back is a
+single file copy, and unlike the nightly archives they keep the full
+weather history, so a rollback puts the database back exactly as it was
+rather than needing the weather re-imported afterwards. They are roughly
+the size of the database itself - around 40 MB on an established farm.
+
+To go back to one, stop the server, copy the file over
+`data\boord.db`, then check out the release you were on before and start
+the server again. The pre-migration copies are never deleted by the
+nightly 14-backup pruner; only a fourth database change removes the oldest
+of them.
+
+If a release changes the database and something goes wrong, the update
+stops with **THE DATABASE COULD NOT BE MIGRATED** and tells you the two
+commands to get back to the previous release. Send the message on rather
+than trying the update again.
+
 **Checking an install is sound.** After a fresh install, a database
 restore, or any update that worries you, run the self-test:
 ```bat
@@ -349,7 +401,9 @@ backend\.venv\Scripts\python.exe scripts\selftest.py
 It checks the parts of the app that do real arithmetic - the Risk
 indicator's scoring, the Harvest Forecast's projections, and whether every
 sheet of the Historical Harvest Data report reconciles against the
-database - and prints a line per check, ending in PASSED or FAILED. It
+database - along with the database's own schema: that this server is on
+the newest schema version, and that it matches what this release expects.
+It prints a line per check, ending in PASSED or FAILED. It
 reads only; it never writes to the database and needs no internet, so it
 is safe to run on the live server at any time, including while people are
 using the app. If anything reports FAILED, the message names what
@@ -1874,6 +1928,9 @@ there before you overwrote it.
 1. Get the backup zip you want to restore - either downloaded from
    Settings → Data Backup, or directly from `data\backups\` on the server
    (filenames are timestamped, e.g. `backup_20260804_020000.zip`).
+   The `pre_migration_*.db` files in that same folder are **not** these
+   backups and are not restored this way - see
+   [Database changes on update](#database-changes-on-update).
 2. Stop the server (see
    [Stopping, starting, and restarting the server](#stopping-starting-and-restarting-the-server-task-scheduler)).
 3. Unzip the backup - it contains `boord.db` and a `photos\`

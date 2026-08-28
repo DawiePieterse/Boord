@@ -27,13 +27,14 @@ sys.path.insert(0, BACKEND_DIR)
 
 from sqlmodel import Session, delete  # noqa: E402
 
-from db import create_db_and_tables, engine  # noqa: E402
+from db import engine  # noqa: E402
+from migrate import run_migrations  # noqa: E402
 from models import WeatherHistory  # noqa: E402
 from weather import HISTORY_START_DATE, farm_coords, fetch_historical_hourly, parse_hourly_rows  # noqa: E402
 
 
 def main():
-    create_db_and_tables()
+    run_migrations()
     with Session(engine) as session:
         coords = farm_coords(session)
     if coords is None:

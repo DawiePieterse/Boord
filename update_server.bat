@@ -191,9 +191,29 @@ echo ==^> Installing any new dependencies...
 call "%~dp0backend\.venv\Scripts\activate.bat"
 pip install --quiet --disable-pip-version-check -r "%~dp0backend\requirements.txt"
 if %errorLevel% neq 0 (
-    echo Warning: dependency install had a problem - continuing anyway, since
-    echo most updates don't change requirements.txt. Check the error above if
-    echo the server fails to start next.
+    echo Warning: dependency install reported a problem - see the error above.
+    echo Checking whether the server can still start before going any further...
+)
+
+:: This used to just warn and carry on, on the reasoning that most updates
+:: don't change requirements.txt. That stopped being safe the moment schema
+:: migrations became a dependency: a release that adds one cannot run at all
+:: without it, so a half-finished pip install would take the farm from "an
+:: update didn't apply" to "the server no longer starts", discovered by
+:: whoever opens the Field app next morning. Ask the venv directly.
+"%~dp0backend\.venv\Scripts\python.exe" -c "import fastapi, sqlmodel, alembic" >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo The server's dependencies are not fully installed, so this update
+    echo cannot be applied. Nothing has been migrated and the server has NOT
+    echo been restarted - it is still running whatever it was before.
+    echo.
+    echo This is nearly always no internet, or pip being blocked. Try again
+    echo once the machine is online:
+    echo     update_server.bat
+    echo.
+    pause
+    exit /b 1
 )
 
 echo.
@@ -202,6 +222,36 @@ schtasks /query /tn "Boord Server" >nul 2>&1
 if %errorLevel% equ 0 (
     schtasks /end /tn "Boord Server" >nul 2>&1
     timeout /t 2 /nobreak >nul
+
+    echo.
+    echo ==^> Bringing the database up to date...
+    echo     The server would do this by itself on startup. It is run here,
+    echo     with the server stopped, so that a schema change happens in
+    echo     front of the person who chose to update rather than inside a
+    echo     Scheduled Task nobody is watching. A copy of the database is
+    echo     taken first, into data\backups\, and nothing is altered unless
+    echo     that copy was written.
+    "%~dp0backend\.venv\Scripts\python.exe" "%~dp0backend\migrate.py"
+    if errorlevel 1 (
+        echo.
+        echo *** THE DATABASE COULD NOT BE MIGRATED ***
+        echo.
+        echo The server has been left stopped on purpose - starting it now
+        echo would only fail the same way, against a database this release
+        echo does not understand.
+        echo.
+        echo Read the error above. If you need the farm working again before
+        echo it can be sorted out, go back to the release that was running
+        echo and restart:
+        echo     git checkout --force !CURTAG!
+        echo     schtasks /run /tn "Boord Server"
+        echo.
+        echo The database itself was copied before anything touched it - look
+        echo for the newest pre_migration_*.db in data\backups\.
+        echo.
+        pause
+        exit /b 1
+    )
 
     echo.
     echo ==^> Refreshing historical weather ^(2020-present^)...

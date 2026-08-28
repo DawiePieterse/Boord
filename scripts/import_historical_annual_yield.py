@@ -50,7 +50,8 @@ sys.path.insert(0, BACKEND_DIR)
 
 from sqlmodel import Session, delete  # noqa: E402
 
-from db import create_db_and_tables, engine  # noqa: E402
+from db import engine  # noqa: E402
+from migrate import run_migrations  # noqa: E402
 from models import HistoricalAnnualYield  # noqa: E402
 
 # The source workbook lives in data/imports/, which is gitignored, NOT in the
@@ -144,7 +145,7 @@ def main():
               "data/imports/, or pass its path as the first argument, then re-run.\n"
               "Nothing was changed.")
         return
-    create_db_and_tables()
+    run_migrations()
     records = load_rows()
     with Session(engine) as session:
         session.exec(delete(HistoricalAnnualYield))
