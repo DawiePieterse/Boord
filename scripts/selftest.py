@@ -39,8 +39,12 @@ from alembic.script import ScriptDirectory  # noqa: E402
 from sqlalchemy import create_engine, inspect  # noqa: E402
 from sqlmodel import Session, SQLModel, func, select  # noqa: E402
 
+import asyncio  # noqa: E402
+from fastapi import HTTPException, UploadFile  # noqa: E402
+
 import backup  # noqa: E402
 from db import DB_PATH, engine, legacy_schema_catch_up  # noqa: E402
+from routers.master_data import import_blocks  # noqa: E402
 from migrate import (BASELINE_REVISION, _baseline_database, _config,  # noqa: E402
                      current_revision, head_revision, run_migrations)
 from models import (AdminUser, Block, HarvestRecord, HistoricalAnnualYield,  # noqa: E402
@@ -875,6 +879,43 @@ def test_this_server_matches_the_models():
 
 
 # ---------------------------------------------------------------------------
+# Master data imports
+# ---------------------------------------------------------------------------
+def test_replacing_all_blocks_with_an_empty_file_is_refused():
+    """"Replace all" reads the uploaded file as the farm's new complete block
+    list, so an empty one used to mean "the new list is empty" and retired
+    every block the farm had - reporting {"imported": 0, "deactivated": 21},
+    which reads as success. The template the wizard hands out is itself a
+    headings-only file, so the mistake is one download and one upload away."""
+    tmp = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmp, "blocks.db")
+        temp_engine = create_engine(f"sqlite:///{path}")
+        run_migrations(temp_engine, snapshot=False)
+        with Session(temp_engine) as s:
+            s.add(Block(id="15", name="Blok 15", variety="Mauritius", trees=100, hectares=1.5))
+            s.add(Block(id="16", name="Blok 16", variety="Mauritius", trees=80, hectares=1.2))
+            s.commit()
+
+        headings_only = UploadFile(filename="blocks.csv",
+                                    file=io.BytesIO(b"id,name,variety,trees,hectares,active\n"))
+        with Session(temp_engine) as s:
+            try:
+                asyncio.run(import_blocks(file=headings_only, replace=True, session=s, admin=None))
+            except HTTPException as e:
+                assert e.status_code == 400, e.status_code
+                assert "no data rows" in e.detail
+            else:
+                raise AssertionError("an empty file was accepted as the farm's new block list")
+
+        with Session(temp_engine) as s:
+            active = s.exec(select(func.count()).select_from(Block).where(Block.active == True)).one()  # noqa: E712
+        assert active == 2, f"{2 - active} block(s) were retired by a file with nothing in it"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
 # First-run setup wizard state
 #
 # The one thing worth asserting against a live database: that this farm is
@@ -1144,6 +1185,10 @@ def main():
                test_this_server_is_at_the_newest_revision,
                test_this_server_matches_the_models):
         check(fn.__name__, fn)
+
+    section("Master data imports")
+    check(test_replacing_all_blocks_with_an_empty_file_is_refused.__name__,
+          test_replacing_all_blocks_with_an_empty_file_is_refused)
 
     section("Setup state")
     for fn in (test_setup_not_required_on_a_configured_farm,

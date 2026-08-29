@@ -95,6 +95,21 @@ async def import_blocks(file: UploadFile, replace: bool = Query(False),
                          session: Session = Depends(get_session),
                          admin=Depends(get_current_admin)):
     records = await parse_uploaded_table(file)
+    # Refuse a file with nothing in it, before anything is written.
+    # "Replace all" reads this file as the farm's new complete block list, so
+    # an empty one means "the new list is empty" and retires every block the
+    # farm has - which is what happens if somebody downloads the blank
+    # templates/blocks.csv, means to fill it in, and uploads it as it is.
+    # Confirmed by hand before this guard: {"imported": 0, "deactivated": 21}.
+    # Recoverable, since blocks are deactivated rather than deleted, but only
+    # by someone who works out what happened - the response reads as success.
+    # Same guard, and the same reasoning, as routers/historical.py's
+    # _check_usable(), which is there because the identical mistake used to
+    # wipe a farm's whole harvest history.
+    if not records:
+        raise HTTPException(400, "That file has no data rows - only column headings. "
+                                  "Fill it in first. Nothing was changed.")
+
     count = 0
     imported_ids = set()
     for r in records:
@@ -113,6 +128,11 @@ async def import_blocks(file: UploadFile, replace: bool = Query(False),
             active=active,
         ))
         count += 1
+
+    if not imported_ids:
+        raise HTTPException(400, "No usable rows in that file - every row is missing an id. "
+                                  "Check the column headings against templates/README.md. "
+                                  "Nothing was changed.")
 
     deactivated = 0
     if replace:
