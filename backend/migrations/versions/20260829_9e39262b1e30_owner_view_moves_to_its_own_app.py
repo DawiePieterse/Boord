@@ -16,8 +16,11 @@ now also replays it to build the throwaway database a pre-Alembic farm is
 caught up against. Both need the baseline to describe what farms actually
 had; this migration is what removes it afterwards.
 
-The code that was here is not gone - see owner-app/, which carries the
-router, the screen and the model definition verbatim.
+The code that was here is not gone. It moved to the Boord Owner app, which
+is now its own project outside this repository, and carries the router, the
+screen and the model definition verbatim. Until this commit it sat in an
+owner-app/ folder here; recover it from that history if the project is ever
+mislaid.
 
 Revision ID: 9e39262b1e30
 Revises: 203607e346ac

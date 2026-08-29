@@ -13,8 +13,9 @@ are added.
 This file used to be about three times this length. Most of it tested the
 Risk indicator's arithmetic, the Harvest Forecast's projections, the stored
 weather history and the Historical Harvest Data report - all of which left
-for the Owner app. Those tests went with them, unchanged, and belong to
-whatever rebuilds that code; see owner-app/.
+for the Boord Owner app, now its own project outside this repository. Those
+tests were deleted rather than moved, and are worth recovering from this
+repo's history rather than rewriting.
 
 Plain asserts, no pytest - this project deliberately carries no test
 dependency.
