@@ -32,6 +32,7 @@ import openpyxl
 BACKEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend")
 sys.path.insert(0, BACKEND_DIR)
 
+from alembic import command  # noqa: E402
 from alembic.autogenerate import compare_metadata  # noqa: E402
 from alembic.migration import MigrationContext  # noqa: E402
 from alembic.script import ScriptDirectory  # noqa: E402
@@ -40,8 +41,8 @@ from sqlmodel import Session, SQLModel, func, select  # noqa: E402
 
 import backup  # noqa: E402
 from db import DB_PATH, engine, legacy_schema_catch_up  # noqa: E402
-from migrate import (BASELINE_REVISION, _config, current_revision,  # noqa: E402
-                     head_revision, run_migrations)
+from migrate import (BASELINE_REVISION, _baseline_database, _config,  # noqa: E402
+                     current_revision, head_revision, run_migrations)
 from models import (AdminUser, Block, HarvestRecord, HistoricalAnnualYield,  # noqa: E402
                     HistoricalHarvest, SetupState, SystemSetting, Worker, WeatherHistory)
 from routers.analysis import build_analysis_summary  # noqa: E402
@@ -702,17 +703,19 @@ def test_migrations_build_what_the_models_describe():
 def test_a_database_from_before_migrations_is_caught_up_and_stamped():
     """The upgrade path every existing farm takes exactly once.
 
-    Built here the way those databases were built, then damaged the way a
-    farm several releases behind is damaged - a table and a column it never
-    received - and it has to come out at the baseline with its rows
-    untouched. A farm that skipped four releases is the case this has to
-    survive, not a farm that updates weekly.
+    Built here the way those databases were built - at the BASELINE shape,
+    which is what a database that predates Alembic actually has, not
+    today's - then damaged the way a farm several releases behind is
+    damaged, a table and a column it never received. It has to come out at
+    the newest revision, with the post-baseline migrations actually applied
+    and its rows untouched. A farm that skipped four releases is the case
+    this has to survive, not a farm that updates weekly.
     """
     tmp = tempfile.mkdtemp()
     try:
         path = os.path.join(tmp, "old.db")
         old_engine = create_engine(f"sqlite:///{path}")
-        legacy_schema_catch_up(old_engine)
+        legacy_schema_catch_up(old_engine, _baseline_database())
         with Session(old_engine) as s:
             s.add(Block(id="15", name="Blok 15", variety="Mauritius", trees=100, hectares=1.5))
             s.add(Worker(id="001", first_name="Thandi", last_name="N", name="Thandi N"))
@@ -727,16 +730,49 @@ def test_a_database_from_before_migrations_is_caught_up_and_stamped():
         assert current_revision(old_engine) is None, "a pre-Alembic database claimed a revision"
         run_migrations(old_engine, snapshot=False)
 
-        assert current_revision(old_engine) == BASELINE_REVISION, (
-            "an existing farm database was not stamped at the baseline - it would be "
-            "replayed through the baseline migration and fail on the first CREATE TABLE")
+        assert current_revision(old_engine) == head_revision(), (
+            "an existing farm database did not end up at the newest revision")
         insp = inspect(old_engine)
         assert insp.has_table("setupstate"), "a table the farm never received was not restored"
         assert "must_change_password" in {c["name"] for c in insp.get_columns("adminuser")}, \
             "a column the farm never received was not restored"
+        assert not _drift(old_engine), (
+            "an adopted database does not match models.py once it is up to date")
         with Session(old_engine) as s:
             assert s.exec(select(func.count()).select_from(Block)).one() == 1
             assert s.exec(select(func.count()).select_from(Worker)).one() == 1
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_the_catch_up_lands_exactly_on_the_baseline():
+    """The catch-up is what a pre-Alembic farm gets instead of the baseline
+    migration, and the database is stamped at the baseline immediately
+    afterwards - so it has to arrive at the same schema the baseline
+    migration would have built. Not a subset, not a superset.
+
+    A superset is the failure that actually happened: while the catch-up
+    worked off models.py it built TODAY's schema, and the first migration
+    after the baseline then tried to add a column that was already there.
+    That kills the update on exactly the farms furthest behind, and it
+    could not happen until a migration finally added a column - which is to
+    say, it would have been found on a farm rather than here.
+    """
+    tmp = tempfile.mkdtemp()
+    try:
+        baseline_path = os.path.join(tmp, "baseline.db")
+        command.upgrade(_config(create_engine(f"sqlite:///{baseline_path}")), BASELINE_REVISION)
+
+        caught_up_path = os.path.join(tmp, "caught_up.db")
+        legacy_schema_catch_up(create_engine(f"sqlite:///{caught_up_path}"), _baseline_database())
+
+        caught_up, baseline = _table_shape(caught_up_path), _table_shape(baseline_path)
+        assert set(caught_up) == set(baseline), (
+            f"tables only one of the two builds: {set(caught_up) ^ set(baseline)}")
+        for table in baseline:
+            assert caught_up[table] == baseline[table], (
+                f"{table} differs\n  catch-up: {caught_up[table]}\n"
+                f"  baseline: {baseline[table]}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -785,7 +821,7 @@ def test_pre_migration_snapshot_is_a_faithful_full_copy():
         os.makedirs(backup.BACKUPS_DIR)
 
         temp_engine = create_engine(f"sqlite:///{path}")
-        legacy_schema_catch_up(temp_engine)
+        run_migrations(temp_engine, snapshot=False)  # any populated database will do here
         with Session(temp_engine) as s:
             s.add(Block(id="15", name="Blok 15", variety="Mauritius", trees=100, hectares=1.5))
             for hour in range(48):
@@ -1101,6 +1137,7 @@ def main():
     section("Schema migrations")
     for fn in (test_migrations_build_what_the_models_describe,
                test_a_database_from_before_migrations_is_caught_up_and_stamped,
+               test_the_catch_up_lands_exactly_on_the_baseline,
                test_migrating_an_up_to_date_database_changes_nothing,
                test_baseline_is_still_the_root_revision,
                test_pre_migration_snapshot_is_a_faithful_full_copy,

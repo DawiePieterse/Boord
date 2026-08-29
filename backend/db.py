@@ -75,26 +75,78 @@ def clear_initial_password_file() -> None:
         pass  # already gone, or never written - either way there is nothing to do
 
 
-def _column_ddl(column, dialect) -> str:
-    """ADD COLUMN clause for a model column missing from a live table."""
-    ddl = f'"{column.name}" {column.type.compile(dialect)}'
-    if column.nullable:
-        return ddl
-    default = getattr(column.default, "arg", None) if column.default is not None else None
-    if default is None or callable(default):
-        # Nothing to backfill existing rows with, and SQLite won't accept a
-        # NOT NULL column without a default. Adding it nullable keeps the farm
-        # running; a fresh install still gets the strict schema from create_all.
-        return ddl
-    literal = "'{}'".format(str(default).replace("'", "''")) if isinstance(default, str) else str(default)
-    return f"{ddl} NOT NULL DEFAULT {literal}"
+def _model_default_literal(table: str, column: str):
+    """The default models.py declares for a column, written as a SQL literal,
+    or None if it does not declare a usable one.
+
+    The source database cannot supply this. A SQLModel default lives in
+    Python - `must_change_password: bool = False` reaches SQLite as a plain
+    NOT NULL column with no DEFAULT clause - so a column copied from there
+    into an existing table would have to be added nullable, and the farm
+    would sit one nullable column away from models.py with _report_drift()
+    saying so on every boot for the rest of its life.
+
+    This decides HOW to add a column, never WHETHER to: it is only ever
+    consulted for a column the source database already has.
+    """
+    model_table = SQLModel.metadata.tables.get(table)
+    if model_table is None or column not in model_table.columns:
+        return None
+    default = model_table.columns[column].default
+    arg = getattr(default, "arg", None) if default is not None else None
+    if arg is None or callable(arg):
+        return None
+    return "'{}'".format(str(arg).replace("'", "''")) if isinstance(arg, str) else str(arg)
 
 
-def legacy_schema_catch_up(target_engine=None) -> None:
+def _add_column_ddl(table: str, column: dict) -> str:
+    """ADD COLUMN clause for one column of a source table's PRAGMA table_info.
+
+    NOT NULL is dropped when there is no default to backfill existing rows
+    with - SQLite will not take the column otherwise. A fresh install still
+    gets the strict schema, because it is built by the migrations rather
+    than by this; that difference is what _report_drift() means by harmless
+    old damage.
+    """
+    ddl = f'"{column["name"]}" {column["type"]}'
+    if not column["notnull"]:
+        return ddl
+    # dflt_value comes out of SQLite already written as a SQL literal.
+    default = column["dflt_value"]
+    if default is None:
+        default = _model_default_literal(table, column["name"])
+    return ddl if default is None else f"{ddl} NOT NULL DEFAULT {default}"
+
+
+def _sqlite_schema(conn) -> tuple:
+    """({table: CREATE TABLE sql}, {table: [CREATE INDEX sql]}) for a database.
+
+    Read from sqlite_master rather than reflected into SQLAlchemy types and
+    rendered back out. The point of this function's caller is to reproduce
+    another database's schema exactly, and a round trip through reflection
+    is where "exactly" quietly turns into "near enough" - an Enum comes back
+    as a plain VARCHAR, a server default as a text clause, and the result
+    differs from what the migrations build in ways nobody notices until the
+    drift report starts complaining on one farm and not another.
+    """
+    tables, indexes = {}, {}
+    rows = conn.execute(text(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master "
+        "WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'"
+    )).all()
+    for kind, name, tbl_name, sql in rows:
+        if kind == "table" and name != "alembic_version":
+            tables[name] = sql
+        elif kind == "index":
+            indexes.setdefault(tbl_name, []).append(sql)
+    return tables, indexes
+
+
+def legacy_schema_catch_up(target_engine, source_engine) -> None:
     """The pre-Alembic schema maintenance, kept for exactly one purpose.
 
     This was how every Boord database was built and upgraded before
-    migrations existed: create_all() for whole tables, then a strictly
+    migrations existed: whole tables created outright, then a strictly
     additive ADD COLUMN pass for fields added to existing ones. It could not
     rename, retype, drop or backfill anything, which is why it was replaced.
 
@@ -105,23 +157,40 @@ def legacy_schema_catch_up(target_engine=None) -> None:
     call it: a schema change made this way is invisible to Alembic, and the
     next migration to touch that table will be reasoning about a schema that
     is not what it thinks.
-    """
-    target_engine = target_engine or engine
-    SQLModel.metadata.create_all(target_engine)
 
-    inspector = inspect(target_engine)
-    live_tables = set(inspector.get_table_names())
-    for table in SQLModel.metadata.sorted_tables:
-        if table.name not in live_tables:
-            continue  # create_all() just built it, columns and all
-        present = {c["name"] for c in inspector.get_columns(table.name)}
-        missing = [c for c in table.columns if c.name not in present]
-        for column in missing:
-            with target_engine.begin() as conn:
-                conn.execute(text(
-                    f'ALTER TABLE "{table.name}" ADD COLUMN '
-                    f'{_column_ddl(column, target_engine.dialect)}'))
-            print(f"[migration] {table.name}: added column {column.name}")
+    `source_engine` is the schema being caught up TO - a throwaway database
+    built by the baseline migration itself (migrate._baseline_database()).
+    It used to be models.py, and that was fine for exactly as long as the
+    baseline and models.py described the same schema. The first migration
+    to add a column ended that: the catch-up would build a table at today's
+    shape, the database would then be stamped at the baseline, and that
+    migration would try to add a column that was already there. The farms
+    it would have failed on are precisely the ones this function exists for
+    - the ones several releases behind, updating in front of somebody.
+    """
+    with source_engine.connect() as source, target_engine.begin() as target:
+        source_tables, source_indexes = _sqlite_schema(source)
+        live = set(inspect(target_engine).get_table_names())
+
+        for name, create_sql in source_tables.items():
+            if name in live:
+                continue
+            target.execute(text(create_sql))
+            for index_sql in source_indexes.get(name, []):
+                target.execute(text(index_sql))
+            print(f"[migration] created table {name}")
+
+        for name in source_tables:
+            if name not in live:
+                continue  # just built it, columns and indexes and all
+            present = {c["name"] for c in inspect(target_engine).get_columns(name)}
+            wanted = source.execute(text(f'PRAGMA table_info("{name}")')).mappings().all()
+            for column in wanted:
+                if column["name"] in present:
+                    continue
+                target.execute(text(
+                    f'ALTER TABLE "{name}" ADD COLUMN {_add_column_ddl(name, column)}'))
+                print(f"[migration] {name}: added column {column['name']}")
 
 
 def get_session():

@@ -38,7 +38,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect
+from sqlalchemy import create_engine, inspect
 from sqlmodel import SQLModel
 
 import models  # noqa: F401 - importing it registers every table on SQLModel.metadata
@@ -156,6 +156,24 @@ def _report_drift(target_engine) -> None:
           "not worth worrying about.", flush=True)
 
 
+def _baseline_database():
+    """A throwaway database holding nothing but the baseline schema.
+
+    Built by running the baseline migration itself, so that migration file
+    stays the single description of what "the baseline" is. A second,
+    hand-maintained copy of that schema would be wrong the first time
+    somebody forgot to update it, and wrong silently.
+
+    In-memory is safe here despite `:memory:` normally being per-connection:
+    SQLAlchemy gives a memory engine a SingletonThreadPool, so every
+    connect() on this thread reaches the same database, for as long as the
+    engine is alive.
+    """
+    tmp_engine = create_engine("sqlite://")
+    command.upgrade(_config(tmp_engine), BASELINE_REVISION)
+    return tmp_engine
+
+
 def _adopt_existing_database(cfg: Config, target_engine) -> None:
     """Bring a database that predates Alembic up to the baseline, and stamp it.
 
@@ -164,9 +182,17 @@ def _adopt_existing_database(cfg: Config, target_engine) -> None:
     releases: whichever version its database was built by, create_all adds
     the tables it never got and the additive pass adds the columns, which
     together is precisely the baseline revision's schema.
+
+    "Precisely the baseline" is the load-bearing part, and it is why the
+    catch-up is handed a database built by the baseline migration rather
+    than left to models.py. Against models.py it brings the database up to
+    TODAY's schema and the database is then stamped at the BASELINE - so
+    every migration since re-applies a change that is already there, and
+    the update dies on "duplicate column name" at the one farm that had
+    furthest to travel.
     """
     print("[migration] this database predates Alembic - catching it up to the baseline", flush=True)
-    legacy_schema_catch_up(target_engine)
+    legacy_schema_catch_up(target_engine, _baseline_database())
     command.stamp(cfg, BASELINE_REVISION)
     print(f"[migration] stamped at baseline {BASELINE_REVISION}", flush=True)
 
