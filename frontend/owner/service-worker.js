@@ -1,89 +1,38 @@
-// App-shell cache so the Owner View still renders (with its last data
-// unavailable, but correctly styled) when the phone has no connection to
-// the farm server. Data always goes over the network when available.
+// Tombstone. This used to be the Owner View's app-shell worker, and that is
+// exactly the problem it now exists to solve.
+//
+// The old worker precached the whole Owner View under "boord-owner-v18" and
+// answered navigations from that cache. Deleting the screen does not reach a
+// phone that already has it: the registration survives, the cached shell
+// keeps rendering, and it renders against /api/owner-view endpoints that no
+// longer exist - so the owner sees the app they know, filled with errors,
+// with nothing to explain it.
+//
+// A worker is only replaced by another worker at the same scope. So this one
+// takes over, throws away every cache the old one made, unregisters itself,
+// and reloads whatever pages it had claimed - which lands them on the plain
+// index.html beside this file.
+//
+// Delete this file (and index.html) once the new Owner app has shipped and
+// the owner's devices have been through here. It costs nothing to leave in
+// the meantime: it caches nothing and intercepts nothing.
 const CACHE_PREFIX = "boord-owner-";
-const CACHE = "boord-owner-v18";
-const REVALIDATE_TIMEOUT_MS = 10000;
-const SHELL = [
-  "./",
-  "./index.html",
-  "./owner.js",
-  "../shared/styles.css",
-  "../shared/api.js",
-  "../shared/charts.js",
-  "../shared/analysis-tab.js",
-  "../shared/weather-tab.js",
-  "../shared/risk-tab.js",
-  "../shared/ptr.js",
-  "../shared/tailwind.js",
-  "../shared/vendor/fontawesome/css/all.min.css",
-  "../shared/vendor/fontawesome/webfonts/fa-solid-900.woff2",
-  "../shared/vendor/html2canvas/html2canvas.min.js",
-  "../shared/vendor/jspdf/jspdf.umd.min.js",
-];
 
-self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
-  self.skipWaiting();
-});
+self.addEventListener("install", () => self.skipWaiting());
 
-// Drop only THIS screen's older caches. CacheStorage is shared per-origin,
-// so deleting every non-matching key would wipe the other screens' offline
-// shells the moment someone opens two of the apps on the same device.
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => Promise.all(
-      keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE).map((k) => caches.delete(k))
-    ))
-  );
-  self.clients.claim();
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k.startsWith(CACHE_PREFIX)).map((k) => caches.delete(k)));
+
+    // Unregister before reloading, not after: a client that reloads while
+    // this worker is still registered would just start it up again.
+    await self.registration.unregister();
+
+    const clients = await self.clients.matchAll({ type: "window" });
+    for (const client of clients) client.navigate(client.url);
+  })());
 });
 
-// Stale-while-revalidate: answer instantly from cache (so a device with no
-// signal still gets the whole UI), but refresh the cached copy in the
-// background whenever the server IS reachable. Without the revalidate half,
-// a cache-first worker pins a device to old JS until the CACHE name changes.
-self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
-  if (url.pathname.startsWith("/api/")) return; // never cache API calls
-  if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
-
-  // Page loads are cached by path only. The Owner View is opened as
-  // /owner/?key=..., and a cache lookup matches the query string too - so
-  // without this the shell would never be found and the page would fail
-  // offline. It also stops one cache entry piling up per distinct link.
-  const isPageLoad = event.request.mode === "navigate";
-  const cacheKey = isPageLoad ? url.origin + url.pathname : event.request;
-
-  // Two things the revalidation needs to behave. It is registered with
-  // waitUntil, so the browser keeps this worker alive until the new copy is
-  // actually written - otherwise the worker can be shut down the moment the
-  // cached response is handed back, the write never lands, and devices stay
-  // pinned to old code, the exact failure this strategy exists to prevent.
-  // And it carries a deadline, because on an unreachable network these
-  // background fetches never settle, and a browser allows only a handful of
-  // connections per host - uncapped they pile up and starve the app's own
-  // API requests of sockets.
-  const revalidateAbort = new AbortController();
-  const revalidateTimer = setTimeout(() => revalidateAbort.abort(), REVALIDATE_TIMEOUT_MS);
-  const update = fetch(event.request, { signal: revalidateAbort.signal })
-    .then(async (res) => {
-      if (res.ok) {
-        const cache = await caches.open(CACHE);
-        await cache.put(cacheKey, res.clone());
-      }
-      return res;
-    })
-    .catch(() => null) // offline: the cached copy below is the answer
-    .finally(() => clearTimeout(revalidateTimer));
-  event.waitUntil(update);
-
-  // Matched against THIS screen's cache, not the global caches.match(), which
-  // searches every cache on the origin and would happily answer with another
-  // screen's stale copy of a shared file (all four cache shared/api.js).
-  event.respondWith(
-    caches.open(CACHE)
-      .then((cache) => cache.match(cacheKey))
-      .then((cached) => cached || update.then((res) => res || Response.error()))
-  );
-});
+// No fetch handler at all. Every request goes straight to the network, which
+// is what a screen that is only a static page needs.

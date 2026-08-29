@@ -128,8 +128,8 @@ def list_payments(period_start: Optional[date] = None, period_end: Optional[date
                    session: Session = Depends(get_session), admin=Depends(get_current_admin)):
     """Admin-only, like every other endpoint in this router. It was the one
     that lacked the dependency, so anyone who could reach the server could
-    read every worker's amount_due without credentials - the exact payroll
-    figures the Owner View goes out of its way to withhold. No frontend code
+    read every worker's amount_due without credentials - the farm's whole
+    payroll, to anyone who found the port. No frontend code
     calls this (the admin screen uses /calculate and /export), so requiring
     a token here changes nothing for the app."""
     query = select(Payment)

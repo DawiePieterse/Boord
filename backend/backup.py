@@ -15,8 +15,8 @@ almost the entire database is weather (WeatherHistory plus its index were
   imports, it does NOT come back on its own.
 - The nightly run only writes an archive when the farm data actually
   changed since the last one. Weather deliberately doesn't count as a
-  change: sync_recent_weather() appends rows whenever anyone opens the
-  Weather, Risk or Owner View tab, so a plain "did the .db file change"
+  change: sync_recent_weather() appends rows whenever anyone loads the
+  weather or risk data, so a plain "did the .db file change"
   test would fire nearly every day and skip nothing. Pressing "Backup Now"
   is always unconditional - only the 02:00 run is gated.
 """

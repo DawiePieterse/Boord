@@ -22,12 +22,11 @@ This manual is for everyone who touches the app:
 5. [Worker ID Badges](#5-worker-id-badges)
 6. [Pack House Receiving](#6-pack-house-receiving)
 7. [Admin - Dashboard](#7-admin---dashboard)
-8. [Owner View - Analysis, Weather & Risk](#8-owner-view---analysis-weather--risk)
-9. [Admin - Master Data](#9-admin---master-data)
-10. [Admin - Payments](#10-admin---payments)
-11. [Admin - Reports](#11-admin---reports)
-12. [Admin - Settings](#12-admin---settings)
-13. [Troubleshooting / FAQ](#13-troubleshooting--faq)
+8. [Admin - Master Data](#8-admin---master-data)
+9. [Admin - Payments](#9-admin---payments)
+10. [Admin - Reports](#10-admin---reports)
+11. [Admin - Settings](#11-admin---settings)
+12. [Troubleshooting / FAQ](#12-troubleshooting--faq)
     - [Annexe A: Data Field Reference](#annexe-a-data-field-reference)
 
 ---
@@ -65,7 +64,7 @@ app use the same "traffic light" idea to make that visible at a glance:
 
 - The **pack house's incoming queue** shows the oldest (longest-waiting)
   load first, colored **green → yellow → red** as it ages past the
-  thresholds set in Settings (see [chapter 12](#12-admin---settings)).
+  thresholds set in Settings (see [chapter 11](#11-admin---settings)).
 - The **admin Dashboard's Harvesting and In Transit lists** use the exact
   same coloring, so the office can see at a glance whether fruit is moving
   through fast enough.
@@ -358,11 +357,11 @@ backend\.venv\Scripts\python.exe scripts\import_historical_annual_yield.py
 NOT one of these three - it's a true one-off against a fixed source
 workbook, so it isn't part of `update_server.bat`'s automatic refresh; see
 [Re-importing historical data on a server](#re-importing-historical-data-on-a-server)
-in the Analysis chapter if it's ever needed by hand, e.g. after
-regenerating that workbook.) Only 2020-2025 actually drives the Risk
-indicator or Harvest Forecast (both fixed to that reference range);
-1987-2019 is reference-only, for the Weather tab and the Historical
-Harvest Data report's Annual Totals sheet.
+below if it's ever needed by hand, e.g. after regenerating that
+workbook.) Only 2020-2025 actually drives the Risk indicator or Harvest
+Forecast (both fixed to that reference range); 1987-2019 is
+reference-only, for the Historical Harvest Data report's Annual Totals
+sheet.
 
 Then restart the server (see
 [Stopping, starting, and restarting the server](#stopping-starting-and-restarting-the-server-task-scheduler)
@@ -425,14 +424,13 @@ disagreed - send that text on rather than acting on the app's figures.
 **Why `update_server.bat` refreshes weather on every update.** Open-Meteo's
 recent days start out as provisional forecast-model estimates and firm up
 into finalized reanalysis figures over the following days/weeks - the
-Weather tab's own automatic sync (`weather.sync_recent_weather()`, run as a
-side effect of opening that tab) only ever *appends* new hours, so it never
-goes back and corrects an earlier provisional value once the real one is
-available. `update_server.bat` re-runs the full historical import (a
+The automatic sync (`weather.sync_recent_weather()`, run as a side effect of
+loading the weather or risk figures) only ever *appends* new hours, so it
+never goes back and corrects an earlier provisional value once the real one
+is available. `update_server.bat` re-runs the full historical import (a
 wholesale replace, same script as the one-off backfill above) between
-stopping and starting the server, so the
-[Risk tab](#8-owner-view---analysis-weather--risk)'s
-score and Harvest Forecast - both sensitive to exactly how accurate recent
+stopping and starting the server, so the Risk indicator's
+score and the Harvest Forecast - both sensitive to exactly how accurate recent
 weather is, not just whether it's present - are working from the best data
 available each time the server restarts. The 1987-2019 weather and harvest
 scripts run there too, mostly as a no-op once already populated (that data
@@ -446,6 +444,50 @@ next successful refresh.
 Either way, remember that each phone/tablet's installed app also needs a
 full close-and-reopen afterward to pick up the update - see
 [Confirming devices picked up an update](#confirming-devices-picked-up-an-update-version-numbers).
+
+### Re-importing historical data on a server
+
+> **The source workbooks are not shipped with the app.** They hold one
+> farm's own harvest records, so they live in `data\imports\` - which is
+> gitignored and per-farm - rather than in the repository. A new install
+> has no workbooks and the two harvest import scripts simply skip, which is
+> correct: a farm should never be importing another farm's history. To load
+> your own, put the workbook in `data\imports\` (or pass its path as the
+> first argument to the script) and re-run.
+
+
+The historical import is a one-off script, not something an update
+carries over - the source workbook and the script that reads it are both
+in the repo, but running the script is a separate manual step against
+*that server's own database*. This means a fresh install, or a server
+whose database was reset, needs the import run on it directly - a pull
+alone leaves the Historical Harvest Data report with nothing before the
+current season, until this is done.
+
+From Command Prompt in `C:\Boord`, after confirming the update
+(`update_server.bat` - see
+[Getting the code onto the server](#getting-the-code-onto-the-server-github-recommended-or-usbzip))
+has already brought in the latest code:
+```bat
+backend\.venv\Scripts\python.exe scripts\import_historical_harvest.py
+```
+Safe to re-run any time (e.g. after regenerating the source workbook) -
+it replaces the whole historical table each time rather than appending.
+No server restart needed; the next report picks it up.
+
+There's a second, separate import for the even-older 1987-2019 seasons
+(annual totals only, no daily breakdown - these feed only the Historical
+Harvest Data report's Annual Totals sheet).
+2012-2019 has a per-block breakdown; 1987-2009 only has a whole-farm
+total per year, since those records predate today's block register and
+use an incompatible numbering scheme. `update_server.bat` runs this
+automatically on every update (see "Pulling future updates" above), so
+it's rarely needed by hand - but for a fresh install, or to run it in
+isolation:
+```bat
+backend\.venv\Scripts\python.exe scripts\import_historical_annual_yield.py
+```
+Safe to re-run any time; replaces its table wholesale.
 
 ### Removing Boord from a PC
 
@@ -703,7 +745,7 @@ Then set Windows to run it automatically on startup:
    End task on every `python.exe`. From here on the scheduled task owns the
    server - starting `start_server.bat` by hand as well is what leaves two
    instances running on different ports (see
-   [chapter 13](#13-troubleshooting--faq)).
+   [chapter 12](#12-troubleshooting--faq)).
 2. Open **Task Scheduler** (search for it in the Start menu).
 3. Click **Create Basic Task…** and name it exactly **Boord Server**, Next.
 
@@ -784,12 +826,9 @@ Tailscale is a free, private network that lets specific outside devices
 reach the server securely over the internet, without opening any ports on
 the farm's router or exposing the app to the public internet.
 
-> **An off-site owner who only wants to check progress** doesn't need
-> Tailscale or a login at all - see
-> [Owner View](#owner-view-read-only-dashboard-link) in
-> [chapter 12](#12-admin---settings) for a link-only read-only Dashboard.
-> Come back to this section if they need the *full* Admin screen remotely
-> instead.
+> **An off-site owner who only wants to check progress** has a separate app
+> of their own - ask whoever set it up for its link. This section is for
+> someone who needs the *full* Admin screen remotely.
 
 **Step 1 - Install Tailscale on the server.**
 
@@ -948,7 +987,7 @@ pings, nothing happens. If the server goes down and stays down past the
 However it's started, leave it running continuously during harvest
 season - the app expects to be a long-lived local service, not something
 started and stopped around each use. (The automatic nightly backup,
-[chapter 12](#12-admin---settings), only fires if the server happens to
+[chapter 11](#11-admin---settings), only fires if the server happens to
 be running at 02:00 - see that chapter's note on this limitation.
 Separately, a night on which nothing changed is skipped on purpose and
 adds no backup - that's normal, not a fault.)
@@ -959,13 +998,13 @@ The very first time the server runs, it automatically creates the
 database and seeds a clean starting baseline:
 
 - Two teams: **Span A** and **Span B** (indunas left blank - fill in via
-  [Master Data](#9-admin---master-data))
+  [Master Data](#8-admin---master-data))
 - **8 devices**: `device-01` through `device-05` (field), `device-06` and
   `device-07` (pack house), and `admin-pc` (admin) - see
   [chapter 3](#3-device-setup) for how these get assigned to physical
   devices
 - One supplier row representing the farm's own fruit ("Own Farm") - rename
-  it to your farm under [Master Data](#9-admin---master-data)
+  it to your farm under [Master Data](#8-admin---master-data)
 - An admin login: **username `admin`**, with a **random password generated
   for this install** - printed by the installer, and kept in
   `data\initial_admin_password.txt` until it is replaced. There is no
@@ -976,8 +1015,8 @@ database and seeds a clean starting baseline:
   that holds nothing yet - a new empty database generates a new password.
 
 **No wage rate.** Nothing is seeded, and **Calculate** under
-[Payments](#10-admin---payments) refuses with "No wage rate has been set"
-until you enter one under [Settings](#12-admin---settings). A wrong block
+[Payments](#9-admin---payments) refuses with "No wage rate has been set"
+until you enter one under [Settings](#11-admin---settings). A wrong block
 list is obvious the moment somebody opens the Field app; a wrong wage rate
 produces a perfectly ordinary-looking payslip at the wrong number, and the
 person most likely to notice is the one being underpaid. So the app will
@@ -1013,7 +1052,7 @@ Boord shows a nine-step setup wizard instead of the usual tabs:
 7. **Name your stations** — rename the eight device slots (optional)
 8. **Seasons before Boord** — historical harvest records, season totals, and
    the weather history download (all optional)
-9. **Finish** — the address to open on your tablets, and the Owner View link
+9. **Finish** — the address to open on your tablets, and anything still outstanding
 
 Steps 1 to 3 are required, because nothing sensible can be guessed for them.
 The rest can be skipped and done later; the last screen lists anything still
@@ -1049,7 +1088,7 @@ straight into a role's screen.
 1. Pick this device's **Device ID** from the dropdown. The list comes from
    the server and shows every active device with its station - e.g.
    `device-08 - Field Station 6` - so a device added in
-   [Master Data → Devices](#9-admin---master-data) is available here
+   [Master Data → Devices](#8-admin---master-data) is available here
    straight away, with no change to the app needed.
 2. Tap **Continue**.
 3. The device looks up that ID's role and **automatically routes itself**
@@ -1160,7 +1199,7 @@ server itself has been updated, until its cache is refreshed.
 
 **After deploying an update:** check the version number on a few devices.
 If one is behind, do a normal open-close-reopen of the app icon (see
-[chapter 13](#13-troubleshooting--faq) - same fix as a stuck "Camera
+[chapter 12](#12-troubleshooting--faq) - same fix as a stuck "Camera
 unavailable" screen); a full close and reopen is what lets the app notice
 and install the new cached version in the background, then show it on the
 next open.
@@ -1176,7 +1215,7 @@ continue. This is mainly reachable by typing an ID by hand (the dropdown
 only ever offers IDs that exist), or if the device was deleted from Master
 Data after being set up. **Devices are never auto-registered** - an admin
 must create the device first, in
-[Master Data → Devices](#9-admin---master-data), before it can be used. This is intentional: it stops a stray or
+[Master Data → Devices](#8-admin---master-data), before it can be used. This is intentional: it stops a stray or
 mistyped device ID from silently attaching itself to the wrong team or
 role.
 
@@ -1187,7 +1226,7 @@ tablet), either:
 - Clear the device's browser data/cache so it forgets its saved ID and
   shows the setup screen again, or
 - Simply change that device ID's role/station in
-  [Master Data → Devices](#9-admin---master-data) - the physical device
+  [Master Data → Devices](#8-admin---master-data) - the physical device
   keeps using the same ID, but the server now treats it differently on its
   next check-in.
 
@@ -1327,7 +1366,7 @@ prints them from **Master Data → Workers**:
 - **Print Badges (all)** - every active worker
 
 Each badge shows the farm name, the worker's photo (if one's been
-captured - see [chapter 9](#9-admin---master-data)), their name, their
+captured - see [chapter 8](#8-admin---master-data)), their name, their
 employee number in large text, and a QR code encoding that employee
 number.
 
@@ -1363,7 +1402,7 @@ Every load currently on its way (dispatched from a field station, or
 logged as an external delivery - see below) appears here, **oldest
 first**, colored green/yellow/red by how long it's been in transit (the
 same thresholds as [chapter 1](#1-overview--concepts), configurable in
-[Settings](#12-admin---settings)). Each card shows the slip number, farm/
+[Settings](#11-admin---settings)). Each card shows the slip number, farm/
 supplier, team, driver, crate count, and total kg.
 
 If a load is part of a **split** (see [chapter 4](#4-field-app---capturing-the-harvest)),
@@ -1392,7 +1431,7 @@ For fruit arriving from another farmer (not via this farm's own field
 devices), tap **+ Log External Delivery** and fill in:
 
 - **Supplier** - the external farm this fruit belongs to (must already
-  exist in [Master Data → Suppliers](#9-admin---master-data))
+  exist in [Master Data → Suppliers](#8-admin---master-data))
 - **Crates**
 - **Total Kg**
 - **Driver**
@@ -1432,7 +1471,7 @@ what's happening right now, all scoped to a shared filter bar at the top.
   leave on "All farms / suppliers"
 - **Period start / Period end**, plus quick-fill buttons **Today**,
   **This Week**, **Season** (season = 1 Jan - 31 Dec of the harvest year
-  set in [Settings](#12-admin---settings)) - or set custom dates directly.
+  set in [Settings](#11-admin---settings)) - or set custom dates directly.
   Whichever preset matches the dates currently selected is highlighted, so
   it's clear at a glance whether "Today" or a custom range is showing.
 - Changing any filter - a preset button, a typed date, or the Farm/Supplier
@@ -1492,7 +1531,7 @@ picked stay exactly as captured). Saving:
 - Shows a warning if **wages were already calculated** for the affected
   worker(s) and period - correcting a crate doesn't retroactively update a
   wage sheet that was already run, so re-run **Calculate Wages** in
-  [Payments](#10-admin---payments) for that period afterward. If the crate
+  [Payments](#9-admin---payments) for that period afterward. If the crate
   was reassigned to a different worker, both the old and new worker's
   periods are checked, since the correction changes both their totals.
 
@@ -1503,280 +1542,8 @@ picked stay exactly as captured). Saving:
 
 ---
 
-## 8. Owner View - Analysis, Weather & Risk
 
-> **These three tabs live on the Owner View only, not in Admin.** The
-> Analysis, Weather and Risk tabs are opened from the Owner View link
-> (`.../owner/?key=...`) issued in
-> [Settings](#owner-view-read-only-dashboard-link). Admin keeps the
-> day-to-day operational tabs - Dashboard, Master Data, Payments, Reports
-> and Settings - and no longer carries these three.
-
-The Analysis tab compares the **current season** against **2020-2025
-historical records**, so a farmer can see at a glance whether the season is
-running ahead or behind, which blocks are over- or under-performing their
-own history, and how varieties and season timing are trending over the
-years - not just what happened today (that's what the Dashboard is for).
-
-Historical data was imported once from the farm's own pre-app record
-spreadsheets, covering the six seasons 2020 through 2025. It's a fixed,
-read-only reference - the app never writes to it - while "current season"
-always means whatever's actually been captured this year through the Field
-app, compared against the harvest year set in
-[Settings](#12-admin---settings).
-
-### Re-importing historical data on a server
-
-> **The source workbooks are not shipped with the app.** They hold one
-> farm's own harvest records, so they live in `data\imports\` - which is
-> gitignored and per-farm - rather than in the repository. A new install
-> has no workbooks and the two harvest import scripts simply skip, which is
-> correct: a farm should never be importing another farm's history. To load
-> your own, put the workbook in `data\imports\` (or pass its path as the
-> first argument to the script) and re-run.
-
-
-The historical import is a one-off script, not something an update
-carries over - the source workbook and the script that reads it are both
-in the repo, but running the script is a separate manual step against
-*that server's own database*. This means a fresh install, or a server
-whose database was reset, needs the import run on it directly - a pull
-alone leaves the Analysis tab showing only the current season, with
-**vs 5-Yr Average Pace** reading "-", until this is done.
-
-From Command Prompt in `C:\Boord`, after confirming the update
-(`update_server.bat` - see
-[Getting the code onto the server](#getting-the-code-onto-the-server-github-recommended-or-usbzip))
-has already brought in the latest code:
-```bat
-backend\.venv\Scripts\python.exe scripts\import_historical_harvest.py
-```
-Safe to re-run any time (e.g. after regenerating the source workbook) -
-it replaces the whole historical table each time rather than appending.
-No server restart needed; the next Analysis tab load picks it up.
-
-There's a second, separate import for the even-older 1987-2019 seasons
-(annual totals only, no daily breakdown - these don't feed the Analysis
-tab, only the Historical Harvest Data report's Annual Totals sheet).
-2012-2019 has a per-block breakdown; 1987-2009 only has a whole-farm
-total per year, since those records predate today's block register and
-use an incompatible numbering scheme. `update_server.bat` runs this
-automatically on every update (see "Pulling future updates" above), so
-it's rarely needed by hand - but for a fresh install, or to run it in
-isolation:
-```bat
-backend\.venv\Scripts\python.exe scripts\import_historical_annual_yield.py
-```
-Safe to re-run any time; replaces its table wholesale.
-
-### A note on the historical numbers
-
-A handful of today's blocks (**8a/8b**, **10a/10b**, **17a/17b**, **19a/19b**)
-didn't exist as separate blocks before the app - the original spreadsheets
-recorded one combined daily total for each pair. Those combined totals have
-been split between the two sub-blocks in proportion to their hectares (e.g.
-a day's picking on the old "block 8" is split roughly 58%/42% between 8a and
-8b, matching their relative size). This is a reasonable **estimate**, not
-what was actually picked from each sub-block on that day - every figure
-built from an estimated split carries a small info icon next to its block
-name in the Per-Block Yield table so it's never mistaken for an exact
-historical record.
-
-### KPI cards
-
-**Season to Date** (cumulative kg picked so far this season), **vs 5-Yr
-Average Pace** (how that compares to where the 5-year historical average
-stood at the same point in the season - green when ahead, red when behind),
-**Current Season** (the harvest year being compared), and **Years of
-History** available.
-
-### Downloading a chart as PDF
-
-Every chart card has a small <i class="fa-solid fa-file-pdf"></i> button in
-its top-right corner - tap it to download that chart as a one-page PDF,
-headed with the farm name and the chart's title, ready to print, email,
-or drop into a report. Charts still under-populated (e.g. the current
-season before picking starts) download just as they appear on screen.
-
-### Season Pace
-
-A line chart of cumulative kg picked, day by day through the season -
-starting from **1 August**, since that's when picking actually begins each
-year, not 1 January. Each historical year gets its own color (see the
-legend below the chart), plus a dashed black **5-Yr Average** line and the
-current season highlighted in navy. The current season always appears in
-the legend, even before any picking has happened, so the color/position
-doesn't shift once it starts. Shows at a glance whether this season is
-tracking ahead of, behind, or in line with history - and where in the
-season that gap opened up.
-
-### Per-Block Yield
-
-A bar chart plus table comparing this season's yield per block against that
-block's own historical average, normalized by size so blocks of different
-hectares/tree counts compare fairly. Switch between **Kg / Hectare** and
-**Kg / Tree** with the dropdown - both the chart and the table (including
-its column headers) switch to match. A dashed red **Farm Avg** line marks
-this season's farm-wide average for the selected metric, so blocks above
-or below the whole farm's own average stand out, not just their own
-history; the table's **vs Average** column is colored green (above its own
-historical average) or red (below) so under-performing blocks stand out
-immediately.
-
-### Harvest Volume by Block and Season
-
-A bubble chart - one bubble per block per season, sized by kg harvested,
-blocks ordered top-to-bottom by total volume across all seasons - for
-seeing at a glance which blocks and which seasons produced the most. A
-**Total Harvest** bar alongside each block's row shows its all-seasons
-total, in the same ranked order as the bubbles.
-
-### Yield per Tree/Hectare by Block and Season
-
-A heatmap (light = low, dark red = high) of yield for every block against
-every season, in block number order - switch between **Kg / Tree** and
-**Kg / Hectare** with the dropdown (the title updates to match). Scan a
-row to see a block's own history, or a column to see how a whole season
-compared across blocks.
-
-### Variety Performance Over Time
-
-A stacked bar chart of **average kg per tree** per variety (Mauritius,
-Early Delight, Hung Long, Third Month Red, Mix) - one bar per season, its
-varieties stacked within it by color - for spotting which varieties are
-trending up or down year over year. Use the dropdown to switch to a single
-variety, which redraws the chart as a plain bar-per-season for just that
-variety; it starts on **All Varieties**.
-
-### Harvest Season Length (first pick → last pick)
-
-One horizontal bar per season, spanning from that season's first day of
-picking to its last, labelled with the span in days and how many of those
-days actually had picking (e.g. "118d span, 46 pick days"). The current
-season always gets a row - shown as "No picking yet" until the first crate
-is captured, rather than the chart only gaining a row once picking starts.
-Shows whether the season is starting, ending, or lasting longer than it
-used to, and how much of the span was actually worked versus idle gaps.
-
-### Monthly Harvest Volume
-
-A heatmap of total kg picked by month (August through December) for every
-season, latest season at the top, each cell also showing that month's
-share of the season's total kg - making it easy to see which months carry
-the bulk of the harvest and whether that's shifting year to year. A
-**Total Kg (100%)** column after December shows each season's grand total,
-shaded on its own blue scale (separate from the month cells' scale) so the
-biggest season stands out at a glance. The current season always has a
-row, shown blank until picking begins.
-
-### Risk tab (Critical Season Risk Indicator)
-
-A separate nav tab next to Analysis and Weather (`/api/risk/summary`,
-served by `backend/routers/risk.py`) - a transparent 0-100 score of how
-risky a season's weather looks for a poor harvest, built from the four
-weather factors that best explained this farm's own harvest variation.
-This is a one-off correlation study behind the score, not a generic
-agronomy model and not recalculated live - the driver list only changes if
-the study is redone.
-
-The study was last re-run once the farm's full 1987-2025 harvest and
-weather history was imported, replacing an earlier version fitted on 2020-
-2025 alone. Two of those original four factors (winter chill hours, and
-rain days during flowering) turned out to have no relationship with this
-farm's yields at all once there was enough history to test them properly -
-winter chill correlated at r = -0.02 across 37 seasons, essentially zero -
-and were replaced. The four below were also checked against each other, so
-the score doesn't count one underlying signal four times over.
-
-**The four drivers**, each scored 0-25 and summed to the 0-100 score:
-- **Fruit Development Air Dryness** (16 Sep - 31 Oct) - mean dew point.
-  The strongest single signal in the whole record: dry air while fruit is
-  sizing means the crop loses water faster than it can take it up.
-- **Fruit Development Warmth** (16 Sep - 15 Nov) - mean daily maximum
-  temperature. Persistently warm afternoons line up with smaller crops -
-  a steadier measure than counting rare extreme days.
-- **Flowering-Period Sunshine** (1 Aug - 15 Sep) - total hours of sunshine.
-  Bright flowering weather produced the bigger crops; dull, overcast spells
-  during flowering mean poorer pollination and fruit set.
-- **Fruit-Sizing Rainfall** (1 Oct - 30 Nov) - total mm. Rain while the
-  fruit fills out fed the bigger harvests; dry Octobers and Novembers line
-  up with the smaller ones.
-
-Each driver is scaled between the best and worst value seen across the
-reference seasons (2012 onward - when the replanted orchard came into
-bearing), so 25/25 on one factor means "as bad as the worst season on
-file for that factor," not an absolute agronomic threshold. A calendar
-window that hasn't closed yet for the season being viewed is left out of
-the sum entirely (never assumed to be zero risk) - which is why the
-current season shows a partial **"score so far"**, with a count of how
-many of the four factors are known, until its last window closes.
-
-Use the **Season** dropdown to inspect any reference season or the current
-one - each shows its own score, band (Low/Moderate/Elevated/High), and the
-per-driver breakdown with that season's actual value against the reference
-range. Below that, **Risk Score by Season** and **Actual Harvest by
-Season** bar charts sit stacked so a higher score can be checked by eye
-against that year's actual outcome - both downloadable as PDF the same way
-as Analysis tab charts (see [above](#downloading-a-chart-as-pdf)).
-
-#### Harvest Forecast
-
-At the top of the Risk tab, above the season inspector, the **Harvest
-Forecast** card (`/api/risk/forecast`) turns the same four drivers into
-three current-season kg predictions - **Favorable**, **Expected**, and
-**Unfavorable** - rather than one falsely-precise number, since most of a
-season's outcome still depends on weather that hasn't happened yet.
-
-For whichever part of a driver's calendar window is still ahead, the
-forecast blends a real short-range weather forecast (up to 15 days out,
-via Open-Meteo) with a historical-scenario assumption for whatever's
-beyond that - each driver's own best/average/worst across the reference
-seasons (2012 onward, the same range the score itself is scaled against)
-for the Favorable/Expected/Unfavorable scenario respectively. The
-**Basis** column in the table under the three scenario cards shows exactly
-how many days of each driver came from actual data, a real forecast, or a
-historical assumption (e.g. "14d actual + 16d forecast + 16d assumed"). A
-driver whose real data has a genuine gap (a down sensor, or the forecast
-service itself unreachable) falls back to the historical range alone for
-its whole window rather than silently treating missing data as "no risk" -
-flagged in that row.
-
-Each scenario's projected score converts to a kg figure via a straight
-line fitted through the historical (risk score, harvest total) pairs from
-2016 onward - the first season the replanted blocks bore any fruit, since
-before that only block 7 was cropping and earlier totals reflect a young
-orchard rather than its weather. The line's own strength (r-value) and
-sample size are disclosed in the methodology panel below. The Favorable
-and Unfavorable ends are held to the best and worst harvests actually on
-record rather than running the line out past them, so those two read as
-"about as good or bad as it has ever gone" rather than exact figures -
-each combines every driver's own best or worst *year*, not one real season
-that went that way on everything at once. If Open-Meteo's forecast is
-unreachable when the tab loads, the card still renders - with a note that
-every driver has fallen back to the historical range alone for its whole
-remaining window.
-
-The collapsible **"How this score is calculated"** panel at the bottom
-spells out the score's method and, deliberately, its limits: weather
-explains roughly a quarter to a half of this farm's swing from season to
-season (real signal, but most of what makes a season good or bad is
-something the score can't see), and many factor-and-window combinations
-were tested to arrive at these four, so they were kept only because they
-held up across separate stretches of the farm's history. The panel also
-notes something growers often assume but this farm's record does not
-support: there is **no alternate-bearing pattern** here - across 35
-back-to-back season pairs, last season's crop predicts this one at
-r = 0.07, statistically nothing. (An earlier version of this manual and
-of the app claimed the opposite; the longer record disproved it.) A second
-list in the same panel covers the Harvest Forecast card specifically: the
-regression's r-value and sample size, the forecast/historical-range
-blending method, the clamping of the two extreme scenarios, and that the
-whole card is a description of what the historical pattern implies about
-this season's weather, not a guarantee of what will be harvested.
-
----
-
-## 9. Admin - Master Data
+## 8. Admin - Master Data
 
 Master Data has five subtabs for the farm's reference data.
 
@@ -1826,7 +1593,7 @@ for fruit actually received (not still in transit) in that period.
 
 ---
 
-## 10. Admin - Payments
+## 9. Admin - Payments
 
 Calculates and exports wages for a filtered period.
 
@@ -1846,7 +1613,7 @@ Calculates and exports wages for a filtered period.
 
 ---
 
-## 11. Admin - Reports
+## 10. Admin - Reports
 
 Downloadable `.xlsx` reports, all sharing the same filter bar as Payments/
 Dashboard (Farm/Supplier + date range):
@@ -1875,9 +1642,22 @@ duplicates. This folder isn't covered by the automatic nightly backup
 (see [Data Backup](#data-backup) below) - back it up the same way you'd
 back up anything else in `data\`.
 
+### A note on the historical numbers
+
+A handful of today's blocks (**8a/8b**, **10a/10b**, **17a/17b**, **19a/19b**)
+didn't exist as separate blocks before the app - the original spreadsheets
+recorded one combined daily total for each pair. Those combined totals have
+been split between the two sub-blocks in proportion to their hectares (e.g.
+a day's picking on the old "block 8" is split roughly 58%/42% between 8a and
+8b, matching their relative size). This is a reasonable **estimate**, not
+what was actually picked from each sub-block on that day - every figure
+built from an estimated split carries a small info icon next to its block
+name in the Per-Block Yield table so it's never mistaken for an exact
+historical record.
+
 ---
 
-## 12. Admin - Settings
+## 11. Admin - Settings
 
 ### Data Backup
 
@@ -1952,8 +1732,8 @@ there before you overwrote it.
    `data\boord.db` and `data\photos\`.
 5. Start the server again.
 6. **Rebuild the weather history.** Backups don't carry it, so straight
-   after a restore the Weather and Risk tabs will be empty, and they will
-   *not* fill themselves back in - the app only ever tops up the last few
+   after a restore the server holds no weather history at all, and it will
+   *not* fill itself back in - the app only ever tops up the last few
    hours, it never re-fetches years. Everything else in the app works
    normally in the meantime. To bring it back, run these two scripts once
    each from the project folder (they take a while - they're downloading
@@ -1981,81 +1761,13 @@ enables automatic weather capture on every dispatched load.
 
 ### Harvest rate
 
-The per-kg wage rate used by [Payments](#10-admin---payments).
+The per-kg wage rate used by [Payments](#9-admin---payments).
 
 ### Change admin password
 
 Change the admin login password - **do this immediately after first setup**
 ([chapter 2](#2-initial-server-setup)).
 
-### Owner View (read-only dashboard link)
-
-A link-only alternative to full Admin access, for an owner or other
-interested party who just wants to check on progress without a
-username/password and without being able to change anything.
-
-The link (`.../owner/?key=...`) opens a four-tab, stripped-down version of
-the Admin app: a **Dashboard** tab with the same KPI cards, Harvesting/In
-Transit/Received lists, a per-worker Workers breakdown, and Blocks
-breakdown, filtered the same way - but with **no wage figures** (the
-Workers list shows crates/kg/avg-kg-per-crate, same as full Admin, just
-without amount due) - plus the **Analysis**, **Weather** and **Risk** tabs
-(see [chapter 8](#8-owner-view---analysis-weather--risk)), PDF downloads
-included. Those three season-level tabs are here and nowhere else - Admin
-does not have them. None of Admin's other tabs (Master Data, Payments,
-Reports, Settings) are available.
-
-- **Copy** the link from Settings and send it directly to whoever it's
-  for - opening it needs no login at all, just the link itself.
-- Anyone with the link can view it for as long as it's valid, so only
-  share it with the people it's meant for - don't post it anywhere
-  public.
-- **Regenerate Link** immediately invalidates the old link and issues a
-  new one - use this if a link was shared more widely than intended, or
-  someone who had it no longer should.
-
-> **"This link isn't valid" means the link, not the connection.** The
-> Owner View only shows that message when the server actively rejects the
-> key - i.e. the link really was regenerated, mistyped, or truncated when
-> it was shared. If the owner simply can't reach the server (Tailscale
-> off, no signal), they get the amber offline bar instead, with the last
-> figures still on screen. So if they report the invalid-link message,
-> re-send them the current link from Settings; it isn't a connection
-> problem.
-
-> **Offline, the page shows its own last-seen figures, not just whatever
-> happened to be on screen already.** It keeps a small local cache (a
-> handful of recently-viewed date-range/farm combinations) on that
-> device, so reopening the page or switching back to a preset like Today
-> while offline still shows real numbers, labeled with how old they are
-> (e.g. *"Offline - showing figures from 12 min ago"*) instead of going
-> blank. A combination it's never loaded before shows *"No saved figures
-> for this period"* rather than stale numbers from a different range.
-
-This link only works the same way any other screen does - reachable on
-the farm's own Wi-Fi, or over Tailscale if the recipient needs it from
-outside the farm (see
-[Connecting external users with Tailscale](#connecting-external-users-with-tailscale-only-if-needed)).
-For someone who needs the *full* Admin screen remotely (not just the
-Dashboard), Tailscale plus the normal admin login is still the way to
-go - this link is deliberately just the read-only Dashboard.
-
-> **If the owner will check this from off the farm** (the usual case),
-> two things need to be true, not just one:
-> 1. **They need Tailscale installed and connected** on whatever device
->    they'll open the link from (see
->    [Connecting external users with Tailscale](#connecting-external-users-with-tailscale-only-if-needed)
->    to give them access) - the token alone only proves they're allowed
->    to view it, it doesn't make the server reachable from outside the
->    farm's own network.
-> 2. **The link itself has to use the Tailscale address, not the LAN
->    one.** The Copy button builds the link from whatever address *you*
->    (the admin) happen to be viewing this Settings page from at that
->    moment - if you're on the farm's own Wi-Fi when you copy it, the
->    link will have the LAN address baked in, which an off-site owner
->    can never reach, no matter how correct their token is. Open Admin
->    via the Tailscale address first (`https://<server-name>.<tailnet-name>.ts.net/admin/`),
->    *then* copy the Owner View link from there.
 
 ### Header weather
 
@@ -2065,11 +1777,11 @@ check of conditions without leaving the app.
 
 ---
 
-## 13. Troubleshooting / FAQ
+## 12. Troubleshooting / FAQ
 
 **"Unknown device id" on a device's first setup**
 The device ID hasn't been created yet. An admin must add it in
-[Master Data → Devices](#9-admin---master-data) first - see
+[Master Data → Devices](#8-admin---master-data) first - see
 [chapter 3](#3-device-setup).
 
 **"Camera unavailable" when tapping Scan Worker QR**
@@ -2093,7 +1805,7 @@ doesn't clear it, clear the site's data in the browser and reopen.
 
 **A device newly added in Master Data doesn't appear on the setup screen**
 The setup screen reads the list from the server each time it loads, so a
-device added in [Master Data → Devices](#9-admin---master-data) should
+device added in [Master Data → Devices](#8-admin---master-data) should
 appear as soon as the page is reloaded. If it doesn't: check the device
 is marked **active** (inactive devices are deliberately not offered), and
 that the setup screen can actually reach the server - if it can't, it
@@ -2101,7 +1813,7 @@ falls back to a type-in box and shows no list at all. Typing the ID by
 hand always works as long as the ID exists in Master Data.
 
 **"QR code doesn't match a known worker" when scanning a badge**
-Either the worker doesn't exist in [Master Data → Workers](#9-admin---master-data)
+Either the worker doesn't exist in [Master Data → Workers](#8-admin---master-data)
 yet, or their badge is stale/misprinted. Reprint the badge from Workers
 after confirming the worker record exists (see
 [chapter 5](#5-worker-id-badges)).
@@ -2157,11 +1869,12 @@ end wastes the most time:
 > reachable - the two use different DNS and different routes. Test the
 > app's own address, not a search engine.
 
-> The Risk and Weather tabs additionally call out to the weather service
-> while loading. If those two are offline but Dashboard and Analysis work,
-> the server is fine and it's that outbound call failing - both tabs fall
-> back to stored data on their own, so this shows up as slowness or stale
-> figures rather than an empty screen.
+> The header weather readout, the weather stamped onto each crate as it is
+> dispatched, and the setup wizard's weather download all call out to the
+> weather service. If those fail while the rest of the app works, the server
+> is fine and it's that outbound call failing - the header simply shows
+> nothing and a crate saves without its weather, rather than anything
+> breaking.
 
 **"Reconnect to send a partial load, or dispatch everything now" when
 sending a picking slip**
@@ -2169,12 +1882,12 @@ You tried to split a load (send fewer crates than captured) while offline.
 Splitting needs a connection because the server decides the split; either
 wait for a connection or send the full load instead.
 
-**Analysis tab only shows the current season, no historical lines**
+**Historical Harvest Data report is missing its older seasons**
 The server's database hasn't had the historical import run against it yet
-- an update brings in the app code and the source workbook, but
-loading that data into the database is a separate manual step per server.
-See [Re-importing historical data on a server](#re-importing-historical-data-on-a-server)
-in chapter 8.
+- an update brings in the app code and the source workbook, but loading
+that data into the database is a separate manual step per server. See
+[Re-importing historical data on a server](#re-importing-historical-data-on-a-server)
+in [chapter 2](#2-initial-server-setup).
 
 **Forgotten admin password**
 There's currently no self-service "forgot password" flow in the app - a
@@ -2297,7 +2010,7 @@ keys below match `backend/models.py` exactly.
 | `period_start` / `period_end` | date | `2026-07-01` / `2026-07-31` | |
 | `total_kg` | decimal | `318.6` | Sum of that worker's net crate weights in the period. |
 | `rate_applied` | decimal | `3.00` | The per-kg rate in effect when calculated. |
-| `amount_due` | decimal | `955.80` | Calculated - not directly editable. There is intentionally no "paid" flag or status field on this record (chapter 10); payment status is tracked outside this app. |
+| `amount_due` | decimal | `955.80` | Calculated - not directly editable. There is intentionally no "paid" flag or status field on this record (chapter 9); payment status is tracked outside this app. |
 
 ### RateSetting
 

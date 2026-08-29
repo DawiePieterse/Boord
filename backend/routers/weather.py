@@ -35,9 +35,10 @@ def current_weather(session: Session = Depends(get_session)):
 
 
 # ---------------------------------------------------------------------------
-# Weather tab: daily-aggregated history, admin-JWT-gated. The Owner View's
-# token-gated equivalent (routers/owner_view.py) calls build_weather_history()
-# directly, same split as analysis.py/build_analysis_summary().
+# Weather tab: daily-aggregated history, admin-JWT-gated. GET /history has no
+# caller in Boord's own UI - the Weather tab left with the Owner View - and is
+# kept as the API that app talks to; see owner-app/README.md. POST
+# /history/backfill is live, and is what the setup wizard calls.
 # ---------------------------------------------------------------------------
 
 # key -> (source column on WeatherHistory, aggregation, unit, decimals).

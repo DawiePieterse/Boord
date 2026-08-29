@@ -123,9 +123,8 @@ class SetupState(SQLModel, table=True):
     """Single-row record of how far the first-run wizard got - see
     routers/setup.py.
 
-    Deliberately its own table rather than two more columns on SystemSetting,
-    for the same reason OwnerViewToken is: SystemSetting is served publicly
-    to every unauthenticated device. It also gets round-tripped whole by
+    Deliberately its own table rather than two more columns on SystemSetting:
+    SystemSetting is served publicly to every unauthenticated device. It also gets round-tripped whole by
     PUT /api/system-settings, which builds a fresh row from the request body
     and merges it - so a field the Settings form does not know about is
     silently blanked every time somebody presses Save. A completion marker
@@ -146,14 +145,6 @@ class SetupState(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-
-
-class OwnerViewToken(SQLModel, table=True):
-    """Single-row secret token gating the read-only Owner View dashboard
-    (see routers/owner_view.py) - deliberately kept off SystemSetting,
-    which is public."""
-    id: Optional[int] = Field(default=None, primary_key=True)
-    token: str
 
 
 # ---------------------------------------------------------------------------
@@ -318,11 +309,11 @@ class WeatherHistory(SQLModel, table=True):
     scripts/import_historical_weather_archive.py (1987-2019) - each only
     replaces its own date range, so they compose safely in either order -
     and kept current day-to-day by weather.sync_recent_weather()
-    (append-only, run as a side effect of opening the admin/owner Weather
-    tab). Only 2020-2025 actually drives anything (the Risk indicator and
-    Harvest Forecast are fixed to that reference range - see
-    routers/risk.py); 1987-2019 is reference-only, for the Weather tab's
-    own chart."""
+    (append-only, run as a side effect of loading the weather or risk
+    figures). Only 2020-2025 actually drives anything (the Risk indicator
+    and Harvest Forecast are fixed to that reference range - see
+    routers/risk.py); 1987-2019 is reference-only, for the weather chart
+    in the separate Owner app."""
     id: Optional[int] = Field(default=None, primary_key=True)
     # Unlike every other datetime column in this app (naive UTC - see
     # timeutil.py), this is naive LOCAL farm time: Open-Meteo was queried

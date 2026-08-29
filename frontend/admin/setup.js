@@ -119,8 +119,6 @@ function bindSetupWizard() {
   document.getElementById("wizHistAnnualFile").addEventListener("change",
     (e) => wizImport(e, "/api/historical-annual-yield/import", "wizHistAnnualResult", "season totals"));
   document.getElementById("wizWeatherBackfillBtn").addEventListener("click", wizFetchWeatherHistory);
-  document.getElementById("wizCopyOwnerLinkBtn").addEventListener("click",
-    () => copyOwnerViewLink("wizOwnerLink"));
 }
 
 async function prefillWizard(state) {
@@ -441,13 +439,6 @@ async function renderWizardDevices() {
 async function renderWizardFinish() {
   document.getElementById("wizServerUrl").value = location.origin + "/";
 
-  try {
-    await loadOwnerViewLink();
-    document.getElementById("wizOwnerLink").value = document.getElementById("ownerViewLink").value;
-  } catch (e) {
-    document.getElementById("wizOwnerLink").value = "Could not load - find it under Settings";
-  }
-
   // Say plainly what was skipped. The whole point of the wizard is that
   // nothing tells you which of five unrelated things you missed; finishing it
   // with a silent gap would reproduce that exactly.
@@ -461,7 +452,7 @@ async function renderWizardFinish() {
   const s = state.steps;
   if (!s.blocks.done) outstanding.push("No blocks yet - the Field app has nothing to pick from until you import them under Master Data.");
   if (!s.rate.done) outstanding.push("No wage rate - Payments will refuse to calculate.");
-  if (!s.location.done) outstanding.push("No farm location - no weather, no Risk indicator, no Harvest Forecast.");
+  if (!s.location.done) outstanding.push("No farm location - no weather anywhere: none in the header, none stamped onto crates and picking notes, and no weather history to download.");
   if (!s.workers.done) outstanding.push("No workers yet - add them under Master Data.");
 
   const el = document.getElementById("wizOutstanding");

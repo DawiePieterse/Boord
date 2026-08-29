@@ -257,15 +257,15 @@ if %errorLevel% equ 0 (
     echo ==^> Refreshing historical weather ^(2020-present^)...
     echo     This replaces recent days with Open-Meteo's finalized figures
     echo     ^(early readings start as provisional forecast-model values and
-    echo     firm up over the following days/weeks^) - the Risk and Harvest
-    echo     Forecast tabs depend on this being accurate, not just present.
+    echo     firm up over the following days/weeks^) - the Risk indicator and
+    echo     Harvest Forecast depend on this being accurate, not just present.
     "%~dp0backend\.venv\Scripts\python.exe" "%~dp0scripts\import_historical_weather.py"
     if errorlevel 1 (
         echo Warning: weather refresh failed - check the error above ^(no
         echo internet, or Open-Meteo unreachable^). Starting the server
         echo anyway with whatever weather history it already had; it'll
-        echo catch up on its own next time someone opens the Weather or
-        echo Risk tab, or next time this script runs successfully.
+        echo catch up on its own next time the weather or risk figures are
+        echo loaded, or next time this script runs successfully.
     )
 
     echo.

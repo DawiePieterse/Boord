@@ -5,7 +5,7 @@ from passlib.context import CryptContext
 from sqlalchemy import inspect, text
 from sqlmodel import SQLModel, Session, create_engine, select
 
-from models import AdminUser, Device, DeviceRole, OwnerViewToken, Supplier, SystemSetting, Team
+from models import AdminUser, Device, DeviceRole, Supplier, SystemSetting, Team
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -239,9 +239,6 @@ def seed_defaults() -> None:
 
         if not session.exec(select(SystemSetting)).first():
             session.add(SystemSetting())
-
-        if not session.exec(select(OwnerViewToken)).first():
-            session.add(OwnerViewToken(token=secrets.token_urlsafe(24)))
 
         if not session.exec(select(Supplier).where(Supplier.is_own_farm == True)).first():  # noqa: E712
             session.add(Supplier(name="Own Farm", is_own_farm=True))

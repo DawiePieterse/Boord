@@ -235,7 +235,7 @@ def list_lots(status: Optional[str] = None, supplier_id: Optional[int] = None,
 @router.get("/{lot_id}")
 def get_lot(lot_id: int, session: Session = Depends(get_session), admin=Depends(get_current_admin)):
     """Admin-only: a lot plus its individual crates, for the harvest-data
-    edit screen. Not used by any field/pack house/owner screen - those only
+    edit screen. Not used by the field or pack house screens - those only
     ever need the aggregate totals from the list endpoints above."""
     lot = session.get(Lot, lot_id)
     if not lot:

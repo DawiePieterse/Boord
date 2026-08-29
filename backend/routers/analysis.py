@@ -32,10 +32,11 @@ def _block_sort_key(block_id: str):
 
 @router.get("/summary")
 def analysis_summary(session: Session = Depends(get_session), admin=Depends(get_current_admin)):
-    """Admin-JWT-gated Analysis tab data - see build_analysis_summary()
-    for what it actually computes. The Owner View's token-gated equivalent
-    (routers/owner_view.py) calls that same function directly, so the two
-    screens' Analysis tabs never drift apart."""
+    """Analysis data - see build_analysis_summary() for what it actually
+    computes. Nothing in Boord's own UI calls this: the Analysis tab left
+    with the Owner View. It is kept as the API that app talks to - see
+    owner-app/README.md, which has the choice still to be made about
+    whether it stays here at all."""
     return build_analysis_summary(session)
 
 

@@ -8,7 +8,7 @@ from backup import start_backup_scheduler
 from db import PHOTOS_DIR, seed_defaults
 from migrate import run_migrations
 from routers import (analysis, auth, backups, dashboard, devices, harvest_records, historical, master_data, lots,
-                      owner_view, payments, processing, receiving, reports, risk, setup, suppliers, sync, weather)
+                      payments, processing, receiving, reports, risk, setup, suppliers, sync, weather)
 
 app = FastAPI(title="Boord Harvest & Receiving")
 
@@ -35,7 +35,6 @@ app.include_router(analysis.router)
 app.include_router(weather.router)
 app.include_router(risk.router)
 app.include_router(backups.router)
-app.include_router(owner_view.router)
 app.include_router(historical.router)
 app.include_router(setup.router)
 

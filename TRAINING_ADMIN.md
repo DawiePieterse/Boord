@@ -85,17 +85,20 @@ already been run.
 
 ---
 
-## Season analysis — on the Owner View, not here
+## Season analysis — in the Owner app, not here
 
-The **Analysis**, **Weather** and **Risk** tabs — this season against
-2020–2025 history, the farm's weather record back to 1987, and the
-season risk score and harvest forecast — are not part of the Admin app.
-They live on the read-only **Owner View** link, which you generate and
-copy under **Settings → Owner View**. See the Owner View training guide
-for what each of those tabs shows.
+This season against 2020–2025 history, the farm's weather record back to
+1987, and the season risk score and harvest forecast are not part of the
+Admin app. They live in the separate **Boord Owner** app, which has its
+own link — ask whoever set it up.
 
 Admin is for the day-to-day operational work: the Dashboard, Master
 Data, Payments, Reports and Settings.
+
+For the record on this server, none of that analysis is lost by not
+being here — the figures are all still recorded, and the **Historical
+Harvest Data** report under **Reports** gives you every harvest figure
+the farm has on file, 1987 to today, in one workbook.
 
 ---
 
@@ -202,12 +205,6 @@ joins.
 - **Harvest rate** — the current rate per kg used for wage calculations.
 - **Change admin password** — do this immediately after first login if
   you haven't already.
-- **Owner View** — a read-only dashboard link for an owner or other
-  interested party who just wants to check progress, no login needed.
-  It shows the same Workers/Blocks breakdown as the full Dashboard, just
-  without amount-due wage figures. Tap **Copy** to grab the link and send
-  it directly to them, or **Regenerate Link** if it was ever shared more
-  widely than intended — that immediately breaks the old link.
 
 ---
 

@@ -266,8 +266,7 @@ function bindDashboard() {
   // Picking a period or a supplier must redraw the dashboard straight away.
   // Setting the inputs alone leaves the old period's figures on screen under
   // the new dates - which reads as "the season looks exactly like today"
-  // rather than needing a separate Refresh press. The Owner View has always
-  // refreshed on change; this keeps the two screens behaving the same.
+  // rather than needing a separate Refresh press.
   Boord.bindDateRangePresets({
     todayBtn: document.getElementById("dashTodayBtn"),
     weekBtn: document.getElementById("dashWeekBtn"),
@@ -1261,40 +1260,6 @@ function bindSettings() {
   document.getElementById("pickMapBtn").addEventListener("click", () => openMapModal("setGpsLat", "setGpsLon"));
   bindMapModal();
   document.getElementById("runBackupBtn").addEventListener("click", runBackupNow);
-  document.getElementById("copyOwnerViewLinkBtn").addEventListener("click", () => copyOwnerViewLink("ownerViewLink"));
-  document.getElementById("regenerateOwnerViewLinkBtn").addEventListener("click", regenerateOwnerViewLink);
-}
-
-function _ownerViewUrl(token) {
-  return `${location.origin}/owner/?key=${token}`;
-}
-
-async function loadOwnerViewLink() {
-  const { token } = await Boord.api("/api/owner-view/link", { auth: true });
-  document.getElementById("ownerViewLink").value = _ownerViewUrl(token);
-}
-
-// Takes the id of the field to copy from, so the setup wizard's own copy of
-// the link works too. Reading "ownerViewLink" unconditionally meant the
-// wizard's button copied the Settings tab's field - empty if that load had
-// failed - and its select() fallback landed on a hidden input, so a failed
-// copy left the user with nothing at all.
-async function copyOwnerViewLink(inputId = "ownerViewLink") {
-  const input = document.getElementById(inputId);
-  try {
-    await navigator.clipboard.writeText(input.value);
-    Boord.toast("Link copied");
-  } catch (e) {
-    input.select();
-    Boord.toast("Select and copy the link manually");
-  }
-}
-
-async function regenerateOwnerViewLink() {
-  if (!confirm("This makes the old Owner View link stop working immediately. Anyone still using it will need the new one. Continue?")) return;
-  const { token } = await Boord.api("/api/owner-view/regenerate", { method: "POST", auth: true });
-  document.getElementById("ownerViewLink").value = _ownerViewUrl(token);
-  Boord.toast("New link generated - the old one no longer works");
 }
 
 async function loadBackupsList() {
@@ -1342,7 +1307,6 @@ async function loadSettingsForm() {
     document.getElementById("setRatePerKg").value = rate.default_rate_per_kg;
   }
   await loadBackupsList();
-  await loadOwnerViewLink();
 }
 
 async function saveSystemSettings() {
@@ -1445,9 +1409,6 @@ function confirmMapLocation() {
   }
   closeMapModal();
 }
-
-// The Analysis, Weather and Risk tabs live only in the Owner View - see
-// frontend/owner/owner.js and the shared/*-tab.js modules it loads.
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("service-worker.js").catch(() => {});

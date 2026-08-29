@@ -44,7 +44,8 @@ const Boord = {
   // True when a request failed because the server could not be reached
   // (offline, unreachable, or timed out) rather than because it answered
   // with an error. Screens use this to tell "no connection" apart from
-  // "rejected" - e.g. Owner View must not treat a dead network as a bad key.
+  // "rejected" - e.g. the device setup screen must not wipe a saved device
+  // id just because the server is unreachable.
   isNetworkError(e) {
     return e instanceof TypeError || (!!e && (e.name === "AbortError" || e.name === "TimeoutError"));
   },

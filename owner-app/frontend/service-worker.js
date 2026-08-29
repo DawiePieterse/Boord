@@ -1,20 +1,25 @@
-// App-shell cache so the pack house PWA installs cleanly and its own UI
-// still loads if the connection briefly drops. Data (queue, receiving)
-// always goes over the network when available.
-const CACHE_PREFIX = "boord-packhouse-";
-const CACHE = "boord-packhouse-v13";
+// App-shell cache so the Owner View still renders (with its last data
+// unavailable, but correctly styled) when the phone has no connection to
+// the farm server. Data always goes over the network when available.
+const CACHE_PREFIX = "boord-owner-";
+const CACHE = "boord-owner-v18";
 const REVALIDATE_TIMEOUT_MS = 10000;
 const SHELL = [
   "./",
   "./index.html",
-  "./receiving.js",
-  "./manifest.json",
+  "./owner.js",
   "../shared/styles.css",
   "../shared/api.js",
+  "../shared/charts.js",
+  "../shared/analysis-tab.js",
+  "../shared/weather-tab.js",
+  "../shared/risk-tab.js",
   "../shared/ptr.js",
   "../shared/tailwind.js",
   "../shared/vendor/fontawesome/css/all.min.css",
   "../shared/vendor/fontawesome/webfonts/fa-solid-900.woff2",
+  "../shared/vendor/html2canvas/html2canvas.min.js",
+  "../shared/vendor/jspdf/jspdf.umd.min.js",
 ];
 
 self.addEventListener("install", (event) => {
@@ -43,10 +48,10 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/")) return; // never cache API calls
   if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
 
-  // Page loads are cached by path only. A cache lookup matches the query
-  // string too, so a screen opened with one on the end would never find its
-  // cached shell and would fail offline. It also stops one cache entry
-  // piling up per distinct query string.
+  // Page loads are cached by path only. The Owner View is opened as
+  // /owner/?key=..., and a cache lookup matches the query string too - so
+  // without this the shell would never be found and the page would fail
+  // offline. It also stops one cache entry piling up per distinct link.
   const isPageLoad = event.request.mode === "navigate";
   const cacheKey = isPageLoad ? url.origin + url.pathname : event.request;
 

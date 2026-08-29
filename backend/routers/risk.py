@@ -389,9 +389,9 @@ def build_risk_summary(session: Session) -> dict:
 
 @router.get("/summary")
 def risk_summary(session: Session = Depends(get_session), admin=Depends(get_current_admin)):
-    """Admin-JWT-gated Risk tab data - see build_risk_summary(). The Owner
-    View's token-gated equivalent (routers/owner_view.py) calls that same
-    function directly, same split as analysis.py/weather.py."""
+    """Risk tab data - see build_risk_summary(). No caller in Boord's own
+    UI since the Risk tab left with the Owner View; kept as that app's API,
+    same as analysis.py/weather.py. See owner-app/README.md."""
     return build_risk_summary(session)
 
 
@@ -689,7 +689,7 @@ def build_harvest_forecast(session: Session) -> dict:
 
 @router.get("/forecast")
 def risk_forecast(session: Session = Depends(get_session), admin=Depends(get_current_admin)):
-    """Admin-JWT-gated Harvest Forecast data - see build_harvest_forecast().
-    The Owner View's token-gated equivalent (routers/owner_view.py) calls
-    that same function directly, same split as every other pair here."""
+    """Harvest Forecast data - see build_harvest_forecast(). No caller in
+    Boord's own UI since the forecast card left with the Owner View; kept
+    as that app's API, same as every other endpoint here."""
     return build_harvest_forecast(session)

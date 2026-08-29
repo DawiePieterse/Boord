@@ -156,8 +156,7 @@ async def import_blocks(file: UploadFile, replace: bool = Query(False),
 # (renderWorkerOptions) and the badge printer both read this endpoint without
 # a token and need only these; everything else on Worker - id_number (SA ID),
 # bank, account, whatsapp_number - is personal data that used to go out to
-# anyone who could reach the server, including whoever an Owner View link had
-# been forwarded to.
+# anyone who could reach the server, no credentials needed.
 _PUBLIC_WORKER_FIELDS = ("id", "first_name", "last_name", "name", "supplier_id", "photo_filename", "active")
 
 

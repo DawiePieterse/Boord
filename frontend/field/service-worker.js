@@ -45,10 +45,10 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/")) return; // never cache API calls
   if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
 
-  // Page loads are cached by path only. The Owner View is opened as
-  // /owner/?key=..., and a cache lookup matches the query string too - so
-  // without this the shell would never be found and the page would fail
-  // offline. It also stops one cache entry piling up per distinct link.
+  // Page loads are cached by path only. A cache lookup matches the query
+  // string too, so a screen opened with one on the end would never find its
+  // cached shell and would fail offline. It also stops one cache entry
+  // piling up per distinct query string.
   const isPageLoad = event.request.mode === "navigate";
   const cacheKey = isPageLoad ? url.origin + url.pathname : event.request;
 
