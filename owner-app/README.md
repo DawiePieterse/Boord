@@ -76,26 +76,61 @@ unauthenticated in Boord: `/api/lots/pending`, `/api/lots/in-transit`,
 `/api/lots/received`, `/api/suppliers`, `/api/system-settings`,
 `/api/weather/current`.
 
-## The decision still to make
+## The shape it takes
 
-Boord kept the endpoints this app was built on - `/api/analysis/summary`,
-`/api/weather/history`, `/api/risk/summary`, `/api/risk/forecast`. They are
-admin-JWT authenticated and, since the Owner View left, nothing in Boord's own
-UI calls them. They were left in place precisely so this app has something to
-talk to over the network on day one.
+Decided, and Boord has already been cut to match. The Owner app is **part of
+the farm's setup, running beside Boord on the farm server** - not a hosted
+service, and not a screen inside Boord.
 
-So there are two shapes available, and picking one is the first real decision:
+**It reads Boord's SQLite file directly, read-only.** `data/boord.db` holds
+the live harvest: crates, lots, workers, blocks, suppliers, payments. Open it
+read-only and do not write to it - Boord is the only writer, and two writers
+on one SQLite file is exactly the kind of bug that shows up first on a farm
+during a harvest. Two things to respect:
 
-1. **A frontend against the farm server.** Keep `owner_view.py`, put it back on
-   the farm server, and the new app is the `frontend/` folder plus its own copy
-   of the shared files. Least work. The owner's device has to be able to reach
-   the farm server - which is what the Tailscale section of `MANUAL.md` is for.
-2. **Its own backend.** The new app carries its own copy of the analysis, risk
-   and weather builders, and gets farm data some other way. More work, and the
-   builders would then exist twice, but it does not require the farm server to
-   be reachable from outside the farm.
+- **Its schema is Boord's, and Boord migrates it on every startup.** There is
+  no stable API between you; a column can be renamed by a migration in Boord's
+  `backend/migrations/versions/`. Read defensively and pin what you depend on.
+- **The nightly backup and the pre-migration snapshot both copy the file.**
+  Neither takes a lock this app needs to worry about, but a long read held
+  open across a migration will see the schema change underneath it.
 
-If (2) wins, Boord should drop those four endpoints and probably `WeatherHistory`
-with them - it is roughly 42 MB of a 42.4 MB database, and the whole
-empty-and-fingerprint design in `backend/backup.py` exists only because of its
-size.
+**It owns its own data for weather and history.** Its own database, separate
+from Boord's:
+
+- `WeatherHistory` - the hourly record. `weather.py` and `weather_router.py`
+  here are Boord's complete originals, including the location columns and the
+  1987-onward backfill.
+- `HistoricalHarvest` / `HistoricalAnnualYield` - the seasons before Boord.
+  Import them with `scripts/import_historical_*.py` against this app's
+  database; `docs/HISTORICAL_DATA.md` covers the workbooks and the one real
+  caveat in the figures.
+
+## What Boord no longer has
+
+All of it moved here, and Boord's migration `748269cfa3ea` drops the three
+tables. Boord kept exactly two pieces of weather, both of which call
+Open-Meteo live and never touched `WeatherHistory`: the header readout, and
+the conditions stamped onto each crate at dispatch.
+
+Gone from Boord, and yours now:
+
+| Was | Now here |
+| --- | --- |
+| `routers/analysis.py` | `backend/analysis.py` |
+| `routers/risk.py` | `backend/risk.py` |
+| `routers/historical.py` | `backend/historical.py` |
+| the history half of `weather.py` | `backend/weather.py` (whole file) |
+| `/api/weather/history` + backfill | `backend/weather_router.py` (whole file) |
+| the Historical Harvest Data report | `backend/historical_report.py` |
+| the four import scripts | `scripts/` |
+| the two CSV templates | `templates/` |
+| ~1,000 lines of selftest | not moved - see below |
+
+**The tests did not come with it.** Boord's `scripts/selftest.py` lost about
+a thousand lines when this left: the Risk indicator's scoring, the Harvest
+Forecast's projections, the driver configuration, the stored-weather
+integrity checks, and the report's sheet reconciliation. They are in Boord's
+git history at commit `2226750` and worth recovering rather than
+rewriting - that arithmetic is the part of this code where a wrong answer
+looks exactly like a right one.

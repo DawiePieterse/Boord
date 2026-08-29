@@ -6,10 +6,6 @@
 // use. Nothing here is a special first-run write path, which is what keeps
 // the wizard from becoming a second, divergent way to configure a farm.
 
-// Order is load-bearing. Blocks before historical harvest, because those rows
-// reference block ids. Location before the weather backfill, because fetching
-// weather for an unset location is exactly the ordering bug this replaces -
-// today the only thing preventing it is that the importer refuses to guess.
 const WIZARD_STEPS = [
   { key: "identity", optional: false },
   { key: "location", optional: false },
@@ -18,7 +14,6 @@ const WIZARD_STEPS = [
   { key: "blocks", optional: true },
   { key: "workers", optional: true },
   { key: "devices", optional: true },
-  { key: "history", optional: true },
   { key: "finish", optional: false },
 ];
 
@@ -114,11 +109,6 @@ function bindSetupWizard() {
     (e) => wizImport(e, "/api/blocks/import?replace=false", "wizBlocksResult", "blocks"));
   document.getElementById("wizWorkersFile").addEventListener("change",
     (e) => wizImport(e, "/api/workers/import", "wizWorkersResult", "workers"));
-  document.getElementById("wizHistDailyFile").addEventListener("change",
-    (e) => wizImport(e, "/api/historical-harvest/import", "wizHistDailyResult", "daily harvest rows"));
-  document.getElementById("wizHistAnnualFile").addEventListener("change",
-    (e) => wizImport(e, "/api/historical-annual-yield/import", "wizHistAnnualResult", "season totals"));
-  document.getElementById("wizWeatherBackfillBtn").addEventListener("click", wizFetchWeatherHistory);
 }
 
 async function prefillWizard(state) {
@@ -156,7 +146,6 @@ function renderWizardStep() {
     step.key === "finish" ? "Open Boord" : "Continue";
 
   if (step.key === "devices") renderWizardDevices();
-  if (step.key === "history") renderWeatherYearChoices();
   if (step.key === "finish") renderWizardFinish();
   window.scrollTo(0, 0);
 }
@@ -297,118 +286,10 @@ async function wizImport(event, url, resultId, noun) {
       : "";
     resultEl.innerHTML =
       `<div class="text-green-700"><i class="fa-solid fa-check"></i> Imported ${result.imported} ${noun}${seasons}</div>${rejected}`;
-    // The weather depth to suggest is derived from the seasons on file, and
-    // a history import is what puts them there - so the suggestion made when
-    // this step painted is now out of date, on the same screen.
-    if (result.seasons) renderWeatherYearChoices();
   } catch (e) {
     resultEl.innerHTML = `<span class="text-red-600">${wizEscape(wizFailure(e, "Import failed - check the columns against the template"))}</span>`;
   }
   event.target.value = "";
-}
-
-// How many years of weather to offer. The floor is 1987 - the earliest
-// season any farm has harvest figures for, and where the server clamps
-// anyway (weather.ARCHIVE_START_DATE), so the last option is always
-// "everything there is" however long this app stays in service.
-const WEATHER_YEAR_CHOICES = [5, 10, 20];
-const WEATHER_ARCHIVE_START_YEAR = 1987;
-// What nobody can guess for the farm: how long this will take on ITS
-// internet. Measured at ~2.2 MB and under 3 seconds for five years on a
-// fast link, and writing the rows costs more than fetching them on a farm
-// laptop - so these are deliberately vague and deliberately pessimistic,
-// because the honest thing to convey is the shape of the trade, not a
-// number that will be wrong.
-function weatherYearsEstimate(years) {
-  if (years <= 5) return "under a minute";
-  if (years <= 10) return "a minute or two";
-  if (years <= 20) return "a few minutes";
-  return "five minutes or more";
-}
-
-// The download has to outlast itself: Boord.UPLOAD_TIMEOUT_MS is two
-// minutes, which is right for a spreadsheet and not for forty years of
-// hourly weather. Scaled by what was actually asked for, and capped, so a
-// stalled request still eventually gives up rather than hanging the step.
-function weatherYearsTimeout(years) {
-  return Math.min(15 * 60 * 1000, Math.max(Boord.UPLOAD_TIMEOUT_MS, years * 25000));
-}
-
-// Suggest a depth from the farm's own history rather than a fixed default:
-// the Risk indicator needs weather for every season it has yield figures
-// for, so "as far back as your oldest season" is the only answer that is
-// about this farm. With no history imported yet there is nothing to go on,
-// and the middle option is a reasonable place to start.
-async function renderWeatherYearChoices() {
-  const select = document.getElementById("wizWeatherYears");
-  const hint = document.getElementById("wizWeatherYearsHint");
-  const thisYear = new Date().getFullYear();
-  const maxYears = thisYear - WEATHER_ARCHIVE_START_YEAR + 1;
-
-  let earliestSeason = null;
-  try {
-    const state = await Boord.api("/api/setup/state", { auth: true });
-    earliestSeason = state.steps.history.earliest_season;
-  } catch (e) {
-    // Only the suggestion is lost - the choice below still works.
-  }
-
-  const options = WEATHER_YEAR_CHOICES.filter((y) => y < maxYears).concat([maxYears]);
-  const needed = earliestSeason ? thisYear - earliestSeason + 1 : null;
-  const suggested = needed
-    ? options.find((y) => y >= needed) || maxYears
-    : options[1] || options[0];
-
-  select.innerHTML = options.map((years) => {
-    const from = years >= maxYears ? WEATHER_ARCHIVE_START_YEAR : thisYear - years + 1;
-    const label = years >= maxYears
-      ? `Everything since ${WEATHER_ARCHIVE_START_YEAR} - ${weatherYearsEstimate(years)}`
-      : `Back to ${from} - ${years} years, ${weatherYearsEstimate(years)}`;
-    return `<option value="${years}"${years === suggested ? " selected" : ""}>${label}</option>`;
-  }).join("");
-
-  hint.textContent = earliestSeason
-    ? `Your harvest history starts in ${earliestSeason}, so anything less than ${needed} years `
-      + `leaves the Risk indicator with seasons it cannot score.`
-    : "No harvest history loaded yet. Load it above first and this will suggest a depth to match it.";
-}
-
-async function wizFetchWeatherHistory() {
-  const btn = document.getElementById("wizWeatherBackfillBtn");
-  const resultEl = document.getElementById("wizWeatherResult");
-  const years = parseInt(document.getElementById("wizWeatherYears").value, 10) || 10;
-  btn.disabled = true;
-  resultEl.innerHTML = `<span class="text-slate-500">Downloading ${years} years of weather - `
-    + `${weatherYearsEstimate(years)}. Leave this page open.</span>`;
-  try {
-    const result = await Boord.api(`/api/weather/history/backfill?years=${years}`, {
-      method: "POST", auth: true, timeoutMs: weatherYearsTimeout(years),
-    });
-    if (result.no_location) {
-      resultEl.innerHTML = `<span class="text-amber-700">Go back to the location step first - Boord will not fetch weather for a place it has not been told about.</span>`;
-    } else {
-      // A farm whose harvest history reaches back further than the weather
-      // it just fetched has a Risk indicator that refuses to score those
-      // seasons. Say so here rather than let it be found later on a Risk tab
-      // that simply does not work - and say what to do about it, which is
-      // now simply to ask for more years.
-      const gap = result.uncovered_season
-        ? `<div class="text-amber-700 text-xs mt-1">Your harvest history starts in ${result.uncovered_season}, but this only reaches back to ${result.start_date.slice(0, 4)}. Choose more years above and fetch again - until then the Risk indicator has no weather for those seasons.</div>`
-        : "";
-      // Only ever non-zero when the farm's GPS was corrected after weather
-      // had already been downloaded. Worth saying plainly: those hours were
-      // somewhere else's, and they are gone now.
-      const replaced = result.removed_elsewhere
-        ? `<div class="text-slate-500 text-xs mt-1">${result.removed_elsewhere.toLocaleString()} older hours downloaded for a previous location were removed.</div>`
-        : "";
-      resultEl.innerHTML =
-        `<div class="text-green-700"><i class="fa-solid fa-check"></i> ${result.imported.toLocaleString()} hours of weather, ${result.start_date} to ${result.end_date}</div>${gap}${replaced}`;
-    }
-  } catch (e) {
-    resultEl.innerHTML = `<span class="text-red-600">${wizEscape(wizFailure(e, "Could not fetch the weather history"))}</span>`;
-  } finally {
-    btn.disabled = false;
-  }
 }
 
 const _DEVICE_ROLE_LABELS = { field: "Field", packhouse: "Pack house", admin: "Admin" };
@@ -452,7 +333,7 @@ async function renderWizardFinish() {
   const s = state.steps;
   if (!s.blocks.done) outstanding.push("No blocks yet - the Field app has nothing to pick from until you import them under Master Data.");
   if (!s.rate.done) outstanding.push("No wage rate - Payments will refuse to calculate.");
-  if (!s.location.done) outstanding.push("No farm location - no weather anywhere: none in the header, none stamped onto crates and picking notes, and no weather history to download.");
+  if (!s.location.done) outstanding.push("No farm location - no weather in the header, and none stamped onto crates or picking notes.");
   if (!s.workers.done) outstanding.push("No workers yet - add them under Master Data.");
 
   const el = document.getElementById("wizOutstanding");

@@ -95,10 +95,11 @@ own link — ask whoever set it up.
 Admin is for the day-to-day operational work: the Dashboard, Master
 Data, Payments, Reports and Settings.
 
-For the record on this server, none of that analysis is lost by not
-being here — the figures are all still recorded, and the **Historical
-Harvest Data** report under **Reports** gives you every harvest figure
-the farm has on file, 1987 to today, in one workbook.
+The seasons before Boord went with it. This server keeps the harvest it
+has recorded itself — every crate, every load, every payment — and the
+Reports tab still exports all of it. What it no longer holds is the
+1987–2019 history and the hourly weather record; those live in the Owner
+app now.
 
 ---
 
@@ -185,7 +186,6 @@ joins.
 | Worker Harvest Report | Per-worker crates/kg/amount due |
 | Lietsjie Lone / Litchi Wages | Per-worker crates harvested, one column per date worked, plus a total — a whole pay period on one row |
 | Block Harvest Report | Per-block crates/kg/averages |
-| Historical Harvest Data | The full multi-year block x date pivot, 2020 through the current season, in one file. Ignores the date range above — there's only ever one. |
 
 ---
 

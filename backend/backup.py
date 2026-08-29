@@ -4,21 +4,14 @@ background daemon thread - no scheduling library needed for a single daily
 job. Backup files never include the app's source code (already in git),
 only the data that changes at runtime.
 
-Two things keep the archives small, both of which turn on the fact that
-almost the entire database is weather (WeatherHistory plus its index were
-42.0 MB of a 42.4 MB file; every other table together came to ~0.3 MB):
+The nightly run only writes an archive when the farm data actually changed
+since the last one; pressing "Backup Now" is always unconditional.
 
-- The archived copy has WeatherHistory emptied out. That history is
-  re-downloadable from Open-Meteo and takes a backup from ~8.7 MB to a
-  couple hundred KB. See the restore note in MANUAL.md - refilling it
-  after a restore means re-running the two scripts/import_historical_weather*
-  imports, it does NOT come back on its own.
-- The nightly run only writes an archive when the farm data actually
-  changed since the last one. Weather deliberately doesn't count as a
-  change: sync_recent_weather() appends rows whenever anyone loads the
-  weather or risk data, so a plain "did the .db file change"
-  test would fire nearly every day and skip nothing. Pressing "Backup Now"
-  is always unconditional - only the 02:00 run is gated.
+This file used to carry a good deal more machinery, because the weather
+history was 42.0 MB of a 42.4 MB database and every archive had to empty it
+out and VACUUM to stay a sensible size. That table left with the Owner app,
+and the whole database is now a few hundred KB - so the archive is simply
+the database, and the special case is gone.
 """
 import hashlib
 import json
@@ -43,7 +36,6 @@ MAX_DAYS_WITHOUT_BACKUP = 30
 # Lives in BACKUPS_DIR on purpose - _backup_filenames() only matches
 # backup_*.zip, so the pruner will never delete it.
 STATE_PATH = os.path.join(BACKUPS_DIR, "last_backup.json")
-WEATHER_TABLE = "weatherhistory"
 
 
 def _backup_filenames() -> list[str]:
@@ -98,27 +90,9 @@ def _snapshot_db(destination: str) -> None:
 
 
 def _build_snapshot(destination: str) -> None:
-    """The database as it goes into the archive: a consistent snapshot with
-    the weather history emptied out.
-
-    The table itself has to survive, empty - a restored database still needs
-    the schema for sync_recent_weather() and the import scripts to refill.
-    Only ever touches the throwaway copy, never DB_PATH. VACUUM is what
-    actually hands the ~42 MB back; without it the pages stay in the file as
-    free space and the archive is no smaller than before.
-    """
+    """The database as it goes into the archive: a consistent point-in-time
+    snapshot, whole. Only ever touches the throwaway copy, never DB_PATH."""
     _snapshot_db(destination)
-    con = sqlite3.connect(destination)
-    try:
-        exists = con.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (WEATHER_TABLE,)
-        ).fetchone()
-        if exists:
-            con.execute(f'DELETE FROM "{WEATHER_TABLE}"')
-            con.commit()
-        con.execute("VACUUM")
-    finally:
-        con.close()
 
 
 def _fingerprint(snapshot_path: Optional[str]) -> str:
@@ -126,10 +100,9 @@ def _fingerprint(snapshot_path: Optional[str]) -> str:
     nightly run has anything new to save.
 
     Taken from the snapshot rather than the live database: it's already a
-    consistent point-in-time copy, and the weather rows are already gone, so
-    they can't make an off-season night look like a change. Photos go in too
-    - a new worker photo never touches the .db, so an mtime or DB-only check
-    would miss it entirely.
+    consistent point-in-time copy. Photos go in too - a new worker photo
+    never touches the .db, so an mtime or DB-only check would miss it
+    entirely.
     """
     digest = hashlib.sha256()
     con = sqlite3.connect(snapshot_path) if snapshot_path else None
@@ -246,10 +219,6 @@ def create_backup(skip_if_unchanged: bool = False) -> Optional[str]:
 # - Uncompressed .db, not a zip. A rollback wants a file you can copy back
 #   over boord.db with the server stopped, at the moment something has gone
 #   wrong and nobody is in the mood to work out an archive layout.
-# - WeatherHistory intact. The nightly archive empties it deliberately, and
-#   refilling it means re-running two import scripts against Open-Meteo -
-#   fine for a restore, wrong for a rollback that is supposed to put the
-#   database back exactly as it was thirty seconds ago.
 # - Its own retention. _backup_filenames() only ever matches backup_*.zip,
 #   so the nightly pruner cannot reach these, and they cannot crowd the
 #   fourteen rolling backups out either.

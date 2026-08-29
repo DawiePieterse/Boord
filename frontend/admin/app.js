@@ -1153,16 +1153,11 @@ const REPORTS = [
     params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
   { key: "block-harvest", label: "Block Harvest Report", icon: "fa-tree",
     params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
-  { key: "historical-harvest-data", label: "Historical Harvest Data", icon: "fa-clock-rotate-left",
-    params: () => "" },
 ];
 
 // Reports whose export ignores the period-end date and only ever covers a
 // single day, no matter how wide a range is picked above.
 const DAILY_ONLY_REPORTS = new Set(["daily-harvest"]);
-
-// Reports that ignore the date range entirely - always the full dataset.
-const NOT_DATE_FILTERED_REPORTS = new Set(["historical-harvest-data"]);
 
 function renderReportsGrid() {
   const d1 = document.getElementById("reportDate1").value;
@@ -1173,8 +1168,6 @@ function renderReportsGrid() {
     const flagDailyOnly = isRange && DAILY_ONLY_REPORTS.has(r.key);
     const subtitle = flagDailyOnly
       ? `<div class="text-xs text-amber-600 font-medium"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Daily report only - uses ${d1} (period start)</div>`
-      : NOT_DATE_FILTERED_REPORTS.has(r.key)
-      ? `<div class="text-xs text-slate-400">Download .xlsx - all seasons, ignores the date range above</div>`
       : `<div class="text-xs text-slate-400">Download .xlsx</div>`;
     return `
     <button class="bg-white rounded-xl shadow p-4 text-left hover:bg-slate-50 flex items-start gap-3" data-report="${r.key}">

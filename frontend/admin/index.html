@@ -74,7 +74,7 @@
     <div class="bg-white rounded-2xl shadow overflow-hidden">
       <div class="px-5 pt-4">
         <div class="flex items-center justify-between text-xs text-slate-500">
-          <span id="wizStepCount">Step 1 of 9</span>
+          <span id="wizStepCount">Step 1 of 8</span>
           <span id="wizStepOptional" class="hidden text-slate-400">Optional</span>
         </div>
         <div class="h-1.5 bg-slate-200 rounded-full mt-2 overflow-hidden">
@@ -211,64 +211,7 @@
           <div id="wizDevicesList" class="space-y-2 text-sm"></div>
         </section>
 
-        <!-- 8. History -->
-        <section class="wiz-step hidden" data-step="history">
-          <div class="font-bold text-lg">Seasons before Boord</div>
-          <div class="text-sm text-slate-500 mt-1 mb-4">
-            Optional, and easy to do later. Past harvests are what the Analysis
-            tab compares this season against, and what the Risk indicator and
-            Harvest Forecast are fitted to - without them those screens work,
-            they just have nothing to measure against yet.
-          </div>
-
-          <div class="bg-slate-50 rounded-lg p-3 text-sm space-y-2">
-            <div class="font-semibold">Daily harvest records</div>
-            <div class="text-xs text-slate-500">One row per block per day.
-              <a href="/templates/historical_harvest.csv" download class="text-blue-700 underline">Download the template</a>
-              - columns: block_id, date, kg, estimated.</div>
-            <label class="inline-block px-4 py-2 bg-slate-200 rounded-lg cursor-pointer">
-              Choose file <input type="file" id="wizHistDailyFile" class="hidden" accept=".csv,.xlsx">
-            </label>
-            <div id="wizHistDailyResult"></div>
-          </div>
-
-          <div class="bg-slate-50 rounded-lg p-3 text-sm space-y-2 mt-3">
-            <div class="font-semibold">Season totals, further back</div>
-            <div class="text-xs text-slate-500">One row per season, block optional.
-              <a href="/templates/historical_annual_yield.csv" download class="text-blue-700 underline">Download the template</a>
-              - columns: season_year, kg, block_id, estimated.</div>
-            <label class="inline-block px-4 py-2 bg-slate-200 rounded-lg cursor-pointer">
-              Choose file <input type="file" id="wizHistAnnualFile" class="hidden" accept=".csv,.xlsx">
-            </label>
-            <div id="wizHistAnnualResult"></div>
-          </div>
-
-          <div class="bg-slate-50 rounded-lg p-3 text-sm space-y-2 mt-3">
-            <div class="font-semibold">Weather history</div>
-            <div class="text-xs text-slate-500">Downloads every hour of weather at the
-              location you entered. The Risk indicator scores each season against the
-              weather that season had, so this needs to reach back as far as your own
-              harvest figures do - but every extra year is another ~8,700 hours to
-              download, and it needs internet the whole way.</div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <label for="wizWeatherYears" class="text-xs text-slate-500">How far back</label>
-              <select id="wizWeatherYears" class="border border-slate-300 rounded-lg p-2 text-sm"></select>
-              <button id="wizWeatherBackfillBtn" class="px-4 py-2 bg-slate-200 rounded-lg text-sm">
-                <i class="fa-solid fa-cloud-arrow-down"></i> Fetch weather history
-              </button>
-            </div>
-            <div id="wizWeatherYearsHint" class="text-xs text-slate-500"></div>
-            <div id="wizWeatherResult"></div>
-          </div>
-
-          <div class="text-xs text-slate-400 mt-3">
-            Each import replaces everything previously loaded into that table
-            rather than adding to it, so a corrected sheet can simply be
-            imported again.
-          </div>
-        </section>
-
-        <!-- 9. Finish -->
+        <!-- 8. Finish -->
         <section class="wiz-step hidden" data-step="finish">
           <div class="font-bold text-lg">That is the farm set up</div>
           <div id="wizOutstanding" class="hidden mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800"></div>

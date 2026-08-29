@@ -118,12 +118,10 @@ ordinary PC that stays switched on.
 | Network | Wi-Fi or Ethernet, same LAN as field/pack house devices | Ethernet, with a static IP or DHCP reservation |
 
 The app itself (Python plus all its dependencies) takes up around
-150 MB. The database grows to a few tens of MB over a season - most of
-that is the hourly weather history rather than harvest data - and the 14
-rolling backups are small by comparison, because they leave that weather
-history out (see [Data Backup](#data-backup)) and are only written on
-days something actually changed. Storage capacity is not a real
-constraint here.
+150 MB. The database is small - a few hundred KB, growing slowly with the
+harvest records - and the 14 rolling backups are smaller still, since they
+are only written on days something actually changed. Storage capacity is
+not a real constraint here.
 
 A small **UPS (uninterruptible power supply)** is worth adding even
 though it's not strictly required: the one real risk on a farm is a power
@@ -302,9 +300,8 @@ server.
 The easy way: double-click **`update_server.bat`** at the top of the
 project folder. It fetches the release tags, picks the newest `v*` by
 version order, **verifies its signature against `data\release_key.fpr`**,
-checks it out, installs any new dependencies, refreshes historical weather
-and harvest data (see below), and restarts the server (via the Scheduled
-Task) all in one step - this is the recommended way to deploy an update,
+checks it out, installs any new dependencies, and restarts the server (via
+the Scheduled Task) all in one step - this is the recommended way to deploy an update,
 since it's easy to forget the restart step if done by hand (a checkout
 alone does not restart anything, so the running server keeps serving the
 old code until it's explicitly restarted).
@@ -346,23 +343,6 @@ than starting a server it knows will fail.
 Then bring the database itself up to date - see
 [Database changes on update](#database-changes-on-update) below.
 
-Optionally refresh historical data too (`update_server.bat`
-does all three of these automatically - see below for why it matters):
-```bat
-backend\.venv\Scripts\python.exe scripts\import_historical_weather.py
-backend\.venv\Scripts\python.exe scripts\import_historical_weather_archive.py
-backend\.venv\Scripts\python.exe scripts\import_historical_annual_yield.py
-```
-(`import_historical_harvest.py`, the 2020-2025 daily harvest import, is
-NOT one of these three - it's a true one-off against a fixed source
-workbook, so it isn't part of `update_server.bat`'s automatic refresh; see
-[Re-importing historical data on a server](#re-importing-historical-data-on-a-server)
-below if it's ever needed by hand, e.g. after regenerating that
-workbook.) Only 2020-2025 actually drives the Risk indicator or Harvest
-Forecast (both fixed to that reference range); 1987-2019 is
-reference-only, for the Historical Harvest Data report's Annual Totals
-sheet.
-
 Then restart the server (see
 [Stopping, starting, and restarting the server](#stopping-starting-and-restarting-the-server-task-scheduler)
 below).
@@ -389,10 +369,8 @@ the release you were already running still works.
 
 These copies are deliberately different from the nightly backups next to
 them: they are plain `.db` files rather than zips, so putting one back is a
-single file copy, and unlike the nightly archives they keep the full
-weather history, so a rollback puts the database back exactly as it was
-rather than needing the weather re-imported afterwards. They are roughly
-the size of the database itself - around 40 MB on an established farm.
+single file copy. They are roughly the size of the database itself, which
+is a few hundred KB.
 
 To go back to one, stop the server, copy the file over
 `data\boord.db`, then check out the release you were on before and start
@@ -410,84 +388,20 @@ restore, or any update that worries you, run the self-test:
 ```bat
 backend\.venv\Scripts\python.exe scripts\selftest.py
 ```
-It checks the parts of the app that do real arithmetic - the Risk
-indicator's scoring, the Harvest Forecast's projections, and whether every
-sheet of the Historical Harvest Data report reconciles against the
-database - along with the database's own schema: that this server is on
-the newest schema version, and that it matches what this release expects.
+It checks the parts of the app where a wrong answer would look plausible -
+the schema migration paths, the copy taken before a migration, the guards
+on bulk imports, and the setup wizard's view of how far this farm has got -
+along with the database's own schema: that this server is on the newest
+schema version, and that it matches what this release expects.
 It prints a line per check, ending in PASSED or FAILED. It
 reads only; it never writes to the database and needs no internet, so it
 is safe to run on the live server at any time, including while people are
 using the app. If anything reports FAILED, the message names what
 disagreed - send that text on rather than acting on the app's figures.
 
-**Why `update_server.bat` refreshes weather on every update.** Open-Meteo's
-recent days start out as provisional forecast-model estimates and firm up
-into finalized reanalysis figures over the following days/weeks - the
-The automatic sync (`weather.sync_recent_weather()`, run as a side effect of
-loading the weather or risk figures) only ever *appends* new hours, so it
-never goes back and corrects an earlier provisional value once the real one
-is available. `update_server.bat` re-runs the full historical import (a
-wholesale replace, same script as the one-off backfill above) between
-stopping and starting the server, so the Risk indicator's
-score and the Harvest Forecast - both sensitive to exactly how accurate recent
-weather is, not just whether it's present - are working from the best data
-available each time the server restarts. The 1987-2019 weather and harvest
-scripts run there too, mostly as a no-op once already populated (that data
-is finalized and doesn't change) - they're there so a fresh or rebuilt
-server picks them up automatically instead of needing the manual steps
-above. If any of these steps fail (no internet, Open-Meteo unreachable),
-the update still completes and the server still
-restarts - it just keeps whatever weather history it already had until the
-next successful refresh.
-
 Either way, remember that each phone/tablet's installed app also needs a
 full close-and-reopen afterward to pick up the update - see
 [Confirming devices picked up an update](#confirming-devices-picked-up-an-update-version-numbers).
-
-### Re-importing historical data on a server
-
-> **The source workbooks are not shipped with the app.** They hold one
-> farm's own harvest records, so they live in `data\imports\` - which is
-> gitignored and per-farm - rather than in the repository. A new install
-> has no workbooks and the two harvest import scripts simply skip, which is
-> correct: a farm should never be importing another farm's history. To load
-> your own, put the workbook in `data\imports\` (or pass its path as the
-> first argument to the script) and re-run.
-
-
-The historical import is a one-off script, not something an update
-carries over - the source workbook and the script that reads it are both
-in the repo, but running the script is a separate manual step against
-*that server's own database*. This means a fresh install, or a server
-whose database was reset, needs the import run on it directly - a pull
-alone leaves the Historical Harvest Data report with nothing before the
-current season, until this is done.
-
-From Command Prompt in `C:\Boord`, after confirming the update
-(`update_server.bat` - see
-[Getting the code onto the server](#getting-the-code-onto-the-server-github-recommended-or-usbzip))
-has already brought in the latest code:
-```bat
-backend\.venv\Scripts\python.exe scripts\import_historical_harvest.py
-```
-Safe to re-run any time (e.g. after regenerating the source workbook) -
-it replaces the whole historical table each time rather than appending.
-No server restart needed; the next report picks it up.
-
-There's a second, separate import for the even-older 1987-2019 seasons
-(annual totals only, no daily breakdown - these feed only the Historical
-Harvest Data report's Annual Totals sheet).
-2012-2019 has a per-block breakdown; 1987-2009 only has a whole-farm
-total per year, since those records predate today's block register and
-use an incompatible numbering scheme. `update_server.bat` runs this
-automatically on every update (see "Pulling future updates" above), so
-it's rarely needed by hand - but for a fresh install, or to run it in
-isolation:
-```bat
-backend\.venv\Scripts\python.exe scripts\import_historical_annual_yield.py
-```
-Safe to re-run any time; replaces its table wholesale.
 
 ### Removing Boord from a PC
 
@@ -612,13 +526,11 @@ likely to get tidied up or deleted by accident.
 > backup zip is a finished file, which is exactly what sync is good at.
 > Just do not run the app from one.
 
-> **Set the farm's GPS location before importing any weather.** Weather,
-> the Risk indicator and the Harvest Forecast are all computed for the
-> coordinates in **Admin → Settings**, and until those are filled in the
-> app will not fetch weather at all - the header reads "Set farm location
-> in Settings" and the import scripts skip with a message. That is
-> deliberate. Guessing a location produces confident Risk scores for
-> somewhere else, which looks completely normal and is completely wrong.
+> **Set the farm's GPS location.** The weather shown in the header, and the
+> conditions stamped onto every crate and picking note, are looked up for
+> those coordinates. Until they are set the app fetches no weather at all -
+> the header reads "Set farm location in Settings" and crates save without
+> it. Nothing else is affected.
 
 **Step 2 - Install Python.**
 
@@ -1050,9 +962,7 @@ Boord shows a nine-step setup wizard instead of the usual tabs:
 5. **Your orchard blocks** — download `blocks.csv`, fill it in, load it back
 6. **Your people** — the worker import (optional)
 7. **Name your stations** — rename the eight device slots (optional)
-8. **Seasons before Boord** — historical harvest records, season totals, and
-   the weather history download (all optional)
-9. **Finish** — the address to open on your tablets, and anything still outstanding
+8. **Finish** — the address to open on your tablets, and anything still outstanding
 
 Steps 1 to 3 are required, because nothing sensible can be guessed for them.
 The rest can be skipped and done later; the last screen lists anything still
@@ -1071,7 +981,7 @@ offering it, so a server that has been running is left alone.
 ### ⚠️ Do not run `seed_demo.py` on a real farm database
 
 The repo includes `backend/seed_demo.py`, which fills the database with
-**fake historical harvest data** for demoing and testing the app. It is
+**invented harvest data on past dates** for demoing and testing the app. It is
 **not** part of normal startup and must never be run against a real farm's
 database - doing so will inject invented workers, lots, and payments
 alongside real data with no easy way to tell them apart afterward. It's
@@ -1631,7 +1541,6 @@ Dashboard (Farm/Supplier + date range):
 | Worker Harvest Report | Per-worker crates/kg/amount-due/avg-kg-per-crate |
 | Lietsjie Lone / Litchi Wages | One row per worker, with the crates that worker harvested broken out per day - one column per date worked, plus a total - so a whole pay period reads off a single row |
 | Block Harvest Report | Per-block crates/kg/avg-kg-per-crate/avg-kg-per-tree |
-| Historical Harvest Data | Every harvest figure the farm has on file, 1987 through the current season, in one workbook. **Season Summary** (one row per season: total, year-on-year change, and how that season was recorded), **Block by Year** (every block-level season total in one grid, whichever way the year was recorded), **Annual Totals** (1987-2019 season-only figures - per block from 2012, whole-farm only before that), then a **block x date sheet per season** from 2020 on, where real daily records exist - the farm's own "Daaglikse Oesdata" workbook, kept live. Ignores the date range filter above (there's only ever one of these); download it any time to get everything to date in one file. |
 
 Every generated report is also saved on the server itself, in
 `data\reports\` (same filename as the download, e.g.
@@ -1641,19 +1550,6 @@ downloaded it happened to save it. Regenerating the same report again
 duplicates. This folder isn't covered by the automatic nightly backup
 (see [Data Backup](#data-backup) below) - back it up the same way you'd
 back up anything else in `data\`.
-
-### A note on the historical numbers
-
-A handful of today's blocks (**8a/8b**, **10a/10b**, **17a/17b**, **19a/19b**)
-didn't exist as separate blocks before the app - the original spreadsheets
-recorded one combined daily total for each pair. Those combined totals have
-been split between the two sub-blocks in proportion to their hectares (e.g.
-a day's picking on the old "block 8" is split roughly 58%/42% between 8a and
-8b, matching their relative size). This is a reasonable **estimate**, not
-what was actually picked from each sub-block on that day - every figure
-built from an estimated split carries a small info icon next to its block
-name in the Per-Block Yield table so it's never mistaken for an exact
-historical record.
 
 ---
 
@@ -1675,12 +1571,10 @@ historical record.
   copy every single night, including right through the off-season, which
   is what made the backups take up so much space. If a full **30 days**
   pass with no changes at all, one backup is taken anyway as a safety net.
-- Weather history is **not** included in the archive. It is by far the
-  biggest thing in the database (bigger than every harvest record put
-  together) and it can be downloaded again from the weather service, so
-  leaving it out takes a backup from roughly 9 MB down to under 100 KB.
-  The trade-off shows up when restoring - see the note in
-  [Restoring from a backup](#restoring-from-a-backup) below.
+- The archive is the whole database. It used to leave the hourly weather
+  history out, because that one table was 42 MB of a 42.4 MB file; the
+  weather left for the Owner app, and with it the special case. A backup is
+  now well under 100 KB and a restore puts everything back.
 
 > **A gap in the backup list is not a problem in itself.** If the newest
 > backup is a few days or a few weeks old, the ordinary explanation is
@@ -1730,25 +1624,9 @@ there before you overwrote it.
    folder.
 4. Copy those into `data\`, replacing the current
    `data\boord.db` and `data\photos\`.
-5. Start the server again.
-6. **Rebuild the weather history.** Backups don't carry it, so straight
-   after a restore the server holds no weather history at all, and it will
-   *not* fill itself back in - the app only ever tops up the last few
-   hours, it never re-fetches years. Everything else in the app works
-   normally in the meantime. To bring it back, run these two scripts once
-   each from the project folder (they take a while - they're downloading
-   years of hourly readings):
-
-   ```bat
-   backend\.venv\Scripts\python.exe scripts\import_historical_weather.py
-   backend\.venv\Scripts\python.exe scripts\import_historical_weather_archive.py
-   ```
-
-   Running `update_server.bat` does both of these for you as part of its
-   normal refresh (see [chapter 2](#2-initial-server-setup)), so if you'd
-   rather not type them, run that instead.
-   Harvest data, workers, payments and settings are all restored by step 4
-   and are not affected by this.
+5. Start the server again. Everything is back - harvest data, workers,
+   payments, settings and photos all come from the archive, and there is
+   nothing to rebuild afterwards.
 
 ### Farm settings
 
@@ -1869,25 +1747,17 @@ end wastes the most time:
 > reachable - the two use different DNS and different routes. Test the
 > app's own address, not a search engine.
 
-> The header weather readout, the weather stamped onto each crate as it is
-> dispatched, and the setup wizard's weather download all call out to the
-> weather service. If those fail while the rest of the app works, the server
-> is fine and it's that outbound call failing - the header simply shows
-> nothing and a crate saves without its weather, rather than anything
-> breaking.
+> The header weather readout and the conditions stamped onto each crate as
+> it is dispatched both call out to the weather service. If those fail while
+> the rest of the app works, the server is fine and it's that outbound call
+> failing - the header simply shows nothing and a crate saves without its
+> weather, rather than anything breaking.
 
 **"Reconnect to send a partial load, or dispatch everything now" when
 sending a picking slip**
 You tried to split a load (send fewer crates than captured) while offline.
 Splitting needs a connection because the server decides the split; either
 wait for a connection or send the full load instead.
-
-**Historical Harvest Data report is missing its older seasons**
-The server's database hasn't had the historical import run against it yet
-- an update brings in the app code and the source workbook, but loading
-that data into the database is a separate manual step per server. See
-[Re-importing historical data on a server](#re-importing-historical-data-on-a-server)
-in [chapter 2](#2-initial-server-setup).
 
 **Forgotten admin password**
 There's currently no self-service "forgot password" flow in the app - a
