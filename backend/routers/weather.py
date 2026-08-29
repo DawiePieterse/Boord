@@ -1,15 +1,16 @@
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlmodel import Session, delete, select
 
 from db import get_session
-from models import HistoricalAnnualYield, HistoricalHarvest, WeatherHistory
+from models import WeatherHistory
+from routers.historical import earliest_history_season
 from security import get_current_admin
-from weather import (HISTORY_START_DATE, farm_coords, fetch_historical_hourly, fetch_weather,
-                      parse_hourly_rows, sync_recent_weather)
+from weather import (ARCHIVE_START_DATE, HISTORY_START_DATE, different_location, farm_coords,
+                      fetch_hourly_range, fetch_weather, foreign_row_count, sync_recent_weather)
 
 router = APIRouter(prefix="/api/weather", tags=["weather"])
 
@@ -102,11 +103,22 @@ def build_weather_history(session: Session) -> dict:
         points.append(point)
 
     last_synced = session.exec(select(func.max(WeatherHistory.timestamp))).one()
+
+    # Hours on file that were fetched for somewhere other than where this
+    # farm now says it is. Normally zero; anything else means the GPS was
+    # corrected after weather had already been downloaded, and the chart
+    # above is a blend of two places until the backfill is re-run. Reported
+    # here because the Weather tab is where somebody would notice the
+    # numbers looking wrong and have no way to find out why.
+    coords = farm_coords(session)
+    hours_elsewhere = foreign_row_count(session, *coords) if coords else 0
+
     return {
         "metrics": _metrics_public(),
         "years": sorted({p["year"] for p in points}),
         "current_year": date.today().year,
         "last_synced": last_synced.isoformat() if last_synced else None,
+        "hours_elsewhere": hours_elsewhere,
         "points": points,
     }
 
@@ -121,30 +133,40 @@ def weather_history(session: Session = Depends(get_session), admin=Depends(get_c
 
 
 @router.post("/history/backfill")
-def backfill_weather_history(session: Session = Depends(get_session), admin=Depends(get_current_admin)):
-    """Pull the whole weather record for the farm's location, 2020 to today.
+def backfill_weather_history(years: Optional[int] = Query(None, ge=1, le=200),
+                              session: Session = Depends(get_session),
+                              admin=Depends(get_current_admin)):
+    """Pull the weather record for the farm's location, `years` back to today.
 
-    Same job as scripts/import_historical_weather.py, reachable from the
-    browser - the setup wizard offers it once GPS has been entered, because
-    a new customer has no shell on the server and no reason to know that
-    script exists. The ordering is the point: this cannot run before the
-    location step, so the "imported weather for the wrong place" failure
-    that farm_coords() refuses to allow never gets a chance to arise.
+    Same job as scripts/import_historical_weather.py and its 1987-2019
+    sibling, reachable from the browser - the setup wizard offers it once
+    GPS has been entered, because a new customer has no shell on the server
+    and no reason to know those scripts exist. The ordering is the point:
+    this cannot run before the location step, so the "imported weather for
+    the wrong place" failure that farm_coords() refuses to allow never gets
+    a chance to arise.
 
-    Deletes and reinserts HISTORY_START_DATE onward only, exactly like the
-    script, so it still composes with the 1987-2019 archive backfill
-    (scripts/import_historical_weather_archive.py) in either order and
-    however many times either runs.
+    `years` counts calendar years including this one, and is what the wizard
+    asks the farm for: the trade is real and only they can make it, because
+    the useful depth is set by their own harvest history (routers/risk.py
+    scores every reference season that has yield data, and refuses one it
+    has no weather for) while the cost is download time on a farm's
+    internet. Omitted, it means HISTORY_START_DATE onward - the range this
+    endpoint fetched before it could be asked, and what weather.py's own
+    default covers. Clamped at ARCHIVE_START_DATE, so asking for more years
+    than exist is not an error, it just starts in 1987.
 
-    Slow by nature - six years of hourly rows in one request - so callers
-    must use Boord.UPLOAD_TIMEOUT_MS, not the 8s default.
+    Everything it fetches, it replaces: the whole requested range, plus -
+    anywhere in the table, at any date - the rows that were fetched for a
+    different location. That second one is the point of the lat/lon columns.
+    A farm that corrects its GPS has a table holding two places' weather,
+    and there is no reading of "keep it" that helps anybody: the Risk
+    indicator would score this season against last season's other town.
+    Rows OUTSIDE the requested range that belong here are left alone, which
+    is what keeps this composable with the archive script in either order.
 
-    Known gap, unchanged by this: WeatherHistory carries no location of its
-    own, so rows fetched for one place are indistinguishable from another's.
-    A farm that MOVES its GPS and re-runs this ends up with two locations'
-    weather in one table. Fixing that needs a lat/lon column and a
-    cache-invalidating migration - non-additive, so it waits for Alembic
-    (NEXT_STEPS.md §4).
+    Slow by nature - a year is ~8,760 rows - so callers must set a timeout
+    to match what they asked for, not Boord's 8s default.
     """
     coords = farm_coords(session)
     if coords is None:
@@ -153,52 +175,61 @@ def backfill_weather_history(session: Session = Depends(get_session), admin=Depe
         # honest answer rather than a 400.
         return {"no_location": True, "imported": 0}
     lat, lon = coords
-    end_date = date.today().isoformat()
+
+    end = date.today()
+    floor = date.fromisoformat(ARCHIVE_START_DATE)
+    if years is None:
+        start = date.fromisoformat(HISTORY_START_DATE)
+    else:
+        start = date(max(end.year - years + 1, floor.year), 1, 1)
+
     try:
-        data = fetch_historical_hourly(lat, lon, HISTORY_START_DATE, end_date)
-        rows = [WeatherHistory(**r) for r in parse_hourly_rows(data)]
+        rows = [WeatherHistory(**r) for r in fetch_hourly_range(lat, lon, start, end)]
     except Exception as e:
-        # The farm server's internet is genuinely unreliable. Say so and
-        # leave the existing history alone - a half-deleted table would be
-        # worse than no import.
+        # The farm server's internet is genuinely unreliable, and a long
+        # range is several requests, any of which can be the one that drops.
+        # Say so and leave the existing history alone - a half-deleted table
+        # would be worse than no import.
         raise HTTPException(502, f"Could not reach the weather service ({type(e).__name__}). "
                                   f"Nothing was changed - try again later.")
-    session.exec(delete(WeatherHistory).where(
-        WeatherHistory.timestamp >= date.fromisoformat(HISTORY_START_DATE)))
+
+    # Counted before the delete, and only outside the range being replaced:
+    # foreign rows inside it were going to be overwritten anyway, so
+    # reporting them would turn an ordinary re-run into an alarming number.
+    removed_elsewhere = session.exec(
+        select(func.count()).select_from(WeatherHistory)
+        .where(different_location(lat, lon), WeatherHistory.timestamp < start)
+    ).one()
+
+    session.exec(delete(WeatherHistory).where(WeatherHistory.timestamp >= start))
+    session.exec(delete(WeatherHistory).where(different_location(lat, lon)))
     session.add_all(rows)
     session.commit()
-    return {"imported": len(rows), "start_date": HISTORY_START_DATE, "end_date": end_date,
+    return {"imported": len(rows), "start_date": start.isoformat(), "end_date": end.isoformat(),
+            "years": end.year - start.year + 1,
             "lat": lat, "lon": lon,
-            "archive_gap": _archive_gap(session)}
+            "removed_elsewhere": removed_elsewhere,
+            "uncovered_season": _uncovered_season(session, start.year)}
 
 
-def _archive_gap(session: Session) -> Optional[int]:
+def _uncovered_season(session: Session, start_year: int) -> Optional[int]:
     """The earliest harvest season this farm has imported, if that is before
-    the weather this endpoint can reach - otherwise None.
+    the weather now on file - otherwise None.
 
     Worth reporting rather than leaving to be discovered. routers/risk.py
     scores every reference season from REFERENCE_START_YEAR (2012) onward
     that has yield data, and it needs weather for each one: a farm that
-    imports season totals back to, say, 2013 and then fills weather only
+    imports season totals back to, say, 2013 and then fetches weather only
     from 2020 gets a Risk indicator that raises "no weather data for
     reference season 2013" instead of a score. Nothing warns them, because
     each half looks like it worked.
 
-    The older range comes from a different Open-Meteo API and is fetched in
-    chunks over several minutes (see
-    scripts/import_historical_weather_archive.py), which is more than one
-    browser request should hold open - so this reports the gap and points
-    at update_server.bat rather than trying to close it here.
+    This used to be able to say only "run update_server.bat", because the
+    older range lives behind a different Open-Meteo API and was fetched
+    exclusively by a shell script. Now that the caller chooses its own
+    depth, the answer is simply to choose more years.
     """
-    # Aggregated in SQL: HistoricalHarvest is one row per block per day and
-    # reaches back years, and this runs on a request that has already spent
-    # a minute or two on the network.
-    earliest = min(
-        (y for y in (session.exec(select(func.min(HistoricalHarvest.season_year))).one(),
-                     session.exec(select(func.min(HistoricalAnnualYield.season_year))).one())
-         if y is not None),
-        default=None,
-    )
+    earliest = earliest_history_season(session)
     if earliest is None:
         return None
-    return earliest if earliest < date.fromisoformat(HISTORY_START_DATE).year else None
+    return earliest if earliest < start_year else None

@@ -43,6 +43,8 @@ import asyncio  # noqa: E402
 from fastapi import HTTPException, UploadFile  # noqa: E402
 
 import backup  # noqa: E402
+import weather as weather_module  # noqa: E402
+import routers.weather as weather_router  # noqa: E402
 from db import DB_PATH, engine, legacy_schema_catch_up  # noqa: E402
 from routers.master_data import import_blocks  # noqa: E402
 from migrate import (BASELINE_REVISION, _baseline_database, _config,  # noqa: E402
@@ -879,6 +881,148 @@ def test_this_server_matches_the_models():
 
 
 # ---------------------------------------------------------------------------
+# Weather belongs to a place
+#
+# WeatherHistory rows now record the coordinates they were fetched for. The
+# reason is not bookkeeping: without it, a farm that corrects its GPS keeps
+# the old location's hours and quietly goes on appending the new location's
+# beside them, and the Risk indicator scores a season against a blend of two
+# places. Every check here is about that one failure.
+#
+# Throwaway databases, and stubbed network - these are the destructive paths
+# (the backfill deletes), so none of them may touch the farm's own database.
+# ---------------------------------------------------------------------------
+HERE = (10.0, 20.0)        # deliberately not anywhere: no farm's coordinates
+ELSEWHERE = (11.0, 21.0)   # belong in this repo
+
+
+def _weather_db(tmp, name, coords, rows):
+    """A throwaway database with a location set and `rows` of (datetime, coords)."""
+    path = os.path.join(tmp, name)
+    temp_engine = create_engine(f"sqlite:///{path}")
+    run_migrations(temp_engine, snapshot=False)
+    with Session(temp_engine) as s:
+        s.add(SystemSetting(gps_lat=coords[0], gps_lon=coords[1]))
+        for when, (lat, lon) in rows:
+            s.add(WeatherHistory(timestamp=when, temp_c=20.0, lat=lat, lon=lon))
+        s.commit()
+    return temp_engine
+
+
+def test_weather_from_another_place_is_counted_as_another_place():
+    """Including rows with no coordinates at all. Those predate the columns,
+    and a database that had no GPS could only have got weather from the
+    hardcoded fallback coordinates farm_coords() used to carry - which is to
+    say, from somebody else's farm. Reading them as "probably ours" would
+    keep exactly the rows there is most reason to throw away."""
+    tmp = tempfile.mkdtemp()
+    try:
+        temp_engine = _weather_db(tmp, "counted.db", HERE, [
+            (datetime(2024, 1, 1, 0), HERE),
+            (datetime(2024, 1, 1, 1), HERE),
+            (datetime(2024, 1, 1, 2), ELSEWHERE),
+            (datetime(2024, 1, 1, 3), (None, None)),
+        ])
+        with Session(temp_engine) as s:
+            assert weather_module.foreign_row_count(s, *HERE) == 2
+            assert weather_module.foreign_row_count(s, *ELSEWHERE) == 3
+        # ~11 m of slack, so re-typing a coordinate does not invalidate a
+        # farm's whole weather history, and a real move still does.
+        assert weather_module.at_location(HERE[0] + 0.00005, HERE[1], *HERE)
+        assert not weather_module.at_location(HERE[0] + 0.01, HERE[1], *HERE)
+        assert not weather_module.at_location(None, None, *HERE)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_backfill_clears_out_a_previous_location_everywhere():
+    """The rows the backfill refetches are replaced whatever their origin;
+    the rows it does NOT refetch are kept if they belong here and deleted if
+    they do not. That second half is the whole point - the pre-2020 archive
+    sits outside any range the browser asks for, so keeping it "because it
+    was not in the range" would leave another town's decade on file."""
+    tmp = tempfile.mkdtemp()
+    try:
+        this_year = date.today().year
+        temp_engine = _weather_db(tmp, "moved.db", HERE, [
+            (datetime(2015, 6, 1, 0), ELSEWHERE),          # old, and from before
+            (datetime(2016, 6, 1, 0), HERE),               # old, but ours - keep
+            (datetime(this_year, 1, 1, 0), ELSEWHERE),     # inside the refetch
+        ])
+        fetched = [{"timestamp": datetime(this_year, 1, 1, 0), "temp_c": 21.0,
+                    "condition": "Clear", "lat": HERE[0], "lon": HERE[1]}]
+        real_fetch = weather_router.fetch_hourly_range
+        weather_router.fetch_hourly_range = lambda lat, lon, start, end: fetched
+        try:
+            with Session(temp_engine) as s:
+                result = weather_router.backfill_weather_history(years=1, session=s, admin=None)
+        finally:
+            weather_router.fetch_hourly_range = real_fetch
+
+        assert result["imported"] == 1
+        assert result["removed_elsewhere"] == 1, (
+            "the pre-range rows fetched for another location were left on file")
+        with Session(temp_engine) as s:
+            assert weather_module.foreign_row_count(s, *HERE) == 0
+            kept = s.exec(select(WeatherHistory.timestamp)).all()
+            assert datetime(2016, 6, 1, 0) in kept, (
+                "the backfill deleted older weather that did belong to this farm")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_sync_will_not_append_to_another_locations_history():
+    """The Weather tab's own top-up. It continues from the newest row on
+    file, so if that row is somewhere else's the new hours land interleaved
+    with it and nothing afterwards can separate them. It has to decline -
+    and it has to decline before it fetches, which is what stubbing the
+    fetch to raise proves: a fetch would come back as error=True."""
+    tmp = tempfile.mkdtemp()
+    try:
+        temp_engine = _weather_db(tmp, "sync.db", HERE, [
+            (datetime(2024, 1, 1, 0), ELSEWHERE),
+        ])
+
+        def _no_network(*a, **kw):
+            raise AssertionError("sync fetched weather for a table it should have refused")
+
+        real_fetch = weather_module.fetch_historical_hourly
+        weather_module.fetch_historical_hourly = _no_network
+        try:
+            with Session(temp_engine) as s:
+                assert weather_module.sync_recent_weather(s) == {"synced": 0, "location_changed": True}
+        finally:
+            weather_module.fetch_historical_hourly = real_fetch
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_a_long_range_is_fetched_from_the_right_api_for_each_era():
+    """Neither Open-Meteo API covers the whole table: the historical-forecast
+    one refuses any start before 2016, and the archive carries no soil
+    temperature or UV at any date. A range that straddles HISTORY_START_DATE
+    has to be split there, and the older half chunked - now that the setup
+    wizard lets a farm ask for forty years in one go."""
+    archive_calls, modern_calls = [], []
+    real_archive = weather_module.fetch_archive_hourly
+    real_modern = weather_module.fetch_historical_hourly
+    weather_module.fetch_archive_hourly = lambda lat, lon, s, e, **kw: archive_calls.append((s, e)) or {}
+    weather_module.fetch_historical_hourly = lambda lat, lon, s, e, **kw: modern_calls.append((s, e)) or {}
+    try:
+        weather_module.fetch_hourly_range(*HERE, date(2014, 3, 1), date(2021, 6, 30))
+    finally:
+        weather_module.fetch_archive_hourly = real_archive
+        weather_module.fetch_historical_hourly = real_modern
+
+    assert modern_calls == [("2020-01-01", "2021-06-30")], modern_calls
+    assert archive_calls[0][0] == "2014-03-01", archive_calls
+    assert archive_calls[-1][1] == "2019-12-31", (
+        "the archive half ran past the day the other API takes over")
+    for i in range(1, len(archive_calls)):
+        assert archive_calls[i][0] > archive_calls[i - 1][1], "the chunks overlap"
+
+
+# ---------------------------------------------------------------------------
 # Master data imports
 # ---------------------------------------------------------------------------
 def test_replacing_all_blocks_with_an_empty_file_is_refused():
@@ -1184,6 +1328,13 @@ def main():
                test_pre_migration_snapshot_is_a_faithful_full_copy,
                test_this_server_is_at_the_newest_revision,
                test_this_server_matches_the_models):
+        check(fn.__name__, fn)
+
+    section("Weather belongs to a place")
+    for fn in (test_weather_from_another_place_is_counted_as_another_place,
+               test_backfill_clears_out_a_previous_location_everywhere,
+               test_sync_will_not_append_to_another_locations_history,
+               test_a_long_range_is_fetched_from_the_right_api_for_each_era):
         check(fn.__name__, fn)
 
     section("Master data imports")

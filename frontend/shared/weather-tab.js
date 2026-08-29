@@ -75,9 +75,23 @@ const LWWeatherTab = (() => {
     Boord.setOffline(false);
     _data = data;
     _rebuildFilters(data);
-    document.getElementById("weatherLastSynced").textContent = data.last_synced
+    const synced = document.getElementById("weatherLastSynced");
+    synced.textContent = data.last_synced
       ? `Weather data current to ${_formatSynced(data.last_synced)}`
       : "No weather data yet";
+    // Hours that were downloaded for somewhere other than where the farm now
+    // says it is - which only happens if the GPS was corrected after weather
+    // had already been fetched. Normally absent entirely. Worth saying here
+    // because this chart is where somebody would notice the numbers looking
+    // wrong, and nothing else on the screen could explain why.
+    if (data.hours_elsewhere) {
+      const note = document.createElement("div");
+      note.className = "text-amber-700 text-xs mt-1";
+      note.textContent = `${data.hours_elsewhere.toLocaleString()} hours on this chart were `
+        + `downloaded for a different location, before the farm's GPS was corrected. They are `
+        + `replaced the next time the weather history is refreshed on the server PC.`;
+      synced.appendChild(note);
+    }
     _render();
   }
 

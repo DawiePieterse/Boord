@@ -26,9 +26,11 @@ and HistoricalAnnualYield), so there is nothing of the farm's own to lose,
 and it is what makes correcting a sheet and re-importing safe.
 """
 from datetime import date, datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from sqlmodel import Session, delete
+from sqlalchemy import func
+from sqlmodel import Session, delete, select
 
 from db import get_session
 from excel_io import parse_uploaded_table
@@ -43,6 +45,28 @@ router = APIRouter(prefix="/api", tags=["historical"])
 # file, and importing its handful of parseable rows would replace a farm's
 # whole history with fragments.
 _MAX_REJECT_RATIO = 0.5
+
+
+def earliest_history_season(session: Session) -> Optional[int]:
+    """The oldest season this farm has loaded, across both history tables,
+    or None if it has loaded neither.
+
+    Lives here because these two tables are this module's, and it is read
+    from two places that have nothing else to do with each other: the setup
+    wizard, to suggest how far back to fetch weather, and the weather
+    backfill, to say afterwards whether it went back far enough. Both are
+    answering the same question - how much of this farm's own history the
+    Risk indicator can actually be scored against.
+
+    Aggregated in SQL: HistoricalHarvest is one row per block per day and
+    reaches back years.
+    """
+    return min(
+        (y for y in (session.exec(select(func.min(HistoricalHarvest.season_year))).one(),
+                     session.exec(select(func.min(HistoricalAnnualYield.season_year))).one())
+         if y is not None),
+        default=None,
+    )
 
 
 def _first(row: dict, *names):

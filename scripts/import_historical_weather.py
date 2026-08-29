@@ -47,7 +47,7 @@ def main():
     lat, lon = coords
     end_date = date.today().isoformat()
     data = fetch_historical_hourly(lat, lon, HISTORY_START_DATE, end_date)
-    rows = [WeatherHistory(**r) for r in parse_hourly_rows(data)]
+    rows = [WeatherHistory(**r) for r in parse_hourly_rows(data, lat, lon)]
     with Session(engine) as session:
         session.exec(delete(WeatherHistory).where(WeatherHistory.timestamp >= date.fromisoformat(HISTORY_START_DATE)))
         session.add_all(rows)

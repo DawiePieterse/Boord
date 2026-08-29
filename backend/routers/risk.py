@@ -568,7 +568,10 @@ def build_harvest_forecast(session: Session) -> dict:
         # forecast_unavailable - it should do so quickly, not hang the whole
         # Risk tab offline while it waits.
         raw = fetch_forecast_hourly(lat, lon, days=FORECAST_API_DAYS, timeout=3)
-        for row in parse_hourly_rows(raw):
+        # lat/lon are stamped on these rows like any other, though nothing
+        # here persists them - the forecast is held in memory for this one
+        # request. Passing them keeps one parse function for every caller.
+        for row in parse_hourly_rows(raw, lat, lon):
             forecast_by_date[row["timestamp"].date()].append(SimpleNamespace(**row))
     except Exception:
         forecast_unavailable = True

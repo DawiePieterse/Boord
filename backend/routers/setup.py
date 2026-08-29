@@ -21,6 +21,7 @@ from sqlmodel import Session, select
 from db import get_session
 from models import (Block, Device, HarvestRecord, HistoricalAnnualYield, HistoricalHarvest,
                     RateSetting, SetupState, Supplier, SystemSetting, Worker)
+from routers.historical import earliest_history_season
 from security import get_current_admin
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
@@ -121,8 +122,15 @@ def build_setup_state(session: Session) -> dict:
         "blocks": {"done": blocks > 0, "count": blocks},
         "workers": {"done": workers > 0, "count": workers},
         "devices": {"done": named_devices > 0, "count": named_devices},
+        # earliest_season is the wizard's basis for suggesting how many years
+        # of weather to download on this same step: the useful depth is
+        # exactly as far back as this farm's own harvest history reaches,
+        # because that is what routers/risk.py scores against. None until
+        # some history has been imported, in which case the wizard has
+        # nothing to go on and offers its own default.
         "history": {"done": daily_history > 0 or annual_history > 0,
-                     "daily_rows": daily_history, "annual_rows": annual_history},
+                     "daily_rows": daily_history, "annual_rows": annual_history,
+                     "earliest_season": earliest_history_season(session)},
     }
     return {
         "required": completed_at is None and (started_at is not None or never_configured),

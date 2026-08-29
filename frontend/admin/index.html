@@ -245,12 +245,19 @@
 
           <div class="bg-slate-50 rounded-lg p-3 text-sm space-y-2 mt-3">
             <div class="font-semibold">Weather history</div>
-            <div class="text-xs text-slate-500">Downloads every hour of weather at
-              the location you entered, back to 2020. Takes a minute or two and
-              needs internet. You can do this later from Settings.</div>
-            <button id="wizWeatherBackfillBtn" class="px-4 py-2 bg-slate-200 rounded-lg text-sm">
-              <i class="fa-solid fa-cloud-arrow-down"></i> Fetch weather history
-            </button>
+            <div class="text-xs text-slate-500">Downloads every hour of weather at the
+              location you entered. The Risk indicator scores each season against the
+              weather that season had, so this needs to reach back as far as your own
+              harvest figures do - but every extra year is another ~8,700 hours to
+              download, and it needs internet the whole way.</div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <label for="wizWeatherYears" class="text-xs text-slate-500">How far back</label>
+              <select id="wizWeatherYears" class="border border-slate-300 rounded-lg p-2 text-sm"></select>
+              <button id="wizWeatherBackfillBtn" class="px-4 py-2 bg-slate-200 rounded-lg text-sm">
+                <i class="fa-solid fa-cloud-arrow-down"></i> Fetch weather history
+              </button>
+            </div>
+            <div id="wizWeatherYearsHint" class="text-xs text-slate-500"></div>
             <div id="wizWeatherResult"></div>
           </div>
 

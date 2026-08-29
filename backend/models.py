@@ -340,3 +340,20 @@ class WeatherHistory(SQLModel, table=True):
     soil_temp_6cm_c: Optional[float] = None
     uv_index: Optional[float] = None
     sunshine_duration_s: Optional[float] = None
+    # The coordinates this hour was fetched FOR, not a measurement - every
+    # row in this table used to be implicitly "the farm's location", which
+    # is only true for a farm that never corrects its GPS. Weather fetched
+    # for one place is indistinguishable from another's once it is stored,
+    # so a farm that moves its pin ends up with two locations' weather in
+    # one table and a Risk indicator scored against a blend of them.
+    # weather.different_location() is the one definition of "not this
+    # farm's", and the backfill deletes what it matches.
+    #
+    # NULL means provenance unknown: rows that predate this column and
+    # belonged to a database with no GPS set, which can only have come from
+    # the hardcoded fallback coordinates that weather.farm_coords() used to
+    # have - i.e. some other farm's weather. They count as a different
+    # location, deliberately. Rows in a database that DID have a location
+    # were stamped with it by the migration that added these columns.
+    lat: Optional[float] = None
+    lon: Optional[float] = None

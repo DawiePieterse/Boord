@@ -3,9 +3,10 @@ import threading
 import time as _time
 import urllib.error
 import urllib.request
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime, timedelta
+from typing import Iterator, Optional
 
+from sqlalchemy import func, or_
 from sqlmodel import Session, select
 
 from models import SystemSetting, WeatherHistory
@@ -78,6 +79,25 @@ def fetch_weather_cached(lat: float, lon: float) -> dict:
 # ---------------------------------------------------------------------------
 
 HISTORY_START_DATE = "2020-01-01"
+
+# The oldest weather anyone can ask for. Open-Meteo's archive reaches back to
+# 1940; 1987 is where this app stops because it is the earliest season any
+# farm has harvest data for to correlate against (see
+# scripts/import_historical_annual_yield.py). Lived in that script's sibling
+# until the setup wizard started letting a farm choose its own depth.
+ARCHIVE_START_DATE = "1987-01-01"
+
+# Chunk size for the pre-2020 archive fetch. 33 years in one request works
+# but is a large, slow, all-or-nothing call - chunking keeps a network hiccup
+# from forcing a full retry, and is gentler on Open-Meteo's API.
+ARCHIVE_CHUNK_YEARS = 5
+
+# How far two coordinate pairs may differ and still count as the same place:
+# ~11 m. Coordinates are stored exactly as they were requested, so an
+# untouched Settings value compares equal on the nose; this only stops a
+# re-typed final decimal from invalidating a farm's whole weather history.
+COORD_TOLERANCE = 0.0001
+
 HOURLY_FIELDS = ",".join([
     "temperature_2m", "relative_humidity_2m", "dew_point_2m", "precipitation",
     "weather_code", "wind_speed_10m", "soil_temperature_6cm", "uv_index",
@@ -106,6 +126,47 @@ def farm_coords(session: Session) -> Optional[tuple]:
     if settings and settings.gps_lat is not None and settings.gps_lon is not None:
         return settings.gps_lat, settings.gps_lon
     return None
+
+
+def different_location(lat: float, lon: float):
+    """SQL condition matching the WeatherHistory rows that are NOT this place's.
+
+    The one definition of "somebody else's weather", shared by the Weather
+    tab (which reports how many such rows there are), the browser backfill
+    (which deletes them) and the archive import script (which stops skipping
+    itself when it finds any). A NULL coordinate counts as different - see
+    the lat/lon comment on the model for why unknown provenance is treated
+    as foreign rather than as "probably ours".
+    """
+    return or_(
+        WeatherHistory.lat.is_(None),
+        WeatherHistory.lon.is_(None),
+        func.abs(WeatherHistory.lat - lat) > COORD_TOLERANCE,
+        func.abs(WeatherHistory.lon - lon) > COORD_TOLERANCE,
+    )
+
+
+def at_location(row_lat, row_lon, lat: float, lon: float) -> bool:
+    """The in-Python counterpart of different_location(), for a row already
+    loaded. Kept beside it so the two cannot drift apart."""
+    if row_lat is None or row_lon is None:
+        return False
+    return abs(row_lat - lat) <= COORD_TOLERANCE and abs(row_lon - lon) <= COORD_TOLERANCE
+
+
+def foreign_row_count(session: Session, lat: float, lon: float) -> int:
+    return session.exec(
+        select(func.count()).select_from(WeatherHistory).where(different_location(lat, lon))
+    ).one()
+
+
+def chunk_date_range(start: date, end: date, years: int) -> Iterator[tuple]:
+    """[start, end] split into calendar-aligned chunks of `years` years."""
+    cur = start
+    while cur <= end:
+        chunk_end = min(date(cur.year + years, 1, 1) - timedelta(days=1), end)
+        yield cur, chunk_end
+        cur = chunk_end + timedelta(days=1)
 
 
 def fetch_historical_hourly(lat: float, lon: float, start_date: str, end_date: str, timeout: int = 120) -> dict:
@@ -166,10 +227,17 @@ def fetch_forecast_hourly(lat: float, lon: float, days: int = 16, timeout: int =
         return _json.loads(resp.read())
 
 
-def parse_hourly_rows(data: dict) -> list:
+def parse_hourly_rows(data: dict, lat: float, lon: float) -> list:
     """Open-Meteo's hourly response -> plain dicts shaped like WeatherHistory
     columns (not ORM objects), so callers can choose wholesale-replace
-    (the import script) or dedupe-and-append (sync_recent_weather)."""
+    (the import script) or dedupe-and-append (sync_recent_weather).
+
+    lat/lon are the coordinates the response was FETCHED for, stamped onto
+    every row - they are not in the response body. Required rather than
+    optional on purpose: every caller already has them in hand, and a
+    defaulted None would put unattributable rows back in the table, which
+    is the whole problem these columns exist to fix.
+    """
     hourly = data.get("hourly", {})
     times = hourly.get("time", [])
 
@@ -202,7 +270,40 @@ def parse_hourly_rows(data: dict) -> list:
             "soil_temp_6cm_c": soil_temp[i],
             "uv_index": uv_index[i],
             "sunshine_duration_s": sunshine[i],
+            "lat": lat,
+            "lon": lon,
         })
+    return rows
+
+
+def fetch_hourly_range(lat: float, lon: float, start: date, end: date) -> list:
+    """Every hour between two dates, whichever era they fall in.
+
+    Two Open-Meteo APIs cover this table and neither covers all of it: the
+    historical-forecast one refuses any start_date before 2016, and the
+    reanalysis archive carries neither soil temperature nor UV at any date.
+    HISTORY_START_DATE is where this app switches between them, so a range
+    that straddles it is fetched in two halves and the older half in
+    ARCHIVE_CHUNK_YEARS-year chunks.
+
+    The split is exactly the one scripts/import_historical_weather.py and
+    scripts/import_historical_weather_archive.py already draw between
+    themselves - so a range fetched here and a range fetched by those
+    scripts produce identical rows, and the two can still be re-run over
+    each other in any order.
+    """
+    boundary = date.fromisoformat(HISTORY_START_DATE)
+    rows = []
+    if start < boundary:
+        for chunk_start, chunk_end in chunk_date_range(
+                start, min(end, boundary - timedelta(days=1)), ARCHIVE_CHUNK_YEARS):
+            rows += parse_hourly_rows(
+                fetch_archive_hourly(lat, lon, chunk_start.isoformat(), chunk_end.isoformat()),
+                lat, lon)
+    if end >= boundary:
+        rows += parse_hourly_rows(
+            fetch_historical_hourly(lat, lon, max(start, boundary).isoformat(), end.isoformat()),
+            lat, lon)
     return rows
 
 
@@ -225,22 +326,34 @@ def sync_recent_weather(session: Session) -> dict:
     the tab hanging past it and reading as fully offline."""
     try:
         latest = session.exec(
-            select(WeatherHistory.timestamp).order_by(WeatherHistory.timestamp.desc())
+            select(WeatherHistory).order_by(WeatherHistory.timestamp.desc())
         ).first()
         now = datetime.now()
-        if latest and latest >= now.replace(minute=0, second=0, microsecond=0):
+        if latest and latest.timestamp >= now.replace(minute=0, second=0, microsecond=0):
             return {"synced": 0}
 
-        start_date = latest.date().isoformat() if latest else HISTORY_START_DATE
         coords = farm_coords(session)
         if coords is None:
             # No location set: append nothing rather than guess. Callers
             # surface this as "set your farm location", not as an error.
             return {"synced": 0, "no_location": True}
         lat, lon = coords
+
+        if latest is not None and not at_location(latest.lat, latest.lon, lat, lon):
+            # The stored history was fetched somewhere else - the farm has
+            # corrected its GPS since, or these rows predate the location
+            # columns on a database that had none. Appending to it would
+            # interleave two places' weather hour by hour, which is worse
+            # than the gap: nothing downstream could tell them apart
+            # afterwards. Say so, and leave it to the backfill to replace
+            # the lot wholesale.
+            return {"synced": 0, "location_changed": True}
+
+        start_date = latest.timestamp.date().isoformat() if latest else HISTORY_START_DATE
         data = fetch_historical_hourly(lat, lon, start_date, now.date().isoformat(), timeout=3)
-        rows = parse_hourly_rows(data)
-        new_rows = [WeatherHistory(**r) for r in rows if latest is None or r["timestamp"] > latest]
+        rows = parse_hourly_rows(data, lat, lon)
+        new_rows = [WeatherHistory(**r) for r in rows
+                    if latest is None or r["timestamp"] > latest.timestamp]
         if new_rows:
             session.add_all(new_rows)
             session.commit()
