@@ -29,7 +29,28 @@ def ensure_blank_before_lists(text):
     """python-markdown requires a blank line before a list to treat it as a
     block (GitHub's renderer is more lenient) - without this, a list that
     immediately follows a paragraph line collapses into a run-on paragraph
-    instead of rendering as list items."""
+    instead of rendering as list items.
+
+    KNOWN TRAP, and it has bitten twice: this cannot tell a real list item
+    from a *wrapped sentence* whose next line happens to begin with "- ",
+    which is easy to write when a dash is being used as punctuation:
+
+        ...says **"Scanning needs the secure address
+        - check Tailscale is connected"** rather than opening a scanner.
+
+    That second line looks exactly like a bullet, so a blank line is
+    inserted, the paragraph is split in two, and any bold span crossing the
+    break is left with literal ** in the PDF. GitHub renders the same source
+    correctly, so it looks fine in the browser and wrong only on paper.
+
+    Nothing here can fix it safely - the two cases are genuinely
+    indistinguishable at this level. Write the markdown so a "- " never
+    starts a line unless it really is a bullet. To check a rendered file:
+
+        pdftotext MANUAL.pdf - | grep '\\*\\*'
+
+    Any hit is this bug; a correctly rendered PDF contains no literal **.
+    """
     lines = text.split('\n')
     out = []
     in_fence = False

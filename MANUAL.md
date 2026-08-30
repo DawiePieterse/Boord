@@ -809,11 +809,11 @@ worker identification is QR-only with no manual picker fallback (see
 optional - it must be set up before Field devices can capture harvest data
 at all.
 
-A device on a plain-http address says **"Scanning needs the secure address
-- check Tailscale is connected, then tell your supervisor"** rather than
-opening a scanner that cannot work. If a picker reports that, this section
-is the fix: the phone is opening the app from the LAN address instead of
-the Tailscale one.
+A device on a plain-http address says **"Scanning needs the secure
+address - check Tailscale is connected, then tell your supervisor"**
+rather than opening a scanner that cannot work. If a picker reports that,
+this section is the fix: the phone is opening the app from the LAN address
+instead of the Tailscale one.
 
 Field devices also need to work over **mobile data** while out picking
 (they're only back on the farm's own Wi-Fi at the end of the day), which
@@ -1071,9 +1071,9 @@ connected reliably on Android).
 
 **Step 2 - Point the device at the new address.**
 Open the `https://...ts.net/` address instead of the old LAN IP. This is
-a different origin, so it'll show the Device Setup screen again (above)
-- re-enter that device's ID once. Then reinstall the home-screen app icon
-from the new HTTPS address (see
+a different origin, so it'll show the Device Setup screen again
+(above) - re-enter that device's ID once. Then reinstall the home-screen
+app icon from the new HTTPS address (see
 [Installing as an app icon](#installing-as-an-app-icon-optional-recommended)
 above), and delete the old icon that points at the `http://` address.
 
