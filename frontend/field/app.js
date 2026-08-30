@@ -615,14 +615,18 @@ async function syncLoop() {
 let qrScanner = null;
 function openScanner() {
   // A browser only hands out the camera on a secure origin - https, or
-  // localhost. A field tablet reaches this server as plain http://<ip>/ over
-  // the pack house LAN, which is neither, so getUserMedia is refused before
-  // any permission prompt appears. Saying so here is the difference between
-  // "this tablet's camera is broken" and "scanning needs https - pick the
-  // worker from the list instead", and the worker is standing in an orchard
-  // holding a full crate while they work it out.
+  // localhost. Field devices are meant to reach this server over Tailscale
+  // HTTPS for exactly this reason (MANUAL.md, "Enabling the QR camera
+  // scanner"); a device left on the plain http://<ip>/ LAN address is
+  // refused the camera before any permission prompt appears.
+  //
+  // There is no manual worker fallback to offer - workerSelect is hidden on
+  // purpose, because picking the right name out of a long list is how a
+  // crate ends up against the wrong person's wages. So this cannot say "use
+  // the list instead"; it has to point at the one thing that actually fixes
+  // it, in the same words TRAINING_FIELD.md gives the picker.
   if (!window.isSecureContext) {
-    Boord.toast("Scanning needs a secure (https) connection - pick the worker from the list below");
+    Boord.toast("Scanning needs the secure address - check Tailscale is connected, then tell your supervisor");
     return;
   }
   document.getElementById("scanModal").classList.remove("hidden");
@@ -647,10 +651,10 @@ function openScanner() {
     () => {}
   ).catch(() => {
     // Close it rather than leaving an empty black box on screen with a
-    // toast that has already faded - a modal that cannot scan is only in
-    // the way of the worker dropdown that still works.
+    // toast that has already faded - a scanner that cannot start is only in
+    // the way of trying again.
     closeScanner();
-    Boord.toast("Camera unavailable - pick the worker from the list below");
+    Boord.toast("Camera unavailable - check Tailscale is connected");
   });
 }
 function closeScanner() {

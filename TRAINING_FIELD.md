@@ -172,9 +172,21 @@ saving crates: the number just tells you how many are still waiting.
   3. Go back to this app and try again.
 
   This device needs Tailscale connected to reach the office system at
-  all — without it, the camera scanner won't work and nothing will sync,
-  even with full signal. If Tailscale shows Connected and it's still not
-  working, that's one for your supervisor.
+  all — without it nothing will sync, even with full signal.
+
+  The scanner is fussier than the rest of the app: the phone's camera only
+  works when this app is opened from the **secure address** Tailscale
+  provides. That's why the camera can stop working while everything else
+  still looks fine, and why reconnecting Tailscale usually brings it back.
+  If the app says **"Scanning needs the secure address"**, or Tailscale
+  shows Connected and the camera still won't start, that's one for your
+  supervisor — it means this phone is opening the app from the wrong
+  address, and only they can change it.
+
+  **You can't log crates without scanning.** There's no way to pick the
+  worker by hand, on purpose — choosing the wrong name from a list is how a
+  crate ends up paid to the wrong person. If the scanner won't work, stop
+  and get your supervisor rather than guessing.
 - **Logged the wrong weight or wrong worker on a crate that's already
   saved?** You can't fix this from the field device — tell your
   supervisor so the office can correct it.

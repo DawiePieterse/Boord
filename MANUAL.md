@@ -802,11 +802,18 @@ revokes their access immediately without affecting anyone else.
 Android's and iOS's browsers only allow a page to use the camera if it's
 loaded over HTTPS or from `localhost` - a plain LAN address like
 `http://192.168.1.50:8000/` fails that check, so **Scan Worker QR** in the
-Field app (see [chapter 4](#4-field-app---capturing-the-harvest)) will fail
-with **"Camera unavailable"** on every device that reaches the server this
-way. Since worker identification is QR-only with no manual picker
-fallback, this isn't optional - it must be set up before Field devices can
-capture harvest data at all.
+Field app (see [chapter 4](#4-field-app---capturing-the-harvest)) cannot
+start the camera on any device that reaches the server that way. Since
+worker identification is QR-only with no manual picker fallback (see
+[Identifying the worker](#identifying-the-worker-qr-scan-only)), this isn't
+optional - it must be set up before Field devices can capture harvest data
+at all.
+
+A device on a plain-http address says **"Scanning needs the secure address
+- check Tailscale is connected, then tell your supervisor"** rather than
+opening a scanner that cannot work. If a picker reports that, this section
+is the fix: the phone is opening the app from the LAN address instead of
+the Tailscale one.
 
 Field devices also need to work over **mobile data** while out picking
 (they're only back on the farm's own Wi-Fi at the end of the day), which
@@ -1673,12 +1680,23 @@ The device ID hasn't been created yet. An admin must add it in
 [Master Data → Devices](#8-admin---master-data) first - see
 [chapter 3](#3-device-setup).
 
-**"Camera unavailable" when tapping Scan Worker QR**
+**"Scanning needs the secure address" when tapping Scan Worker QR**
 The device is reaching the server over plain `http://` (a LAN IP) rather
 than HTTPS - Android/iOS block camera access on any page that isn't a
 secure origin, regardless of camera permissions. See
 [Enabling the QR camera scanner](#enabling-the-qr-camera-scanner-https-via-tailscale---required-for-field-devices)
-to set up Tailscale HTTPS, which fixes this for every device at once.
+to set up Tailscale HTTPS, which fixes this for every device at once. If
+that is already set up, this device is opening the app from the old LAN
+address - re-add it from the `https://...ts.net/` one and delete the old
+icon.
+
+**"Camera unavailable" when tapping Scan Worker QR**
+Different problem: the address is fine, but the camera itself would not
+start. Usually camera permission was denied for the browser, or another
+app is holding the camera. Check the phone's app permissions, close
+anything else using the camera, and reopen. Tailscale being disconnected
+can also produce this, since the device then falls back to the LAN
+address.
 
 **A device shows an older version number than expected**
 Its offline app cache hasn't refreshed yet - see
