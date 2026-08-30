@@ -20,7 +20,39 @@ given your phone, or at the start of each day:
    nothing in the Harvest app will work (see "If something looks wrong"
    further down).
 4. **Open the app.** Tap the **Harvest Capture** icon on the home
-   screen.
+   screen. (If your phone has just been set up again, the icon may be
+   labelled **Field** instead — it's the same app.)
+5. **Check whose fruit you're picking.** Just under the station name at
+   the top, the app says either **"Picking own fruit"** or **"Picking
+   for ..."** with a grower's name. Read it once at the start of the day
+   and make sure it matches where you actually are — see "Whose fruit
+   this phone is picking" below for why it matters.
+
+---
+
+## Whose fruit this phone is picking
+
+Each phone is set up for one grower: either the farm's own fruit, or one
+of the other growers who send fruit to the pack house. The line at the
+top of the screen tells you which:
+
+| What it says | What it means |
+|---|---|
+| **Picking own fruit** | Everything logged on this phone counts as the farm's own harvest. |
+| **Picking for ...** (a grower's name) | Everything logged on this phone is credited to that grower instead. |
+
+This is not something you can change on the phone, and you don't need to
+do anything about it — but it's worth a glance, because **every crate
+you save is credited to whoever that line names.** If it names the wrong
+grower, the day's picking ends up on the wrong account, and that's
+easier to catch now than to unpick later. Tell your supervisor.
+
+The **Block** list follows the same setting. Blocks that belong to
+another grower are hidden, so a phone set up for one grower can't log
+crates against someone else's orchard by mistake. Blocks that haven't
+been given a grower at the office show on every phone — so if nothing
+has been set up that way yet, you'll simply see the full list as before,
+and nothing about your day changes.
 
 ---
 
@@ -42,17 +74,19 @@ When a truck is ready to take a load away, you send a **Picking Slip**
 
 ## Your screen, top to bottom
 
-- **Top bar** — shows which station this device is, and a coloured pill
-  telling you whether it's connected: **green** = everything is sent,
-  **amber** = sending right now, **red** = no connection. Don't worry if
-  it's red — see "Working without signal" below.
+- **Top bar** — shows which station this device is, whose fruit it's
+  picking (see above), and a coloured pill telling you whether it's
+  connected: **green** = everything is sent, **amber** = sending right
+  now, **red** = no connection. Don't worry if it's red — see "Working
+  without signal" below.
 - **Amber bar under the top** — only appears when there's no connection,
   and says so plainly. It disappears on its own when the signal is back.
 - **Crates / kg card** — how many crates and total kg logged for the
   load currently being built at this station, plus how long it's been
   running.
 - **Scan Worker QR button** — tap this before every crate.
-- **Block** — which block this crate came from.
+- **Block** — which block this crate came from. Only blocks belonging to
+  the grower named at the top appear here.
 - **Weight keypad** — type the number, then tap the crate icon (delete
   button clears a mistyped digit).
 - **Save Crate** — logs the crate. Do this every single time, even if
@@ -81,6 +115,10 @@ the end of this guide — it's usually a quick fix you can do yourself.
 Make sure the block dropdown shows the block you're actually picking in.
 It usually stays the same all day at one station, but double-check it
 after a break or when moving to a new area.
+
+The list only holds blocks belonging to the grower named at the top of
+the screen. If the block you're standing in isn't there, don't pick the
+nearest-looking one — see "If something looks wrong" at the end.
 
 **3. Weigh and enter the crate's weight.**
 Use the on-screen keypad. The "." button is for decimals (e.g. `18.5`),
@@ -187,6 +225,16 @@ saving crates: the number just tells you how many are still waiting.
   worker by hand, on purpose — choosing the wrong name from a list is how a
   crate ends up paid to the wrong person. If the scanner won't work, stop
   and get your supervisor rather than guessing.
+- **The block you're picking isn't in the list?** The list only shows
+  blocks belonging to the grower named at the top of the screen, so
+  either this phone is set up for the wrong grower, or that block hasn't
+  been added to them at the office yet. **Don't log the crates against a
+  different block** — the weights would be credited to the wrong orchard
+  and, if the grower is wrong too, to the wrong account. Stop and tell
+  your supervisor; it's a two-minute fix at the office.
+- **The top of the screen names the wrong grower?** Same thing — tell
+  your supervisor before you carry on picking. Everything logged in the
+  meantime is credited to whoever is named there.
 - **Logged the wrong weight or wrong worker on a crate that's already
   saved?** You can't fix this from the field device — tell your
   supervisor so the office can correct it.

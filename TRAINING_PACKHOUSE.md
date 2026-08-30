@@ -10,6 +10,11 @@ Your screen shows every load that's been dispatched from the field and
 is on its way to you, oldest first. When a truck arrives, you find its
 load in the list, check what actually came in, and confirm receipt.
 
+The top of the screen names **this pack house** above your station name
+(with its code alongside, once the office has entered one). You don't
+need to do anything with it — it's there so it's obvious which pack
+house you're checking fruit into.
+
 ---
 
 ## Understanding the queue
@@ -24,6 +29,16 @@ Each load in the list is colored:
 
 The list is already sorted oldest-first, so working from the top down is
 almost always the right order.
+
+Each load also shows **which grower it belongs to**, in bold under the
+slip number — the farm's own fruit, or one of the growers who send fruit
+here. Loads from different growers sit in the same queue and are
+received exactly the same way; the name is there so the right fruit is
+credited to the right account, and so you can tell two similar loads
+apart when several trucks are waiting.
+
+Under the grower you'll see the team and driver where there is one. An
+external delivery (below) has no team, so it just shows the driver.
 
 ---
 
@@ -57,12 +72,14 @@ itself.
 
 ## Logging an external delivery
 
-Use this when a truck arrives directly from **another farm/supplier**
-that doesn't use our field devices — their fruit was never "dispatched"
-through the app, so there's no existing load to find in the queue.
+Use this when a truck arrives directly from **a grower who doesn't use
+our field devices** — their fruit was never "dispatched" through the
+app, so there's no existing load to find in the queue.
 
 1. Tap **Log External Delivery** (top of the screen).
-2. Choose the **Supplier**.
+2. Choose the **Supplier**. Only growers other than the farm's own fruit
+   appear here — a load off our own field devices is already in the
+   queue and must never be logged twice.
 3. Enter the **Crates** and **Total Kg** on the truck.
 4. Enter the **Driver** name.
 5. Add **Notes** if needed.
@@ -96,6 +113,15 @@ stored up to send later, so don't assume it went through.)
   dispatched yet from the field, or may already have been received by
   someone else. Check with the field station or the office before
   assuming something's broken.
+- **A load shows the wrong grower** — receive it anyway if the truck is
+  there and the fruit is real; don't hold up the offload. Then tell the
+  office, because the fruit will be credited to the name shown until
+  they correct it. It usually means the field phone that sent the load
+  is set up for the wrong grower.
+- **A grower is missing from the External Delivery list** — they either
+  haven't been added at the office yet, or have been marked inactive.
+  Don't log the delivery against a different grower to get it through;
+  ask the office to add them.
 - **Wrong crate count already confirmed?** You can't edit a receipt from
   this screen once it's submitted — tell the office so they can correct
   it.
