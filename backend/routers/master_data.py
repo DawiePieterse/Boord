@@ -85,8 +85,9 @@ def deactivate_block(block_id: str, session: Session = Depends(get_session), adm
 def export_blocks(fmt: str = Query("xlsx", pattern="^(csv|xlsx)$"), session: Session = Depends(get_session),
                    admin=Depends(get_current_admin)):
     blocks = session.exec(select(Block)).all()
-    headers = ["id", "name", "variety", "trees", "hectares", "active"]
-    rows = [[b.id, b.name, b.variety, b.trees, b.hectares, b.active] for b in blocks]
+    headers = ["id", "name", "variety", "trees", "hectares", "supplier_id", "active"]
+    rows = [[b.id, b.name, b.variety, b.trees, b.hectares, b.supplier_id or "", b.active]
+            for b in blocks]
     return _export(headers, rows, fmt, "Blocks")
 
 
@@ -119,12 +120,25 @@ async def import_blocks(file: UploadFile, replace: bool = Query(False),
         imported_ids.add(block_id)
         active_raw = r.get("active", True)
         active = str(active_raw).strip().lower() not in ("false", "0", "no")
+        # A file with no supplier_id COLUMN leaves each block's supplier as it
+        # is; only a column that is present and blank clears it. session.merge
+        # rebuilds the whole row, so reading the absent column as None would
+        # silently unassign every block the moment somebody re-imported the
+        # spreadsheet they exported before this field existed - the same trap
+        # lots.py documents for split_from_slip_number.
+        existing = session.get(Block, block_id)
+        if "supplier_id" in r:
+            supplier_raw = str(r.get("supplier_id") or "").strip()
+            supplier_id = int(supplier_raw) if supplier_raw.isdigit() else None
+        else:
+            supplier_id = existing.supplier_id if existing else None
         session.merge(Block(
             id=block_id,
             name=r.get("name") or "",
             variety=r.get("variety") or "",
             trees=int(r.get("trees") or 0),
             hectares=float(r.get("hectares") or 0),
+            supplier_id=supplier_id,
             active=active,
         ))
         count += 1
@@ -298,7 +312,7 @@ def create_rate_setting(setting_in: RateSettingIn, session: Session = Depends(ge
     return setting
 
 
-# --- System settings (farm name, urgency thresholds, GPS, season) ------
+# --- System settings (pack house name + PHC, thresholds, GPS, season) --
 
 @router.get("/system-settings")
 def get_system_settings(session: Session = Depends(get_session)):

@@ -50,7 +50,7 @@ from db import DB_PATH, engine, legacy_schema_catch_up  # noqa: E402
 from migrate import (BASELINE_REVISION, _baseline_database, _config,  # noqa: E402
                      current_revision, head_revision, run_migrations)
 from models import (AdminUser, Block, HarvestRecord, SetupState,  # noqa: E402
-                    SystemSetting, Worker)
+                    Supplier, SystemSetting, Worker)
 from routers.master_data import import_blocks  # noqa: E402
 from routers.setup import build_setup_state  # noqa: E402
 
@@ -173,10 +173,18 @@ def test_a_database_from_before_migrations_is_caught_up_and_stamped():
         path = os.path.join(tmp, "old.db")
         old_engine = create_engine(f"sqlite:///{path}")
         legacy_schema_catch_up(old_engine, _baseline_database())
-        with Session(old_engine) as s:
-            s.add(Block(id="15", name="Blok 15", variety="Mauritius", trees=100, hectares=1.5))
-            s.add(Worker(id="001", first_name="Thandi", last_name="N", name="Thandi N"))
-            s.commit()
+        # Raw INSERTs, baseline columns only: the catch-up brings the database
+        # to the BASELINE shape, which predates block.supplier_id and any
+        # other column later migrations add - the ORM models describe today's
+        # schema and would name columns this database does not have yet.
+        con = sqlite3.connect(path)
+        con.execute("INSERT INTO block (id, name, variety, trees, hectares, active) "
+                    "VALUES ('15', 'Blok 15', 'Mauritius', 100, 1.5, 1)")
+        con.execute("INSERT INTO worker (id, first_name, last_name, name, id_number, "
+                    "bank, account, whatsapp_number, photo_filename, active) "
+                    "VALUES ('001', 'Thandi', 'N', 'Thandi N', '', '', '', '', '', 1)")
+        con.commit()
+        con.close()
 
         con = sqlite3.connect(path)
         con.execute("DROP TABLE setupstate")
@@ -369,6 +377,51 @@ def test_replacing_all_blocks_with_an_empty_file_is_refused():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_importing_blocks_without_a_supplier_column_keeps_the_supplier():
+    """A file with no supplier_id COLUMN must leave each block's supplier
+    alone; only a column that is present and blank clears it.
+
+    import_blocks rebuilds each row with session.merge, so reading an absent
+    column as None silently unassigns every block the moment somebody
+    re-imports the spreadsheet they exported before the field existed - which
+    is every spreadsheet an established pack house already has. Nothing about
+    the result looks wrong: the response still says imported, and the blocks
+    are all still there.
+    """
+    tmp = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmp, "blocks.db")
+        temp_engine = create_engine(f"sqlite:///{path}")
+        run_migrations(temp_engine, snapshot=False)
+        with Session(temp_engine) as s:
+            s.add(Supplier(name="Mkhize Farms"))
+            s.commit()
+            supplier_id = s.exec(select(Supplier.id)).one()
+            s.add(Block(id="15", name="Blok 15", supplier_id=supplier_id))
+            s.commit()
+
+        old_format = UploadFile(
+            filename="blocks.csv",
+            file=io.BytesIO(b"id,name,variety,trees,hectares,active\n15,Blok 15,Mauritius,100,1.5,true\n"))
+        with Session(temp_engine) as s:
+            asyncio.run(import_blocks(file=old_format, replace=False, session=s, admin=None))
+        with Session(temp_engine) as s:
+            assert s.get(Block, "15").supplier_id == supplier_id, \
+                "a file with no supplier_id column unassigned the block's supplier"
+
+        # ...and a column that IS there, left blank, still clears it.
+        with_blank = UploadFile(
+            filename="blocks.csv",
+            file=io.BytesIO(b"id,name,variety,trees,hectares,supplier_id,active\n15,Blok 15,Mauritius,100,1.5,,true\n"))
+        with Session(temp_engine) as s:
+            asyncio.run(import_blocks(file=with_blank, replace=False, session=s, admin=None))
+        with Session(temp_engine) as s:
+            assert s.get(Block, "15").supplier_id is None, \
+                "an explicitly blank supplier_id did not clear the block's supplier"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # First-run setup wizard state
 #
@@ -405,7 +458,7 @@ def test_setup_not_required_on_a_configured_farm():
         assert state["required"] is True, "an unfinished setup wizard stopped being offered"
         return
 
-    named = bool(settings and (settings.farm_name or "").strip())
+    named = bool(settings and (settings.packhouse_name or "").strip())
     picked = state["harvest_records"] > 0
     if not (named or picked or state["completed_at"]):
         return  # a genuinely blank database - the wizard SHOULD be offered
@@ -459,8 +512,9 @@ def main():
         check(fn.__name__, fn)
 
     section("Master data imports")
-    check(test_replacing_all_blocks_with_an_empty_file_is_refused.__name__,
-          test_replacing_all_blocks_with_an_empty_file_is_refused)
+    for fn in (test_replacing_all_blocks_with_an_empty_file_is_refused,
+               test_importing_blocks_without_a_supplier_column_keeps_the_supplier):
+        check(fn.__name__, fn)
 
     section("Setup state")
     for fn in (test_setup_not_required_on_a_configured_farm,

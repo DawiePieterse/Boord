@@ -36,6 +36,12 @@ async function init() {
     await refresh();
   });
 
+  // Name this pack house in the header - from cache first, like everything
+  // else on this screen, so a gate device that starts up out of range still
+  // says which pack house it belongs to rather than showing a blank line.
+  renderPackhouseLabel();
+  loadPackhouseLabel();
+
   // Show the queue this device already has before touching the network.
   renderCachedQueue();
   setInterval(refresh, 30000);
@@ -71,6 +77,24 @@ async function loadSuppliers() {
     _suppliersCache = await Boord.api("/api/suppliers");
     localStorage.setItem("boord_cached_suppliers", JSON.stringify(_suppliersCache));
   } catch (e) { /* keep last known list if offline */ }
+}
+
+function renderPackhouseLabel() {
+  const el = document.getElementById("packhouseLabel");
+  if (!el) return;
+  const s = Boord.getCachedJSON("boord_cached_settings");
+  if (!s) return;
+  const name = s.packhouse_name || "";
+  el.textContent = s.packhouse_code ? `${name} · ${s.packhouse_code}` : name;
+}
+
+async function loadPackhouseLabel() {
+  try {
+    const settings = await Boord.api("/api/system-settings");
+    if (!settings) return;
+    localStorage.setItem("boord_cached_settings", JSON.stringify(settings));
+    renderPackhouseLabel();
+  } catch (e) { /* keep the cached name if offline */ }
 }
 
 const QUEUE_CACHE_KEY = "boord_cached_intransit";
@@ -110,6 +134,24 @@ function renderCachedQueue() {
   renderQueue(cached.lots);
 }
 
+// "Team A - Driver Sipho", minus whatever this lot hasn't got. An external
+// delivery has no team and often no driver, and printing "Team ?" for it
+// reads as missing data rather than as not-applicable.
+function lotSubtitleParts(lot) {
+  const parts = [];
+  if (lot.team_id) parts.push(`Team ${lot.team_id}`);
+  if (lot.driver) parts.push(`Driver ${lot.driver}`);
+  return parts;
+}
+
+// The same line for the queue card, where the supplier leads in bold.
+function lotSubtitleHtml(lot) {
+  const parts = lotSubtitleParts(lot);
+  const lead = lot.supplier_name ? `<span class="font-semibold">${lot.supplier_name}</span>` : "";
+  if (!parts.length) return lead;
+  return lead ? `${lead} - ${parts.join(" - ")}` : parts.join(" - ");
+}
+
 function renderQueue(lots) {
   const list = document.getElementById("lotsList");
   const empty = document.getElementById("emptyState");
@@ -120,14 +162,12 @@ function renderQueue(lots) {
       <div class="flex justify-between items-center">
         <div>
           <div class="font-bold">${lot.slip_number}</div>
-          <div class="text-sm text-slate-600">
-            ${lot.supplier_name ? `<span class="font-semibold">${lot.supplier_name}</span> - ` : ""}
-            Team ${lot.team_id || "?"} - Driver ${lot.driver || "?"}
-          </div>
+          <div class="text-sm text-slate-600">${lotSubtitleHtml(lot)}</div>
         </div>
-        <div class="text-right">
-          <div class="font-semibold">${lot.total_crates} crates / ${lot.total_kg.toFixed(1)} kg</div>
-          <div class="text-xs text-slate-500">${lot.age_minutes} min ago</div>
+        <div class="text-right shrink-0 pl-2">
+          <div class="font-semibold whitespace-nowrap">${lot.total_crates} crates</div>
+          <div class="font-semibold whitespace-nowrap">${lot.total_kg.toFixed(1)} kg</div>
+          <div class="text-xs text-slate-500 whitespace-nowrap">${lot.age_minutes} min ago</div>
         </div>
       </div>
       ${lot.related_lots && lot.related_lots.length ? `
@@ -185,8 +225,11 @@ function renderRelatedLots(lot) {
 function openReceiveModal(lot) {
   selectedLot = lot;
   document.getElementById("modalSlip").textContent = lot.slip_number;
-  document.getElementById("modalMeta").textContent =
-    `${lot.supplier_name ? lot.supplier_name + " - " : ""}Team ${lot.team_id || "?"} - Driver ${lot.driver || "?"} - dispatched ${lot.age_minutes} min ago`;
+  document.getElementById("modalMeta").textContent = [
+    lot.supplier_name,
+    ...lotSubtitleParts(lot),
+    `dispatched ${lot.age_minutes} min ago`,
+  ].filter(Boolean).join(" - ");
   document.getElementById("expectedCrates").textContent = lot.total_crates;
   document.getElementById("actualCrates").value = lot.total_crates;
   document.getElementById("notes").value = "";

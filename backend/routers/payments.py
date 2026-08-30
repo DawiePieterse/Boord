@@ -17,9 +17,9 @@ router = APIRouter(prefix="/api/payments", tags=["payments"])
 
 def _worker_ids_for_supplier(session: Session, supplier_id: Optional[int]) -> Optional[set]:
     """Resolve which workers belong to a supplier filter, or None for no filter.
-    Own-farm workers are seeded with supplier_id left unset (None) rather than
-    pointing at the "Own Farm" Supplier row (see master_data.py/seed_demo.py),
-    so matching the own-farm supplier has to include NULL too - a plain
+    Own-fruit workers are seeded with supplier_id left unset (None) rather than
+    pointing at the own-fruit Supplier row (see master_data.py/seed_demo.py),
+    so matching the own-fruit supplier has to include NULL too - a plain
     equality check would silently return zero workers for that case."""
     if supplier_id is None:
         return None
@@ -35,9 +35,9 @@ def _worker_ids_for_supplier(session: Session, supplier_id: Optional[int]) -> Op
 
 def _supplier_display_name(worker: Optional[Worker], suppliers_by_id: dict, own_id: Optional[int],
                             own_name: str) -> str:
-    """Resolve the farm/supplier name to show for a worker, for grouping the
-    wage sheet - own-farm workers have supplier_id left unset (None), so they
-    fall back to the own-farm supplier's name rather than an "Unknown" group."""
+    """Resolve the supplier name to show for a worker, for grouping the
+    wage sheet - own-fruit workers have supplier_id left unset (None), so they
+    fall back to the own-fruit supplier's name rather than an "Unknown" group."""
     if not worker or worker.supplier_id is None or worker.supplier_id == own_id:
         return own_name
     supplier = suppliers_by_id.get(worker.supplier_id)
@@ -154,7 +154,7 @@ def export_payments(period_start: date, period_end: date, supplier_id: Optional[
     suppliers_by_id = {s.id: s for s in session.exec(select(Supplier)).all()}
     own_id = get_own_supplier_id(session)
     own_supplier = suppliers_by_id.get(own_id)
-    own_name = own_supplier.name if own_supplier else "Own Farm"
+    own_name = own_supplier.name if own_supplier else "Own fruit"
 
     groups: dict[str, list[Payment]] = {}
     for p in payments:
@@ -162,7 +162,7 @@ def export_payments(period_start: date, period_end: date, supplier_id: Optional[
         groups.setdefault(name, []).append(p)
     group_names = sorted(groups.keys(), key=lambda n: (n != own_name, n))
 
-    headers = ["Farm/Supplier", "Emp Nr", "Naam & Van", "Total Kg", "Rate", "Amount Due", "Bank", "Account"]
+    headers = ["Supplier", "Emp Nr", "Naam & Van", "Total Kg", "Rate", "Amount Due", "Bank", "Account"]
     rows = []
     for name in group_names:
         group_payments = groups[name]

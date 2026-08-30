@@ -149,8 +149,8 @@ def refuse_unless_safe(token):
                        f"({', '.join(other_blocks[:3])}...)")
 
     settings = api("/api/system-settings") or {}
-    if settings.get("farm_name"):
-        reasons.append(f"a farm name: {settings['farm_name']!r}")
+    if settings.get("packhouse_name"):
+        reasons.append(f"a pack house name: {settings['packhouse_name']!r}")
     gps = (settings.get("gps_lat"), settings.get("gps_lon"))
     if gps != (None, None) and gps != DEMO_GPS:
         reasons.append(f"a GPS location this script did not set: {gps[0]}, {gps[1]}")

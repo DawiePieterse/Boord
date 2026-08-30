@@ -16,15 +16,16 @@
      across page boundaries even with page-break-inside: avoid on children. */
   #badgesContainer { padding: 2mm; font-size: 0; }
 
-  /* Sized to the physical card holders the farm uses: 60mm x 80mm,
-     portrait. Every dimension below is in mm and adds up to that on
-     purpose - see the budget in the .badge-qr rule - so a badge cut on the
-     dashed line slides straight into a holder with no trimming. Don't
-     switch these to px or %: a browser's px is 1/96in only in theory, and
-     the whole point here is that the print comes out the size it says. */
+  /* Sized 1mm inside the physical card holders on every edge: 58mm x 78mm,
+     portrait, so the printed badge drops into the sleeve without catching.
+     Every dimension below is in mm and adds up to that on purpose - see the
+     budget in the .badge-qr rule - so a badge cut on the dashed line slides
+     straight into a holder with no trimming. Don't switch these to px or %:
+     a browser's px is 1/96in only in theory, and the whole point here is
+     that the print comes out the size it says. */
   .badge {
     display: inline-block; vertical-align: top;
-    width: 60mm; height: 80mm; box-sizing: border-box;
+    width: 58mm; height: 78mm; box-sizing: border-box;
     margin: 1mm;
     border: 1px dashed #999; border-radius: 2mm;
     background: white;
@@ -63,15 +64,15 @@
   /* margin-top:auto pins the QR to the bottom of the card and lets any
      slack collect above it, so a worker with a one-line name and one with
      a two-line name still get the QR in the same place. Vertical budget
-     inside the 2.5mm padding (75mm of usable height):
-     3.5 farm + 1 + 17 header + 50 QR = 71.5mm. */
+     inside the 2.5mm padding (73mm of usable height):
+     3.5 pack house + 1 + 17 header + 48 QR = 69.5mm. */
   .badge-qr { flex: none; margin-top: auto; }
   /* Vector, not a canvas bitmap - it prints at whatever the printer's own
      resolution is instead of at a fixed pixel count, and a full-workforce
      run doesn't hold a megabyte-plus canvas per worker in memory. */
-  .badge-qr svg { display: block; width: 50mm; height: 50mm; }
+  .badge-qr svg { display: block; width: 48mm; height: 48mm; }
   .no-data { padding: 24px; text-align: center; color: #666; }
-  /* 3 badges across (3 x 62mm = 186mm) and 3 down (3 x 82mm = 246mm) on an
+  /* 3 badges across (3 x 60mm = 180mm) and 3 down (3 x 80mm = 240mm) on an
      A4 sheet with these margins - 9 to a page. */
   @page { size: A4; margin: 8mm; }
   @media print {
@@ -84,7 +85,7 @@
 <body>
 <div class="toolbar no-print">
   <button onclick="window.print()">Print</button>
-  <div class="hint">Each badge is 60 x 80 mm, sized for the ID card holders - cut along the dashed lines.<br>
+  <div class="hint">Each badge is 58 x 78 mm, sized 1mm inside the ID card holders - cut along the dashed lines.<br>
     In the print dialog set <b>Scale</b> to 100% (not &quot;Fit to page&quot;), or they'll come out the wrong size.</div>
 </div>
 <div id="badgesContainer"></div>
@@ -103,7 +104,7 @@
       fetch("/api/workers").then((r) => r.json()),
       fetch("/api/system-settings").then((r) => r.json()).catch(() => null),
     ]);
-    const farmName = (settings && settings.farm_name) || "Boord";
+    const packhouseName = (settings && settings.packhouse_name) || "Boord";
     const byId = new Map(workers.map((w) => [w.id, w]));
     const selected = ids.map((id) => byId.get(id)).filter(Boolean);
 
@@ -113,7 +114,7 @@
     }
 
     container.innerHTML = selected.map((w) => `<div class="badge"><div class="badge-inner">
-        <div class="badge-farm">${farmName}</div>
+        <div class="badge-farm">${packhouseName}</div>
         <div class="badge-head">
           <div class="badge-photo">
             ${w.photo_filename

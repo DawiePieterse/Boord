@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, SQLModel, select
 
-from db import get_own_supplier_id, get_session
+from db import get_session, supplier_id_for_device
 from models import HarvestRecord, Lot, LotStatus, SystemSetting
 from weather import fetch_weather_cached
 
@@ -37,9 +37,11 @@ def _resolve_lot_id(session: Session, slip_number: Optional[str], device_id, tea
     # Field device hasn't dispatched the slip yet (crate saved before "Send
     # Picking Slip" was tapped) - create a placeholder lot so the crate has
     # somewhere to attach; totals get filled in when the slip is dispatched.
-    # Field devices only ever capture the farm's own fruit.
+    # The lot is attributed to whichever supplier this field device is
+    # allocated to, falling back to the pack house's own fruit.
     lot = Lot(slip_number=slip_number, timestamp=timestamp, device_id=device_id,
-              team_id=team_id, status=LotStatus.created, supplier_id=get_own_supplier_id(session))
+              team_id=team_id, status=LotStatus.created,
+              supplier_id=supplier_id_for_device(session, device_id))
     session.add(lot)
     session.commit()
     session.refresh(lot)

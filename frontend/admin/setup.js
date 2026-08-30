@@ -2,9 +2,9 @@
 // GET /api/setup/state reports `required` - see backend/routers/setup.py for
 // what makes that true, and why it takes more than a flag to decide it.
 //
-// Every step calls the ordinary endpoint Settings and Master Data already
-// use. Nothing here is a special first-run write path, which is what keeps
-// the wizard from becoming a second, divergent way to configure a farm.
+// Every step calls the ordinary endpoint Settings already uses. Nothing here
+// is a special first-run write path, which is what keeps the wizard from
+// becoming a second, divergent way to configure a pack house.
 
 const WIZARD_STEPS = [
   { key: "identity", optional: false },
@@ -115,7 +115,7 @@ async function prefillWizard(state) {
   const steps = state.steps || {};
   const set = (id, value) => { document.getElementById(id).value = value ?? ""; };
 
-  set("wizFarmName", steps.identity.farm_name);
+  set("wizPackhouseName", steps.identity.packhouse_name);
   set("wizOwnSupplier", steps.identity.own_supplier_name);
   set("wizGpsLat", steps.location.gps_lat);
   set("wizGpsLon", steps.location.gps_lon);
@@ -124,8 +124,14 @@ async function prefillWizard(state) {
   set("wizYellowRed", steps.thresholds.yellow_to_red_minutes);
 
   const settings = await Boord.api("/api/system-settings");
-  set("wizFarmLocation", settings && settings.farm_location);
-  set("wizHarvestYear", (settings && settings.current_harvest_year) || new Date().getFullYear());
+  set("wizPackhouseLocation", settings && settings.packhouse_location);
+  set("wizPackhouseCode", settings && settings.packhouse_code);
+  set("wizSeasonMonth", (settings && settings.season_start_month) || 1);
+  set("wizSeasonDay", (settings && settings.season_start_day) || 1);
+
+  const own = (await Boord.api("/api/suppliers") || []).find((s) => s.is_own_farm);
+  set("wizOwnPuc", own && own.puc);
+  set("wizOwnGlobalGap", own && own.global_gap_number);
 }
 
 function renderWizardStep() {
@@ -193,19 +199,29 @@ async function saveWizardStep(key) {
   const value = (id) => document.getElementById(id).value.trim();
 
   if (key === "identity") {
-    const farmName = value("wizFarmName");
+    const packhouseName = value("wizPackhouseName");
     const ownName = value("wizOwnSupplier");
-    if (!farmName) throw "Enter the farm's name";
+    if (!packhouseName) throw "Enter the pack house name";
     if (!ownName) throw "Enter a name for your own fruit as a supplier";
+    const month = parseInt(value("wizSeasonMonth"), 10) || 1;
+    const day = parseInt(value("wizSeasonDay"), 10) || 1;
     await patchSystemSettings({
-      farm_name: farmName,
-      farm_location: value("wizFarmLocation"),
-      current_harvest_year: parseInt(value("wizHarvestYear"), 10) || new Date().getFullYear(),
+      packhouse_name: packhouseName,
+      packhouse_location: value("wizPackhouseLocation"),
+      packhouse_code: value("wizPackhouseCode"),
+      season_start_month: month,
+      season_start_day: day,
+      current_harvest_year: Boord.seasonYearFor(month, day),
     });
     const suppliers = await Boord.api("/api/suppliers");
     const own = (suppliers || []).find((s) => s.is_own_farm);
-    if (own && own.name !== ownName) {
-      await Boord.api("/api/suppliers", { method: "POST", auth: true, body: { ...own, name: ownName } });
+    const puc = value("wizOwnPuc");
+    const ggn = value("wizOwnGlobalGap");
+    if (own && (own.name !== ownName || own.puc !== puc || own.global_gap_number !== ggn)) {
+      await Boord.api("/api/suppliers", {
+        method: "POST", auth: true,
+        body: { ...own, name: ownName, puc, global_gap_number: ggn },
+      });
     }
     return;
   }
@@ -216,7 +232,7 @@ async function saveWizardStep(key) {
     // weather.farm_coords() documents on the server side.
     const lat = parseFloat(value("wizGpsLat"));
     const lon = parseFloat(value("wizGpsLon"));
-    if (isNaN(lat) || isNaN(lon)) throw "Enter both coordinates, or pick the farm on the map";
+    if (isNaN(lat) || isNaN(lon)) throw "Enter both coordinates, or pick the pack house on the map";
     if (lat < -90 || lat > 90) throw "Latitude must be between -90 and 90";
     if (lon < -180 || lon > 180) throw "Longitude must be between -180 and 180";
     await patchSystemSettings({ gps_lat: lat, gps_lon: lon });
@@ -331,10 +347,10 @@ async function renderWizardFinish() {
   }
   const outstanding = [];
   const s = state.steps;
-  if (!s.blocks.done) outstanding.push("No blocks yet - the Field app has nothing to pick from until you import them under Master Data.");
+  if (!s.blocks.done) outstanding.push("No blocks yet - the Field app has nothing to pick from until you import them under Settings -> Master Data.");
   if (!s.rate.done) outstanding.push("No wage rate - Payments will refuse to calculate.");
-  if (!s.location.done) outstanding.push("No farm location - no weather in the header, and none stamped onto crates or picking notes.");
-  if (!s.workers.done) outstanding.push("No workers yet - add them under Master Data.");
+  if (!s.location.done) outstanding.push("No pack house location - no weather in the header, and none stamped onto crates or picking notes.");
+  if (!s.workers.done) outstanding.push("No workers yet - add them under Settings -> Master Data.");
 
   const el = document.getElementById("wizOutstanding");
   if (!outstanding.length) { el.classList.add("hidden"); return; }

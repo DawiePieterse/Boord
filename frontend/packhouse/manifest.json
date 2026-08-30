@@ -1,6 +1,6 @@
 {
-  "name": "Boord Pakhuis",
-  "short_name": "Pakhuis",
+  "name": "Boord Receiving",
+  "short_name": "Receiving",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

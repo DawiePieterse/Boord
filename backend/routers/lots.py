@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, SQLModel, select
 
-from db import get_own_supplier_id, get_session
+from db import get_session, supplier_id_for_device
 from models import HarvestRecord, Lot, LotStatus, Supplier, SystemSetting
 from security import get_current_admin
 from timeutil import day_bounds
@@ -142,7 +142,8 @@ def list_pending(supplier_id: Optional[int] = None, period_start: Optional[date]
     dispatched yet ('Send Picking Slip' not tapped). These lots exist only
     as placeholders (status=created, created on first crate sync) so their
     totals are computed live from HarvestRecord rather than stored on Lot.
-    Always the farm's own fruit - other suppliers don't use field devices.
+    Attributed to the dispatching field device's supplier (its allocation,
+    or the pack house's own fruit when it has none).
 
     period_start/period_end are optional and only applied when both are
     passed (dashboard KPI use) - left unfiltered by default so device screens
@@ -250,12 +251,16 @@ def get_lot(lot_id: int, session: Session = Depends(get_session), admin=Depends(
 def upsert_lot(lot_in: LotIn, session: Session = Depends(get_session)):
     """Create or update a lot by slip_number (idempotent - safe to retry).
     Field devices never send supplier_id (they don't know about suppliers) -
-    it's always own-farm fruit, so it's assigned automatically here."""
+    it's resolved here from the dispatching device's allocation, falling back
+    to the pack house's own fruit."""
     existing = session.exec(select(Lot).where(Lot.slip_number == lot_in.slip_number)).first()
     data = lot_in.model_dump()
     data["total_kg"] = round(data.get("total_kg", 0.0), 1)
     if data.get("supplier_id") is None:
-        data["supplier_id"] = get_own_supplier_id(session)
+        # Keep the placeholder lot's supplier if sync.py already set one from
+        # the device; otherwise resolve it from the device now.
+        data["supplier_id"] = (existing.supplier_id if existing and existing.supplier_id is not None
+                                else supplier_id_for_device(session, data.get("device_id")))
     lot = Lot(**data, id=existing.id if existing else None)
     if existing:
         # LotIn doesn't carry split_from_slip_number (dispatch never sets it),
@@ -353,16 +358,36 @@ def split_lot(slip_number: str, body: SplitLotIn, session: Session = Depends(get
     }
 
 
+def _external_slip_number(session: Session, supplier_id: int, timestamp: datetime) -> str:
+    """A slip a human can read back over a two-way radio.
+
+    This used to append %f - six digits of microseconds - which made a
+    24-character slip for a number that gets read aloud at a gate, written on
+    paper and typed into a query. Seconds match what a field device already
+    mints (device-01-20260830132301), and two deliveries logged in the same
+    second by someone pressing a button is not a real case. It is still a
+    UNIQUE column, though, so it cannot merely be assumed: a taken slip gets a
+    short suffix rather than a 500 in front of the receiving clerk.
+    """
+    base = f"EXT-{supplier_id}-{timestamp.strftime('%Y%m%d%H%M%S')}"
+    candidate = base
+    for suffix in range(2, 100):
+        if not session.exec(select(Lot).where(Lot.slip_number == candidate)).first():
+            return candidate
+        candidate = f"{base}-{suffix}"
+    return f"{base}-{timestamp.strftime('%f')}"  # absurd, but never a collision
+
+
 @router.post("/external")
 def create_external_lot(lot_in: ExternalLotIn, session: Session = Depends(get_session)):
-    """Pack house staff logs an incoming delivery from another farmer who
-    doesn't use the farm's field devices. Goes straight into the in-transit
+    """Pack house staff logs an incoming delivery from a supplier who doesn't
+    use the pack house's field devices. Goes straight into the in-transit
     list, ready to be checked in through the normal receiving flow."""
     supplier = session.get(Supplier, lot_in.supplier_id)
     if not supplier:
         raise HTTPException(404, "Supplier not found")
     timestamp = lot_in.timestamp or datetime.now(timezone.utc)
-    slip_number = f"EXT-{lot_in.supplier_id}-{timestamp.strftime('%Y%m%d%H%M%S%f')}"
+    slip_number = _external_slip_number(session, lot_in.supplier_id, timestamp)
     lot = Lot(
         slip_number=slip_number,
         timestamp=timestamp,

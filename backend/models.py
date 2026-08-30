@@ -46,6 +46,7 @@ class Block(SQLModel, table=True):
     variety: str = ""
     trees: int = 0
     hectares: float = 0.0
+    supplier_id: Optional[int] = Field(default=None, foreign_key="supplier.id")  # which supplier's orchard this block belongs to
     active: bool = True
 
 
@@ -69,6 +70,10 @@ class Device(SQLModel, table=True):
     station: str = ""
     role: DeviceRole
     team_id: Optional[str] = Field(default=None, foreign_key="team.id")
+    # Which supplier a field device is picking for. Lots dispatched from this
+    # device are attributed to this supplier; None falls back to the own-fruit
+    # supplier (see db.supplier_id_for_device). Only meaningful for role=field.
+    supplier_id: Optional[int] = Field(default=None, foreign_key="supplier.id")
     induna: str = ""
     data_capturer: str = ""
     active: bool = True
@@ -86,6 +91,8 @@ class Supplier(SQLModel, table=True):
     contact_phone: str = ""
     contact_email: str = ""
     is_own_farm: bool = False
+    puc: str = ""  # Product Unit Code (traceability - the grower's registered production unit)
+    global_gap_number: str = ""  # GlobalG.A.P. Number (GGN) for this supplier
     packing_rate_per_kg: float = 0.0  # facility-use fee charged to this supplier
     packing_rate_per_crate: float = 0.0  # used instead of per_kg if per_kg is 0
     active: bool = True
@@ -106,14 +113,22 @@ class AdminUser(SQLModel, table=True):
 
 
 class SystemSetting(SQLModel, table=True):
-    """Single-row table of farm-wide settings. Served to every device
-    (including unauthenticated Field/Pack House ones) via a public
+    """Single-row table of pack-house-wide settings. Served to every device
+    (including unauthenticated Field/Receiving ones) via a public
     GET /api/system-settings - never put anything secret on this model."""
     id: Optional[int] = Field(default=None, primary_key=True)
-    farm_name: str = ""
-    farm_location: str = ""
+    packhouse_name: str = ""
+    packhouse_location: str = ""
+    packhouse_code: str = ""  # PHC - the pack house's registered code
     green_to_yellow_minutes: int = 90
     yellow_to_red_minutes: int = 150
+    # The season is a recurring anchor (month + day). The app derives which
+    # season is current and labels it by the year it starts in;
+    # current_harvest_year is kept as that derived label for report headers
+    # and older readers. Default 1 January reproduces the old calendar-year
+    # behaviour.
+    season_start_month: int = 1
+    season_start_day: int = 1
     current_harvest_year: int = datetime.now().year
     gps_lat: Optional[float] = None
     gps_lon: Optional[float] = None
@@ -133,7 +148,7 @@ class SetupState(SQLModel, table=True):
 
     started_at is stamped the first time the wizard is shown, and it is what
     makes the wizard resumable. Without it the wizard was offered on the
-    strength of a blank farm_name - which its own first step then fills in,
+    strength of a blank packhouse_name - which its own first step then fills in,
     so closing the tab after step 1 dropped the admin into a half-configured
     app with the remaining steps unreachable.
 

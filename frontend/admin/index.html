@@ -53,10 +53,10 @@
   </div>
 </div>
 
-<!-- First-run setup wizard. A fresh database is deliberately nobody's farm -
-     no name, no location, no blocks, no wage rate (db.seed_defaults) - and
-     until this existed, making it yours meant finding five unrelated fields
-     across Settings and Master Data with nothing saying which one you had
+<!-- First-run setup wizard. A fresh database is deliberately nobody's pack
+     house - no name, no location, no blocks, no wage rate (db.seed_defaults)
+     - and until this existed, making it yours meant finding several
+     unrelated fields across Settings with nothing saying which one you had
      missed. Shown instead of the tabs while GET /api/setup/state reports
      required; the steps themselves just call the ordinary endpoints, so
      anything done here can equally be done (or undone) in Settings later. -->
@@ -64,10 +64,10 @@
   <div class="max-w-3xl mx-auto">
 
     <div class="text-center py-6">
-      <div class="text-3xl font-bold" style="color: var(--boord-blue)">Set up your farm</div>
+      <div class="text-3xl font-bold" style="color: var(--boord-blue)">Set up your pack house</div>
       <div id="wizIntro" class="text-sm text-slate-500 mt-2">
-        This server is running, but it does not know whose farm it is yet.
-        Nine short steps and it will.
+        This server is running, but it does not know whose pack house it is yet.
+        A few short steps and it will.
       </div>
     </div>
 
@@ -86,22 +86,40 @@
 
         <!-- 1. Identity -->
         <section class="wiz-step" data-step="identity">
-          <div class="font-bold text-lg">Whose farm is this?</div>
+          <div class="font-bold text-lg">Whose pack house is this?</div>
           <div class="text-sm text-slate-500 mt-1 mb-4">
-            The farm name appears in every screen header, on picking slips and
-            on every report. The supplier name is how the farm's own fruit is
+            The pack house name appears in every screen header, on picking slips
+            and on every report. The supplier name is how your own fruit is
             labelled where it sits alongside other growers' deliveries.
           </div>
           <div class="space-y-3">
-            <div><label class="text-xs text-slate-500 block">Farm name</label>
-              <input id="wizFarmName" placeholder="e.g. Blaauwkrantz Estate" class="w-full border border-slate-300 rounded-lg p-3 text-lg"></div>
+            <div><label class="text-xs text-slate-500 block">Pack House name</label>
+              <input id="wizPackhouseName" placeholder="e.g. Blaauwkrantz Pack House" class="w-full border border-slate-300 rounded-lg p-3 text-lg"></div>
             <div><label class="text-xs text-slate-500 block">Location description <span class="text-slate-400">(optional)</span></label>
-              <input id="wizFarmLocation" placeholder="e.g. Hazyview, Mpumalanga" class="w-full border border-slate-300 rounded-lg p-3"></div>
+              <input id="wizPackhouseLocation" placeholder="e.g. Hazyview, Mpumalanga" class="w-full border border-slate-300 rounded-lg p-3"></div>
+            <div><label class="text-xs text-slate-500 block">Pack House Code (PHC)</label>
+              <input id="wizPackhouseCode" placeholder="e.g. PH1234567" class="w-full border border-slate-300 rounded-lg p-3"></div>
             <div><label class="text-xs text-slate-500 block">Your own fruit is delivered as</label>
               <input id="wizOwnSupplier" class="w-full border border-slate-300 rounded-lg p-3">
-              <div class="text-xs text-slate-400 mt-1">Starts as "Own Farm". Anything you pack for other growers gets its own supplier later.</div></div>
-            <div><label class="text-xs text-slate-500 block">Current harvest season (year)</label>
-              <input type="number" id="wizHarvestYear" class="w-full border border-slate-300 rounded-lg p-3"></div>
+              <div class="text-xs text-slate-400 mt-1">Starts as "Own fruit". Anything you pack for other growers gets its own supplier later.</div></div>
+            <div class="grid grid-cols-2 gap-2">
+              <div><label class="text-xs text-slate-500 block">Your PUC <span class="text-slate-400">(optional)</span></label>
+                <input id="wizOwnPuc" placeholder="Product Unit Code" class="w-full border border-slate-300 rounded-lg p-3"></div>
+              <div><label class="text-xs text-slate-500 block">Your GlobalG.A.P. Number <span class="text-slate-400">(optional)</span></label>
+                <input id="wizOwnGlobalGap" placeholder="GGN" class="w-full border border-slate-300 rounded-lg p-3"></div>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block">Season start (repeats every year)</label>
+              <div class="grid grid-cols-2 gap-2">
+                <select id="wizSeasonMonth" class="w-full border border-slate-300 rounded-lg p-3">
+                  <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+                  <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+                  <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+                  <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+                </select>
+                <input type="number" min="1" max="31" id="wizSeasonDay" placeholder="Day" class="w-full border border-slate-300 rounded-lg p-3">
+              </div>
+            </div>
           </div>
         </section>
 
@@ -213,7 +231,7 @@
 
         <!-- 8. Finish -->
         <section class="wiz-step hidden" data-step="finish">
-          <div class="font-bold text-lg">That is the farm set up</div>
+          <div class="font-bold text-lg">That is the pack house set up</div>
           <div id="wizOutstanding" class="hidden mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800"></div>
 
           <div class="mt-4 space-y-3 text-sm">
@@ -242,7 +260,7 @@
     </div>
 
     <div class="text-center text-xs text-slate-400 mt-4">
-      Everything here also lives under Settings and Master Data - nothing is
+      Everything here also lives under Settings - nothing is
       decided permanently on this screen.
     </div>
   </div>
@@ -253,7 +271,7 @@
   <div class="boord-header p-4">
     <div class="flex items-start justify-between gap-3">
       <div>
-        <div id="headerFarmName" class="font-bold text-2xl md:text-3xl leading-tight">Boord</div>
+        <div id="headerPackhouseName" class="font-bold text-2xl md:text-3xl leading-tight">Boord</div>
         <div id="headerDateTime" class="text-lg md:text-xl font-semibold text-white/90 mt-1">&nbsp;</div>
       </div>
       <div class="text-right">
@@ -266,7 +284,6 @@
 
   <div class="flex overflow-x-auto bg-white shadow sticky top-0 z-10">
     <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
-    <button class="tab-btn" data-tab="masterdata">Master Data</button>
     <button class="tab-btn" data-tab="payments">Payments</button>
     <button class="tab-btn" data-tab="reports">Reports</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
@@ -277,7 +294,7 @@
     <!-- DASHBOARD -->
     <div id="tab-dashboard" class="tab-content space-y-4">
       <div class="bg-white rounded-xl shadow p-4 flex flex-wrap gap-2 items-end">
-        <div><label class="text-xs text-slate-500 block">Farm / Supplier</label><select id="dashSupplierFilter" class="border border-slate-300 rounded-lg p-2 text-sm"></select></div>
+        <div><label class="text-xs text-slate-500 block">Supplier</label><select id="dashSupplierFilter" class="border border-slate-300 rounded-lg p-2 text-sm"></select></div>
         <div><label class="text-xs text-slate-500 block">Period start</label><input type="date" id="dashStart" class="border border-slate-300 rounded-lg p-2"></div>
         <div><label class="text-xs text-slate-500 block">Period end</label><input type="date" id="dashEnd" class="border border-slate-300 rounded-lg p-2"></div>
         <button id="dashTodayBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">Today</button>
@@ -318,7 +335,7 @@
         </button>
         <div id="dash-workers-body" class="collapsible-body hidden border-t overflow-x-auto">
           <table class="w-full text-sm">
-            <thead><tr class="text-left border-b"><th class="p-2">Worker</th><th class="p-2">Farm/Supplier</th><th class="p-2">Crates</th><th class="p-2">Kg</th><th class="p-2">Amount Due</th><th class="p-2">Avg Kg/Crate</th></tr></thead>
+            <thead><tr class="text-left border-b"><th class="p-2">Worker</th><th class="p-2">Supplier</th><th class="p-2">Crates</th><th class="p-2">Kg</th><th class="p-2">Amount Due</th><th class="p-2">Avg Kg/Crate</th></tr></thead>
             <tbody id="dash-workers-rows"></tbody>
           </table>
         </div>
@@ -338,113 +355,10 @@
       </div>
     </div>
 
-    <div id="tab-masterdata" class="tab-content hidden space-y-4">
-      <div class="flex overflow-x-auto gap-2">
-        <button class="subtab-btn active" data-subtab="workers">Workers</button>
-        <button class="subtab-btn" data-subtab="teams">Teams</button>
-        <button class="subtab-btn" data-subtab="blocks">Blocks</button>
-        <button class="subtab-btn" data-subtab="devices">Devices</button>
-        <button class="subtab-btn" data-subtab="suppliers">Suppliers</button>
-      </div>
-
-      <div id="subtab-workers" class="subtab-content space-y-3">
-        <div class="flex flex-wrap gap-2 items-end">
-          <button data-action="export-workers-xlsx" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Export .xlsx</button>
-          <label class="px-3 py-2 bg-slate-200 rounded-lg text-sm cursor-pointer">Import <input type="file" id="importWorkers" class="hidden" accept=".csv,.xlsx"></label>
-          <div>
-            <label class="text-xs text-slate-500 block">Filter by Farm / Supplier</label>
-            <select id="workerSupplierFilter" class="border border-slate-300 rounded-lg p-2 text-sm"></select>
-          </div>
-          <button data-action="print-filtered" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Print Badges (filtered)</button>
-          <button data-action="print-selected" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Print Badges (selected)</button>
-          <button data-action="print-all" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Print Badges (all)</button>
-          <button data-action="new-worker" class="px-3 py-2 boord-btn-primary rounded-lg text-sm ml-auto">+ Add Worker</button>
-        </div>
-        <div class="bg-white rounded-xl shadow overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead><tr class="text-left border-b">
-              <th class="p-2"><input type="checkbox" id="selectAllWorkers" class="w-4 h-4"></th>
-              <th class="p-2">Photo</th>
-              <th class="p-2">Emp Nr</th><th class="p-2">First Name</th><th class="p-2">Last Name</th>
-              <th class="p-2">Farm / Supplier</th>
-              <th class="p-2">Active</th><th></th>
-            </tr></thead>
-            <tbody id="workersTable"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div id="subtab-teams" class="subtab-content hidden space-y-3">
-        <button data-action="new-team" class="px-3 py-2 boord-btn-primary rounded-lg text-sm">+ Add Team</button>
-        <div class="bg-white rounded-xl shadow overflow-x-auto">
-          <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="p-2">Id</th><th class="p-2">Name</th><th class="p-2">Induna</th><th class="p-2">Active</th><th></th></tr></thead><tbody id="teamsTable"></tbody></table>
-        </div>
-      </div>
-
-      <div id="subtab-blocks" class="subtab-content hidden space-y-3">
-        <div class="flex flex-wrap gap-2">
-          <button data-action="export-blocks-xlsx" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Export .xlsx</button>
-          <label class="px-3 py-2 bg-slate-200 rounded-lg text-sm cursor-pointer">Import <input type="file" id="importBlocks" class="hidden" accept=".csv,.xlsx"></label>
-          <label class="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600">
-            <input type="checkbox" id="importBlocksReplace">
-            Replace all (deactivate blocks not in the file)
-          </label>
-          <button data-action="new-block" class="px-3 py-2 boord-btn-primary rounded-lg text-sm ml-auto">+ Add Block</button>
-        </div>
-        <div class="bg-white rounded-xl shadow overflow-x-auto">
-          <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="p-2">Id</th><th class="p-2">Variety</th><th class="p-2">Trees</th><th class="p-2">Hectares</th><th class="p-2">Active</th><th></th></tr></thead><tbody id="blocksTable"></tbody></table>
-        </div>
-      </div>
-
-      <div id="subtab-devices" class="subtab-content hidden space-y-3">
-        <button data-action="new-device" class="px-3 py-2 boord-btn-primary rounded-lg text-sm">+ Add Device</button>
-        <div class="bg-white rounded-xl shadow overflow-x-auto">
-          <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="p-2">Id</th><th class="p-2">Role</th><th class="p-2">Station</th><th class="p-2">Team</th><th class="p-2">Last Seen</th><th></th></tr></thead><tbody id="devicesTable"></tbody></table>
-        </div>
-      </div>
-
-      <div id="subtab-suppliers" class="subtab-content hidden space-y-3">
-        <div class="text-xs text-slate-500">
-          Other farmers who use the pack house to process their own fruit. Each supplier's lots are
-          kept separate from the farm's own harvest everywhere in the dashboard and reports.
-        </div>
-        <button data-action="new-supplier" class="px-3 py-2 boord-btn-primary rounded-lg text-sm">+ Add Supplier</button>
-        <div class="bg-white rounded-xl shadow overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead><tr class="text-left border-b">
-              <th class="p-2">Name</th><th class="p-2">Contact</th><th class="p-2">Rate</th>
-              <th class="p-2">Active</th><th></th>
-            </tr></thead>
-            <tbody id="suppliersTable"></tbody>
-          </table>
-        </div>
-
-        <div class="bg-white rounded-xl shadow p-4 space-y-3">
-          <div class="font-semibold">Facility Billing</div>
-          <div class="flex flex-wrap gap-2 items-end">
-            <div>
-              <label class="text-xs text-slate-500 block">Supplier</label>
-              <select id="billingSupplierSelect" class="border border-slate-300 rounded-lg p-2"></select>
-            </div>
-            <div><label class="text-xs text-slate-500 block">Period start</label><input type="date" id="billingStart" class="border border-slate-300 rounded-lg p-2"></div>
-            <div><label class="text-xs text-slate-500 block">Period end</label><input type="date" id="billingEnd" class="border border-slate-300 rounded-lg p-2"></div>
-            <button id="calcBillingBtn" class="px-4 py-2 boord-btn-primary rounded-lg">Calculate</button>
-          </div>
-          <div id="billingSummary" class="text-sm font-semibold hidden"></div>
-          <div class="bg-slate-50 rounded-lg overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead><tr class="text-left border-b"><th class="p-2">Slip Number</th><th class="p-2">Received</th><th class="p-2">Crates</th><th class="p-2">Kg</th></tr></thead>
-              <tbody id="billingTable"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- PAYMENTS -->
     <div id="tab-payments" class="tab-content hidden space-y-4">
       <div class="bg-white rounded-xl shadow p-4 flex flex-wrap gap-2 items-end">
-        <div><label class="text-xs text-slate-500 block">Farm / Supplier</label><select id="paySupplierFilter" class="border border-slate-300 rounded-lg p-2 text-sm"></select></div>
+        <div><label class="text-xs text-slate-500 block">Supplier</label><select id="paySupplierFilter" class="border border-slate-300 rounded-lg p-2 text-sm"></select></div>
         <div><label class="text-xs text-slate-500 block">Period start</label><input type="date" id="payStart" class="border border-slate-300 rounded-lg p-2"></div>
         <div><label class="text-xs text-slate-500 block">Period end</label><input type="date" id="payEnd" class="border border-slate-300 rounded-lg p-2"></div>
         <button id="payTodayBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">Today</button>
@@ -455,7 +369,7 @@
       </div>
       <div class="bg-white rounded-xl shadow overflow-x-auto">
         <table class="w-full text-sm">
-          <thead><tr class="text-left border-b"><th class="p-2">Farm / Supplier</th><th class="p-2">Worker</th><th class="p-2">Kg</th><th class="p-2">Rate (R/kg)</th><th class="p-2">Due</th></tr></thead>
+          <thead><tr class="text-left border-b"><th class="p-2">Supplier</th><th class="p-2">Worker</th><th class="p-2">Kg</th><th class="p-2">Rate (R/kg)</th><th class="p-2">Due</th></tr></thead>
           <tbody id="paymentsTable"></tbody>
         </table>
       </div>
@@ -464,7 +378,7 @@
     <!-- REPORTS -->
     <div id="tab-reports" class="tab-content hidden space-y-4">
       <div class="bg-white rounded-xl shadow p-4 flex flex-wrap gap-2 items-end">
-        <div><label class="text-xs text-slate-500 block">Farm / Supplier</label><select id="reportsSupplierFilter" class="border border-slate-300 rounded-lg p-2 text-sm"></select></div>
+        <div><label class="text-xs text-slate-500 block">Supplier</label><select id="reportsSupplierFilter" class="border border-slate-300 rounded-lg p-2 text-sm"></select></div>
         <div><label class="text-xs text-slate-500 block">Day / period start</label><input type="date" id="reportDate1" class="border border-slate-300 rounded-lg p-2"></div>
         <div><label class="text-xs text-slate-500 block">Period end</label><input type="date" id="reportDate2" class="border border-slate-300 rounded-lg p-2"></div>
         <button id="reportsTodayBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">Today</button>
@@ -476,9 +390,112 @@
 
     <!-- SETTINGS -->
     <div id="tab-settings" class="tab-content hidden space-y-4">
+      <div id="masterdata-section" class="bg-white rounded-xl shadow p-4 space-y-4">
+        <div class="font-semibold">Master Data</div>
+        <div class="flex overflow-x-auto gap-2">
+          <button class="subtab-btn active" data-subtab="workers">Workers</button>
+          <button class="subtab-btn" data-subtab="teams">Teams</button>
+          <button class="subtab-btn" data-subtab="blocks">Blocks</button>
+          <button class="subtab-btn" data-subtab="devices">Devices</button>
+          <button class="subtab-btn" data-subtab="suppliers">Suppliers</button>
+        </div>
+
+        <div id="subtab-workers" class="subtab-content space-y-3">
+          <div class="flex flex-wrap gap-2 items-end">
+            <button data-action="export-workers-xlsx" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Export .xlsx</button>
+            <label class="px-3 py-2 bg-slate-200 rounded-lg text-sm cursor-pointer">Import <input type="file" id="importWorkers" class="hidden" accept=".csv,.xlsx"></label>
+            <div>
+              <label class="text-xs text-slate-500 block">Filter by supplier</label>
+              <select id="workerSupplierFilter" class="border border-slate-300 rounded-lg p-2 text-sm"></select>
+            </div>
+            <button data-action="print-filtered" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Print Badges (filtered)</button>
+            <button data-action="print-selected" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Print Badges (selected)</button>
+            <button data-action="print-all" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Print Badges (all)</button>
+            <button data-action="new-worker" class="px-3 py-2 boord-btn-primary rounded-lg text-sm ml-auto">+ Add Worker</button>
+          </div>
+          <div class="bg-white rounded-xl shadow overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="text-left border-b">
+                <th class="p-2"><input type="checkbox" id="selectAllWorkers" class="w-4 h-4"></th>
+                <th class="p-2">Photo</th>
+                <th class="p-2">Emp Nr</th><th class="p-2">First Name</th><th class="p-2">Last Name</th>
+                <th class="p-2">Supplier</th>
+                <th class="p-2">Active</th><th></th>
+              </tr></thead>
+              <tbody id="workersTable"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="subtab-teams" class="subtab-content hidden space-y-3">
+          <button data-action="new-team" class="px-3 py-2 boord-btn-primary rounded-lg text-sm">+ Add Team</button>
+          <div class="bg-white rounded-xl shadow overflow-x-auto">
+            <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="p-2">Id</th><th class="p-2">Name</th><th class="p-2">Induna</th><th class="p-2">Active</th><th></th></tr></thead><tbody id="teamsTable"></tbody></table>
+          </div>
+        </div>
+
+        <div id="subtab-blocks" class="subtab-content hidden space-y-3">
+          <div class="flex flex-wrap gap-2">
+            <button data-action="export-blocks-xlsx" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Export .xlsx</button>
+            <label class="px-3 py-2 bg-slate-200 rounded-lg text-sm cursor-pointer">Import <input type="file" id="importBlocks" class="hidden" accept=".csv,.xlsx"></label>
+            <label class="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600">
+              <input type="checkbox" id="importBlocksReplace">
+              Replace all (deactivate blocks not in the file)
+            </label>
+            <button data-action="new-block" class="px-3 py-2 boord-btn-primary rounded-lg text-sm ml-auto">+ Add Block</button>
+          </div>
+          <div class="bg-white rounded-xl shadow overflow-x-auto">
+            <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="p-2">Id</th><th class="p-2">Variety</th><th class="p-2">Trees</th><th class="p-2">Hectares</th><th class="p-2">Supplier</th><th class="p-2">Active</th><th></th></tr></thead><tbody id="blocksTable"></tbody></table>
+          </div>
+        </div>
+
+        <div id="subtab-devices" class="subtab-content hidden space-y-3">
+          <button data-action="new-device" class="px-3 py-2 boord-btn-primary rounded-lg text-sm">+ Add Device</button>
+          <div class="bg-white rounded-xl shadow overflow-x-auto">
+            <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="p-2">Id</th><th class="p-2">Role</th><th class="p-2">Station</th><th class="p-2">Team</th><th class="p-2">Supplier</th><th class="p-2">Last Seen</th><th></th></tr></thead><tbody id="devicesTable"></tbody></table>
+          </div>
+        </div>
+
+        <div id="subtab-suppliers" class="subtab-content hidden space-y-3">
+          <div class="text-xs text-slate-500">
+            Growers who deliver fruit into this pack house. Each supplier's lots are
+            kept separate from your own harvest everywhere in the dashboard and reports.
+          </div>
+          <button data-action="new-supplier" class="px-3 py-2 boord-btn-primary rounded-lg text-sm">+ Add Supplier</button>
+          <div class="bg-white rounded-xl shadow overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="text-left border-b">
+                <th class="p-2">Name</th><th class="p-2">Contact</th><th class="p-2">Rate</th>
+                <th class="p-2">Active</th><th></th>
+              </tr></thead>
+              <tbody id="suppliersTable"></tbody>
+            </table>
+          </div>
+
+          <div class="bg-white rounded-xl shadow p-4 space-y-3">
+            <div class="font-semibold">Facility Billing</div>
+            <div class="flex flex-wrap gap-2 items-end">
+              <div>
+                <label class="text-xs text-slate-500 block">Supplier</label>
+                <select id="billingSupplierSelect" class="border border-slate-300 rounded-lg p-2"></select>
+              </div>
+              <div><label class="text-xs text-slate-500 block">Period start</label><input type="date" id="billingStart" class="border border-slate-300 rounded-lg p-2"></div>
+              <div><label class="text-xs text-slate-500 block">Period end</label><input type="date" id="billingEnd" class="border border-slate-300 rounded-lg p-2"></div>
+              <button id="calcBillingBtn" class="px-4 py-2 boord-btn-primary rounded-lg">Calculate</button>
+            </div>
+            <div id="billingSummary" class="text-sm font-semibold hidden"></div>
+            <div class="bg-slate-50 rounded-lg overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead><tr class="text-left border-b"><th class="p-2">Slip Number</th><th class="p-2">Received</th><th class="p-2">Crates</th><th class="p-2">Kg</th></tr></thead>
+                <tbody id="billingTable"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="bg-white rounded-xl shadow p-4 space-y-3">
         <div class="font-semibold">Data Backup</div>
-        <div class="text-xs text-slate-500">Backs up the farm data and worker photos. Runs automatically every day at 02:00, but only saves a backup when something actually changed that day - quiet days add no entry. The last 14 are kept. <b>Backup Now</b> always creates one. Weather history isn't included (it re-downloads).</div>
+        <div class="text-xs text-slate-500">Backs up the pack house data and worker photos. Runs automatically every day at 02:00, but only saves a backup when something actually changed that day - quiet days add no entry. The last 14 are kept. <b>Backup Now</b> always creates one.</div>
         <button id="runBackupBtn" class="px-4 py-2 boord-btn-primary rounded-lg">Backup Now</button>
         <div class="bg-slate-50 rounded-lg overflow-x-auto">
           <table class="w-full text-sm">
@@ -489,10 +506,23 @@
       </div>
 
       <div class="bg-white rounded-xl shadow p-4 space-y-3">
-        <div class="font-semibold">Farm settings</div>
-        <div><label class="text-xs text-slate-500 block">Farm name</label><input id="setFarmName" class="w-full border border-slate-300 rounded-lg p-2"></div>
-        <div><label class="text-xs text-slate-500 block">Location description</label><input id="setFarmLocation" class="w-full border border-slate-300 rounded-lg p-2"></div>
-        <div><label class="text-xs text-slate-500 block">Current harvest season (year)</label><input type="number" id="setHarvestYear" class="w-full border border-slate-300 rounded-lg p-2"></div>
+        <div class="font-semibold">Pack House settings</div>
+        <div><label class="text-xs text-slate-500 block">Pack House name</label><input id="setPackhouseName" class="w-full border border-slate-300 rounded-lg p-2"></div>
+        <div><label class="text-xs text-slate-500 block">Location description</label><input id="setPackhouseLocation" class="w-full border border-slate-300 rounded-lg p-2"></div>
+        <div><label class="text-xs text-slate-500 block">Pack House Code (PHC)</label><input id="setPackhouseCode" class="w-full border border-slate-300 rounded-lg p-2"></div>
+        <div>
+          <label class="text-xs text-slate-500 block">Season start (repeats every year)</label>
+          <div class="grid grid-cols-2 gap-2">
+            <select id="setSeasonMonth" class="w-full border border-slate-300 rounded-lg p-2">
+              <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+              <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+              <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+              <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+            </select>
+            <input type="number" min="1" max="31" id="setSeasonDay" class="w-full border border-slate-300 rounded-lg p-2" placeholder="Day">
+          </div>
+          <div id="setSeasonYearLabel" class="text-xs text-slate-400 mt-1"></div>
+        </div>
         <div class="grid grid-cols-2 gap-2">
           <div><label class="text-xs text-slate-500 block">Green → Yellow (minutes)</label><input type="number" id="setGreenYellow" class="w-full border border-slate-300 rounded-lg p-2"></div>
           <div><label class="text-xs text-slate-500 block">Yellow → Red (minutes)</label><input type="number" id="setYellowRed" class="w-full border border-slate-300 rounded-lg p-2"></div>
@@ -577,7 +607,7 @@
 <!-- Map picker modal -->
 <div id="mapModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-50">
   <div class="bg-white rounded-xl p-4 w-full max-w-2xl">
-    <div class="font-bold mb-2">Click to pin farm location</div>
+    <div class="font-bold mb-2">Click to pin pack house location</div>
     <div class="text-xs text-slate-500 mb-2" id="mapCoordDisplay">Click the map to pick coordinates</div>
     <div id="mapContainer" style="height: 420px; z-index: 1;"></div>
     <div class="flex gap-2 mt-3">

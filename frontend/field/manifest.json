@@ -1,6 +1,6 @@
 {
-  "name": "Boord Veld",
-  "short_name": "Veld",
+  "name": "Boord Field",
+  "short_name": "Field",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -2,9 +2,12 @@
 
 let _systemSettings = null;
 
-function updateBannerFarmName() {
-  const el = document.getElementById("headerFarmName");
-  if (el) el.textContent = (_systemSettings && _systemSettings.farm_name) || "Boord";
+function updateBannerPackhouseName() {
+  const el = document.getElementById("headerPackhouseName");
+  if (!el) return;
+  const s = _systemSettings || {};
+  const name = s.packhouse_name || "Boord";
+  el.textContent = s.packhouse_code ? `${name} · ${s.packhouse_code}` : name;
 }
 
 function updateBannerClock() {
@@ -25,7 +28,7 @@ async function updateBannerWeather() {
       // The farm's GPS isn't set. Say so rather than leaving the strip blank:
       // Weather, Risk and the Harvest Forecast all stay empty until it is,
       // and a silent gap gives no clue why.
-      el.innerHTML = `<i class="fa-solid fa-location-dot"></i> Set farm location in Settings`;
+      el.innerHTML = `<i class="fa-solid fa-location-dot"></i> Set pack house location in Settings`;
     } else if (w && w.temp !== undefined && w.temp !== null) {
       const icon = Boord.weatherIcon(w.condition);
       el.innerHTML = `<i class="fa-solid ${icon}"></i> ${Math.round(w.temp)}°C · ${w.condition}${w.humidity != null ? ` · ${w.humidity}% humidity` : ""}`;
@@ -37,7 +40,7 @@ async function updateBannerWeather() {
 
 function initBanner() {
   document.getElementById("appVersion").textContent = `v${Boord.VERSION}`;
-  updateBannerFarmName();
+  updateBannerPackhouseName();
   updateBannerClock();
   updateBannerWeather();
   setInterval(updateBannerClock, 1000);
@@ -147,7 +150,8 @@ async function showApp() {
       const active = document.querySelector(".tab-btn.active");
       const tab = active ? active.dataset.tab : "dashboard";
       if (tab === "dashboard") await refreshDashboard();
-      else if (tab === "masterdata") await loadAllMasterData();
+      // Master Data now lives inside the Settings tab.
+      else if (tab === "settings") { await loadSettingsForm(); await loadAllMasterData(); }
     });
   }
 
@@ -273,7 +277,10 @@ function bindDashboard() {
     seasonBtn: document.getElementById("dashSeasonBtn"),
     startInput: document.getElementById("dashStart"),
     endInput: document.getElementById("dashEnd"),
-    seasonYear: () => (_systemSettings && _systemSettings.current_harvest_year) || new Date().getFullYear(),
+    seasonAnchor: () => ({
+      month: (_systemSettings && _systemSettings.season_start_month) || 1,
+      day: (_systemSettings && _systemSettings.season_start_day) || 1,
+    }),
     onChange: refreshDashboard,
   });
   document.getElementById("dashStart").addEventListener("change", refreshDashboard);
@@ -714,8 +721,14 @@ async function exportFile(path, filename) {
   Boord.downloadBlob(blob, filename);
 }
 
+// Suppliers and teams first, then everything that renders their names.
+// Workers, blocks and devices all resolve a supplier_id (and devices a
+// team_id) against the caches those two fill, so loading the whole lot in
+// one Promise.all is a race: whichever table wins draws blank names and
+// only looks right after the next refresh.
 async function loadAllMasterData() {
-  await Promise.all([loadWorkers(), loadTeams(), loadBlocks(), loadDevices(), loadSuppliers()]);
+  await Promise.all([loadSuppliers(), loadTeams()]);
+  await Promise.all([loadWorkers(), loadBlocks(), loadDevices()]);
 }
 
 // Workers
@@ -774,8 +787,8 @@ function populateSupplierFilterSelect(elementId, suppliers) {
   if (!select) return;
   const current = select.value;
   const active = suppliers.filter((s) => s.active);
-  select.innerHTML = `<option value="">All farms / suppliers</option>` +
-    active.map((s) => `<option value="${s.id}">${s.name}${s.is_own_farm ? " (Own Farm)" : ""}</option>`).join("");
+  select.innerHTML = `<option value="">All suppliers</option>` +
+    active.map((s) => `<option value="${s.id}">${s.name}${s.is_own_farm ? " (Own fruit)" : ""}</option>`).join("");
   if (current) select.value = current;
 }
 
@@ -807,7 +820,7 @@ function editWorker(worker) {
     { key: "bank", label: "Bank" },
     { key: "account", label: "Account Number" },
     { key: "whatsapp_number", label: "WhatsApp Number" },
-    { key: "supplier_id", label: "Farm / Supplier", type: "select",
+    { key: "supplier_id", label: "Supplier", type: "select",
       options: [{ value: "", label: "(none)" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))] },
     { key: "photo", label: "Photo (camera or file)", type: "file" },
     { key: "active", label: "Active", type: "checkbox" },
@@ -865,6 +878,13 @@ function editTeam(team) {
   });
 }
 
+// The supplier name for an id, from the cached list; blank for none/unknown.
+function supplierName(id) {
+  if (id == null || id === "") return "";
+  const s = (window._suppliersCache || []).find((x) => x.id == id);
+  return s ? s.name : "";
+}
+
 // Blocks
 async function loadBlocks() {
   const blocks = await Boord.api("/api/blocks");
@@ -873,6 +893,7 @@ async function loadBlocks() {
     <tr class="border-b ${b.active ? "" : "opacity-50"}">
       <td class="p-2">${b.id}</td><td class="p-2">${b.variety}</td><td class="p-2">${b.trees}</td>
       <td class="p-2">${b.hectares}</td>
+      <td class="p-2 text-xs">${supplierName(b.supplier_id)}</td>
       <td class="p-2">${b.active ? '<span class="text-green-600 text-xs">Active</span>' : '<span class="text-slate-400 text-xs">Inactive</span>'}</td>
       <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit="${b.id}">Edit</button></td>
     </tr>
@@ -883,17 +904,26 @@ async function loadBlocks() {
 }
 
 function editBlock(block) {
+  const suppliers = (window._suppliersCache || []).filter((s) => s.active);
   openEditModal(block ? "Edit Block" : "Add Block", [
     { key: "id", label: "Block Id", disabled: !!block },
     { key: "name", label: "Name" },
     { key: "variety", label: "Variety" },
     { key: "trees", label: "Trees", type: "number" },
     { key: "hectares", label: "Hectares", type: "number" },
+    { key: "supplier_id", label: "Supplier", type: "select",
+      options: [{ value: "", label: "(none)" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))] },
     { key: "active", label: "Active", type: "checkbox" },
   ], { active: true, ...block }, async (values) => {
     await Boord.api("/api/blocks", {
       method: "POST", auth: true,
-      body: { ...values, trees: parseInt(values.trees) || 0, hectares: parseFloat(values.hectares) || 0, active: !!values.active },
+      body: {
+        ...values,
+        trees: parseInt(values.trees) || 0,
+        hectares: parseFloat(values.hectares) || 0,
+        supplier_id: values.supplier_id ? parseInt(values.supplier_id) : null,
+        active: !!values.active,
+      },
     });
     Boord.toast("Block saved");
     await loadBlocks();
@@ -906,6 +936,7 @@ async function loadDevices() {
   document.getElementById("devicesTable").innerHTML = devices.map((d) => `
     <tr class="border-b">
       <td class="p-2">${d.id}</td><td class="p-2">${d.role}</td><td class="p-2">${d.station}</td><td class="p-2">${d.team_id || ""}</td>
+      <td class="p-2 text-xs">${d.role === "field" ? (supplierName(d.supplier_id) || "Own fruit") : ""}</td>
       <td class="p-2">${Boord.fmtDateTime(d.last_seen, "never")}</td>
       <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit="${d.id}">Edit</button></td>
     </tr>
@@ -917,19 +948,25 @@ async function loadDevices() {
 
 function editDevice(device) {
   const teams = window._teamsCache || [];
+  const suppliers = (window._suppliersCache || []).filter((s) => s.active);
   openEditModal(device ? "Edit Device" : "Add Device", [
     { key: "id", label: "Device Id (e.g. device-01)", disabled: !!device },
     { key: "role", label: "Role", type: "select", options: [
       { value: "field", label: "Field" },
-      { value: "packhouse", label: "Pack House (Receiving)" },
+      { value: "packhouse", label: "Receiving" },
       { value: "admin", label: "Admin" },
     ] },
     { key: "station", label: "Station name" },
     { key: "team_id", label: "Team", type: "select", options: [{ value: "", label: "(none)" }, ...teams.filter((t) => t.active).map((t) => ({ value: t.id, label: t.name }))] },
+    { key: "supplier_id", label: "Supplier (field devices - whose fruit this device picks)", type: "select",
+      options: [{ value: "", label: "(own fruit)" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))] },
     { key: "induna", label: "Induna" },
     { key: "data_capturer", label: "Data Capturer" },
   ], device || { role: "field" }, async (values) => {
-    await Boord.api("/api/devices", { method: "POST", auth: true, body: { ...values, active: true } });
+    await Boord.api("/api/devices", {
+      method: "POST", auth: true,
+      body: { ...values, supplier_id: values.supplier_id ? parseInt(values.supplier_id) : null, active: true },
+    });
     Boord.toast("Device saved");
     await loadDevices();
   });
@@ -941,7 +978,7 @@ async function loadSuppliers() {
   window._suppliersCache = suppliers;
   document.getElementById("suppliersTable").innerHTML = suppliers.map((s) => `
     <tr class="border-b ${s.active ? "" : "opacity-50"}">
-      <td class="p-2">${s.name}${s.is_own_farm ? ' <span class="text-xs text-blue-700 font-semibold">(Own Farm)</span>' : ""}</td>
+      <td class="p-2">${s.name}${s.is_own_farm ? ' <span class="text-xs text-blue-700 font-semibold">(Own fruit)</span>' : ""}</td>
       <td class="p-2 text-xs">${s.contact_name || ""}${s.contact_phone ? ` - ${s.contact_phone}` : ""}</td>
       <td class="p-2 text-xs">${s.packing_rate_per_kg > 0 ? `R${s.packing_rate_per_kg.toFixed(2)}/kg` : s.packing_rate_per_crate > 0 ? `R${s.packing_rate_per_crate.toFixed(2)}/crate` : "-"}</td>
       <td class="p-2">${s.active ? '<span class="text-green-600 text-xs">Active</span>' : '<span class="text-slate-400 text-xs">Inactive</span>'}</td>
@@ -965,6 +1002,8 @@ function editSupplier(supplier) {
     { key: "contact_name", label: "Contact Name" },
     { key: "contact_phone", label: "Contact Phone" },
     { key: "contact_email", label: "Contact Email" },
+    { key: "puc", label: "PUC (Product Unit Code)" },
+    { key: "global_gap_number", label: "GlobalG.A.P. Number (GGN)" },
     { key: "packing_rate_per_kg", label: "Packing Rate (R/kg)", type: "number" },
     { key: "packing_rate_per_crate", label: "Packing Rate (R/crate, used if R/kg is 0)", type: "number" },
     { key: "active", label: "Active", type: "checkbox" },
@@ -1044,7 +1083,10 @@ function bindPayments() {
     seasonBtn: document.getElementById("paySeasonBtn"),
     startInput: document.getElementById("payStart"),
     endInput: document.getElementById("payEnd"),
-    seasonYear: () => (_systemSettings && _systemSettings.current_harvest_year) || new Date().getFullYear(),
+    seasonAnchor: () => ({
+      month: (_systemSettings && _systemSettings.season_start_month) || 1,
+      day: (_systemSettings && _systemSettings.season_start_day) || 1,
+    }),
   });
 }
 
@@ -1069,7 +1111,7 @@ async function calculatePayments() {
 function supplierNameForWorker(worker, suppliers) {
   const own = suppliers.find((s) => s.is_own_farm);
   if (!worker || worker.supplier_id == null || (own && worker.supplier_id === own.id)) {
-    return own ? own.name : "Own Farm";
+    return own ? own.name : "Own fruit";
   }
   const supplier = suppliers.find((s) => s.id === worker.supplier_id);
   return supplier ? supplier.name : "Unknown";
@@ -1132,26 +1174,37 @@ async function exportPayments() {
 // ---------------------------------------------------------------------
 const REPORTS = [
   { key: "daily-harvest", label: "Daily Harvest Summary", icon: "fa-sun",
+    desc: "Crates and kg by block and team for one day. Uses the period start date even if a wider range is picked.",
     params: (d1, d2, s) => `day=${d1}${s ? `&supplier_id=${s}` : ""}` },
   { key: "lot-receiving", label: "Lot & Receiving Report", icon: "fa-truck",
+    desc: "Every lot dispatched in the range, with its receiving detail once the truck has been checked in.",
     params: (d1, d2, s) => `date_from=${d1}&date_to=${d2}${s ? `&supplier_id=${s}` : ""}` },
   { key: "picking-notes", label: "Plukstrokies / Picking Notes", icon: "fa-clipboard-list",
+    desc: "One row per dispatched lot - slip, block(s), crates sent vs received, driver, supplier, condition, weather - matching the paper picking slip.",
     params: (d1, d2, s) => `date_from=${d1}&date_to=${d2}${s ? `&supplier_id=${s}` : ""}` },
   { key: "team-picking-list", label: "Span Pluklys / Team Picking List", icon: "fa-people-group",
+    desc: "One row per team per day - data capturer, induna, worker count, deductions, plus each block picked and each lot dispatched that day.",
     params: (d1, d2, s) => `date_from=${d1}&date_to=${d2}${s ? `&supplier_id=${s}` : ""}` },
   { key: "harvest-data", label: "Daaglikse Oesdata / Daily Harvest Data", icon: "fa-table-cells",
+    desc: "Kg by date (rows) against block (columns) over the range, with per-day and per-block totals including avg per tree and per hectare.",
     params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
   { key: "harvesting-list", label: "Harvesting List", icon: "fa-seedling",
+    desc: "Loads still being picked, matching the Dashboard's Harvesting list.",
     params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
   { key: "in-transit-list", label: "In Transit List", icon: "fa-truck-fast",
+    desc: "Loads dispatched from the field but not yet received at the pack house.",
     params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
   { key: "received-list", label: "Pakhuis Ontvangstes / Pack House Receivables", icon: "fa-warehouse",
+    desc: "Received loads - slip, date/time, receiving block, supplier, team, driver, crates, kg and rejected waste kg - matching the paper receipt list.",
     params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
   { key: "worker-harvest", label: "Worker Harvest Report", icon: "fa-users",
+    desc: "Per-worker crates, kg, amount due and average kg per crate over the range.",
     params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
   { key: "litchi-wages", label: "Lietsjie Lone / Litchi Wages", icon: "fa-hand-holding-dollar",
+    desc: "One row per worker with crates broken out per day worked, plus a total - a whole pay period on a single line.",
     params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
   { key: "block-harvest", label: "Block Harvest Report", icon: "fa-tree",
+    desc: "Per-block crates, kg, average kg per crate and average kg per tree over the range.",
     params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
 ];
 
@@ -1166,15 +1219,16 @@ function renderReportsGrid() {
 
   document.getElementById("reportsGrid").innerHTML = REPORTS.map((r) => {
     const flagDailyOnly = isRange && DAILY_ONLY_REPORTS.has(r.key);
-    const subtitle = flagDailyOnly
-      ? `<div class="text-xs text-amber-600 font-medium"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Daily report only - uses ${d1} (period start)</div>`
-      : `<div class="text-xs text-slate-400">Download .xlsx</div>`;
+    const note = flagDailyOnly
+      ? `<div class="text-xs text-amber-600 font-medium mt-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Daily report only - uses ${d1} (period start)</div>`
+      : `<div class="text-xs text-slate-400 mt-1">Download .xlsx</div>`;
     return `
     <button class="bg-white rounded-xl shadow p-4 text-left hover:bg-slate-50 flex items-start gap-3" data-report="${r.key}">
       <i class="fa-solid ${r.icon} text-slate-400 mt-0.5"></i>
       <div>
         <div class="font-semibold text-sm">${r.label}</div>
-        ${subtitle}
+        <div class="text-xs text-slate-500">${r.desc || ""}</div>
+        ${note}
       </div>
     </button>
   `;
@@ -1195,7 +1249,10 @@ function bindReports() {
     seasonBtn: document.getElementById("setSeasonDatesBtn"),
     startInput: document.getElementById("reportDate1"),
     endInput: document.getElementById("reportDate2"),
-    seasonYear: () => (_systemSettings && _systemSettings.current_harvest_year) || new Date().getFullYear(),
+    seasonAnchor: () => ({
+      month: (_systemSettings && _systemSettings.season_start_month) || 1,
+      day: (_systemSettings && _systemSettings.season_start_day) || 1,
+    }),
     onChange: renderReportsGrid,
   });
   document.getElementById("reportDate1").addEventListener("change", renderReportsGrid);
@@ -1253,6 +1310,8 @@ function bindSettings() {
   document.getElementById("pickMapBtn").addEventListener("click", () => openMapModal("setGpsLat", "setGpsLon"));
   bindMapModal();
   document.getElementById("runBackupBtn").addEventListener("click", runBackupNow);
+  document.getElementById("setSeasonMonth").addEventListener("change", updateSeasonYearLabel);
+  document.getElementById("setSeasonDay").addEventListener("input", updateSeasonYearLabel);
 }
 
 async function loadBackupsList() {
@@ -1287,13 +1346,16 @@ async function loadSettingsForm() {
   const settings = await Boord.api("/api/system-settings");
   _systemSettings = settings;
   if (settings) {
-    document.getElementById("setFarmName").value = settings.farm_name || "";
-    document.getElementById("setFarmLocation").value = settings.farm_location || "";
-    document.getElementById("setHarvestYear").value = settings.current_harvest_year || new Date().getFullYear();
+    document.getElementById("setPackhouseName").value = settings.packhouse_name || "";
+    document.getElementById("setPackhouseLocation").value = settings.packhouse_location || "";
+    document.getElementById("setPackhouseCode").value = settings.packhouse_code || "";
+    document.getElementById("setSeasonMonth").value = settings.season_start_month || 1;
+    document.getElementById("setSeasonDay").value = settings.season_start_day || 1;
     document.getElementById("setGreenYellow").value = settings.green_to_yellow_minutes;
     document.getElementById("setYellowRed").value = settings.yellow_to_red_minutes;
     document.getElementById("setGpsLat").value = settings.gps_lat ?? "";
     document.getElementById("setGpsLon").value = settings.gps_lon ?? "";
+    updateSeasonYearLabel();
   }
   const rate = await Boord.api("/api/rate-settings/current");
   if (rate) {
@@ -1302,13 +1364,28 @@ async function loadSettingsForm() {
   await loadBackupsList();
 }
 
+// The season year shown beside the anchor: derived, never typed, so it can
+// never drift from the start date the pack house actually picked.
+function updateSeasonYearLabel() {
+  const el = document.getElementById("setSeasonYearLabel");
+  if (!el) return;
+  const month = parseInt(document.getElementById("setSeasonMonth").value, 10) || 1;
+  const day = parseInt(document.getElementById("setSeasonDay").value, 10) || 1;
+  el.textContent = `Current season: ${Boord.seasonYearFor(month, day)}`;
+}
+
 async function saveSystemSettings() {
   const lat = parseFloat(document.getElementById("setGpsLat").value) || null;
   const lon = parseFloat(document.getElementById("setGpsLon").value) || null;
+  const month = parseInt(document.getElementById("setSeasonMonth").value, 10) || 1;
+  const day = parseInt(document.getElementById("setSeasonDay").value, 10) || 1;
   const newSettings = {
-    farm_name: document.getElementById("setFarmName").value,
-    farm_location: document.getElementById("setFarmLocation").value,
-    current_harvest_year: parseInt(document.getElementById("setHarvestYear").value) || new Date().getFullYear(),
+    packhouse_name: document.getElementById("setPackhouseName").value,
+    packhouse_location: document.getElementById("setPackhouseLocation").value,
+    packhouse_code: document.getElementById("setPackhouseCode").value,
+    season_start_month: month,
+    season_start_day: day,
+    current_harvest_year: Boord.seasonYearFor(month, day),
     green_to_yellow_minutes: parseInt(document.getElementById("setGreenYellow").value) || 90,
     yellow_to_red_minutes: parseInt(document.getElementById("setYellowRed").value) || 150,
     gps_lat: lat,
@@ -1316,7 +1393,8 @@ async function saveSystemSettings() {
   };
   await Boord.api("/api/system-settings", { method: "PUT", auth: true, body: newSettings });
   _systemSettings = { ..._systemSettings, ...newSettings };
-  updateBannerFarmName();
+  updateBannerPackhouseName();
+  updateSeasonYearLabel();
   Boord.toast("Settings saved");
 }
 

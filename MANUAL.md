@@ -915,8 +915,8 @@ database and seeds a clean starting baseline:
   `device-07` (pack house), and `admin-pc` (admin) - see
   [chapter 3](#3-device-setup) for how these get assigned to physical
   devices
-- One supplier row representing the farm's own fruit ("Own Farm") - rename
-  it to your farm under [Master Data](#8-admin---master-data)
+- One supplier row representing the pack house's own fruit ("Own fruit") -
+  rename it under [Master Data](#8-admin---master-data)
 - An admin login: **username `admin`**, with a **random password generated
   for this install** - printed by the installer, and kept in
   `data\initial_admin_password.txt` until it is replaced. There is no
@@ -940,9 +940,9 @@ until you fill it in. That is deliberate: a block register is the shape of
 one particular orchard - its labels, varieties, tree counts and hectares -
 and no two farms share one.
 
-Import yours via **Admin → Master Data → Blocks → Import**, using
+Import yours via **Admin → Settings → Master Data → Blocks → Import**, using
 `templates/blocks.csv` in the project folder for the column headings
-(`id`, `name`, `variety`, `trees`, `hectares`, `active`). `templates/README.md`
+(`id`, `name`, `variety`, `trees`, `hectares`, `supplier_id`, `active`). `templates/README.md`
 describes each column. Both `.csv` and `.xlsx` are accepted, and importing
 again updates blocks with a matching `id` rather than duplicating them, so
 it is safe to correct a mistake and re-import.
@@ -951,14 +951,15 @@ it is safe to correct a mistake and re-import.
 
 You do not have to hunt for any of the above. The first time you sign in to
 the Admin app on a new install — straight after choosing your own password —
-Boord shows a nine-step setup wizard instead of the usual tabs:
+Boord shows an eight-step setup wizard instead of the usual tabs:
 
-1. **Whose farm is this** — farm name, location description, how your own
-   fruit is labelled as a supplier, and the current harvest season
+1. **Whose pack house is this** — pack house name, location description,
+   Pack House Code (PHC), how your own fruit is labelled as a supplier
+   (with its PUC and GlobalG.A.P. Number), and the season start date
 2. **Where is it** — GPS latitude and longitude, with a map to click on
 3. **What you pay per kilogram** — the wage rate
 4. **How long fruit may sit in transit** — the two urgency thresholds
-   (optional; the defaults suit most farms)
+   (optional; the defaults suit most operations)
 5. **Your orchard blocks** — download `blocks.csv`, fill it in, load it back
 6. **Your people** — the worker import (optional)
 7. **Name your stations** — rename the eight device slots (optional)
@@ -971,8 +972,8 @@ outstanding rather than letting you discover it in use.
 **It is safe to close half way through.** Reopening the Admin app returns you
 to the wizard at the first step you have not finished. It stops appearing
 once you press **Open Boord** on the last screen, and everything it collects
-can be changed afterwards under **Settings** and **Master Data** — nothing on
-that screen is decided permanently.
+can be changed afterwards under **Settings** — nothing on that screen is
+decided permanently.
 
 An existing farm upgrading to this version never sees the wizard: Boord
 checks that the database has no farm name *and* no captured crates before
@@ -1275,17 +1276,18 @@ prints them from **Master Data → Workers**:
   ticked
 - **Print Badges (all)** - every active worker
 
-Each badge shows the farm name, the worker's photo (if one's been
+Each badge shows the pack house name, the worker's photo (if one's been
 captured - see [chapter 8](#8-admin---master-data)), their name, their
 employee number in large text, and a QR code encoding that employee
 number.
 
-Badges print **60 mm wide × 80 mm high**, portrait, to fit the ID card
-holders the farm uses - nine to an A4 sheet, with dashed lines to cut
-along. Cut on the line and a badge slides straight into a holder; no
-trimming, and nothing to laminate unless you want to.
+Badges print **58 mm wide × 78 mm high**, portrait - 1 mm inside the ID
+card holders on every edge so the printed badge drops into the sleeve
+without catching. Nine to an A4 sheet, with dashed lines to cut along. Cut
+on the line and a badge slides straight into a holder; no trimming, and
+nothing to laminate unless you want to.
 
-Most of the card is the QR code, at **50 mm square**. That's deliberate:
+Most of the card is the QR code, at **48 mm square**. That's deliberate:
 it's the part the badge gets used for every day, out in the sun at arm's
 length, and a bigger code is quicker to catch and can be scanned from
 further back. It's printed as line art rather than as a picture, so it
@@ -1377,14 +1379,16 @@ what's happening right now, all scoped to a shared filter bar at the top.
 
 ### Filter bar
 
-- **Farm / Supplier** - narrow everything below to one farm/supplier, or
-  leave on "All farms / suppliers"
+- **Supplier** - narrow everything below to one supplier, or leave on
+  "All suppliers"
 - **Period start / Period end**, plus quick-fill buttons **Today**,
-  **This Week**, **Season** (season = 1 Jan - 31 Dec of the harvest year
-  set in [Settings](#11-admin---settings)) - or set custom dates directly.
-  Whichever preset matches the dates currently selected is highlighted, so
-  it's clear at a glance whether "Today" or a custom range is showing.
-- Changing any filter - a preset button, a typed date, or the Farm/Supplier
+  **This Week**, **Season**. The season is a recurring start date (a month
+  and a day) set in [Settings](#11-admin---settings); **Season** fills the
+  twelve months from that date, and the season is labelled by the year it
+  starts in. Or set custom dates directly. Whichever preset matches the
+  dates currently selected is highlighted, so it's clear at a glance
+  whether "Today" or a custom range is showing.
+- Changing any filter - a preset button, a typed date, or the supplier
   dropdown - refreshes everything below immediately, so there's no separate
   Refresh button to remember to press (dragging down from the top of the
   page still refreshes too, same as everywhere else in the app).
@@ -1455,12 +1459,13 @@ picked stay exactly as captured). Saving:
 
 ## 8. Admin - Master Data
 
-Master Data has five subtabs for the farm's reference data.
+Master Data is a section of the **Settings** tab, with five subtabs for the
+pack house's reference data.
 
 ### Workers
 
 Employee number, name, ID number, bank/account, WhatsApp number, which
-farm/supplier they belong to, a photo (captured via the device's camera
+supplier they belong to, a photo (captured via the device's camera
 right in the edit form, or uploaded), and active/inactive. Supports
 CSV/xlsx **Export** and **Import** for bulk edits, and the
 [Print Badges](#5-worker-id-badges) buttons.
@@ -1471,11 +1476,12 @@ ID (e.g. "A"), name (e.g. "Span A"), induna, active.
 
 ### Blocks
 
-The 21 preseeded blocks (see [chapter 2](#2-initial-server-setup)), each
-with name, variety, tree count, hectares, active already filled in.
-Supports CSV/xlsx export/import for bulk edits rather than one block at a
-time - useful whenever the farm's actual block layout changes (e.g. a
-block gets re-divided by variety).
+Each block has a name, variety, tree count, hectares, an optional
+**supplier** (whose orchard the block is - blank means the pack house's
+own fruit), and active. Supports CSV/xlsx export/import (the file has a
+`supplier_id` column) for bulk edits rather than one block at a time -
+useful whenever the actual block layout changes (e.g. a block gets
+re-divided by variety).
 
 **Import** always adds new block IDs and updates existing ones from the
 file, but never removes anything on its own - a block ID that used to
@@ -1488,14 +1494,17 @@ that reference it are unaffected.
 
 ### Devices
 
-ID, role (field/packhouse/admin), station name, team, induna, data
-capturer, active. This is where new devices must be added before they can
-complete [Device Setup](#3-device-setup).
+ID, role (Field / Receiving / Admin), station name, team, and - for a
+Field device - the **supplier** it picks for (blank means the pack
+house's own fruit; every picking slip it sends is attributed there),
+induna, data capturer, active. This is where new devices must be added
+before they can complete [Device Setup](#3-device-setup).
 
 ### Suppliers
 
-Every farm whose fruit passes through this pack house, including the
-farm's own row (marked "(Own Farm)"). Contact details and a packing rate
+Every grower whose fruit passes through this pack house, including your
+own row (marked "(Own fruit)"). Each carries contact details, a **PUC**
+(Product Unit Code) and a **GlobalG.A.P. Number**, and a packing rate
 (per kg, or per crate if per-kg is left at 0) used for the **Facility
 Billing** panel on this same subtab - pick a supplier and date range,
 tap **Calculate**, and see how much facility-use fee that supplier owes
@@ -1557,9 +1566,9 @@ back up anything else in `data\`.
 
 ### Data Backup
 
-- **Backup Now** - immediately zips the farm data and worker photos into a
-  downloadable archive, and adds it to the list below (created date, size,
-  a download link per entry). This always creates a backup, whether
+- **Backup Now** - immediately zips the pack house data and worker photos
+  into a downloadable archive, and adds it to the list below (created date,
+  size, a download link per entry). This always creates a backup, whether
   anything changed or not
 - The same backup also runs **automatically every day at 02:00**, keeping
   only the **14 most recent** backups (older ones are deleted
@@ -1628,12 +1637,14 @@ there before you overwrote it.
    payments, settings and photos all come from the archive, and there is
    nothing to rebuild afterwards.
 
-### Farm settings
+### Pack House settings
 
-Farm name, location description, current harvest season (year - drives
-what "Season" means throughout the app), the green→yellow and yellow→red
-urgency thresholds in minutes (used everywhere the traffic-light coloring
-appears - [chapter 1](#1-overview--concepts)), and GPS coordinates
+Pack House name, location description, **Pack House Code (PHC)**, the
+season start date (a month and a day that repeats every year - drives what
+"Season" means throughout the app; the current season year is shown
+beside it), the green→yellow and yellow→red urgency thresholds in minutes
+(used everywhere the traffic-light coloring appears -
+[chapter 1](#1-overview--concepts)), and GPS coordinates
 (latitude/longitude, or pick a location on the map) - setting these
 enables automatic weather capture on every dispatched load.
 
@@ -1802,11 +1813,12 @@ keys below match `backend/models.py` exactly.
 
 | Field | Type | Example | Notes / Limitations |
 |---|---|---|---|
-| `id` | text | `"8a"` | Primary key - a real farm block label. One of the 21 preseeded labels (see chapter 2); not free-form. |
+| `id` | text | `"8a"` | Primary key - a real block label the orchard uses. Imported by the pack house; not free-form. |
 | `name` | text | `"Block 8a"` | |
 | `variety` | text | `"Mauritius"` | |
 | `trees` | number | `450` | Whole number of trees on the block. |
 | `hectares` | decimal | `2.3` | |
+| `supplier_id` | number (optional) | `2` | Which supplier's orchard this block is. Blank = the pack house's own fruit. |
 | `active` | true/false | `true` | |
 
 ### Device
@@ -1814,9 +1826,10 @@ keys below match `backend/models.py` exactly.
 | Field | Type | Example | Notes / Limitations |
 |---|---|---|---|
 | `id` | text | `"device-01"` | Primary key - must be entered exactly on the physical device's setup screen (chapter 3). |
-| `role` | enum | `"field"` | Must be exactly one of `field`, `packhouse`, `admin`. |
+| `role` | enum | `"field"` | Must be exactly one of `field`, `packhouse`, `admin` (shown as Field / Receiving / Admin). |
 | `station` | text | `"Field Station 1"` | |
-| `team_id` | text (optional) | `"A"` | Which team this field device belongs to. Not applicable to pack house/admin devices. |
+| `team_id` | text (optional) | `"A"` | Which team this field device belongs to. Not applicable to Receiving/Admin devices. |
+| `supplier_id` | number (optional) | `2` | For a Field device: which supplier it picks for. Blank = the pack house's own fruit. Picking slips it sends are attributed there. |
 | `induna` | text | `"Samuel Mthembu"` | |
 | `data_capturer` | text | `""` | Free text, optional. |
 | `active` | true/false | `true` | |
@@ -1829,7 +1842,9 @@ keys below match `backend/models.py` exactly.
 | `id` | number | `1` | Primary key, auto-assigned. |
 | `name` | text | `"Jansen Boerdery"` | |
 | `contact_name` / `contact_phone` / `contact_email` | text | `"Piet Jansen"` / `"082-555-1234"` / — | All optional. |
-| `is_own_farm` | true/false | `false` | Exactly one supplier row in the whole system should ever have this set to `true` - that row represents the farm's own fruit. |
+| `puc` | text | `"PUC1234567"` | Product Unit Code - the grower's registered production unit. Optional. |
+| `global_gap_number` | text | `"4049928123456"` | GlobalG.A.P. Number (GGN). Optional. |
+| `is_own_farm` | true/false | `false` | Exactly one supplier row in the whole system should ever have this set to `true` - that row represents the pack house's own fruit. |
 | `packing_rate_per_kg` | decimal | `1.50` | If greater than 0, this rate is used for Facility Billing; otherwise the per-crate rate below is used. |
 | `packing_rate_per_crate` | decimal | `25.00` | Only used when the per-kg rate is 0. |
 | `active` | true/false | `true` | |
@@ -1895,9 +1910,11 @@ keys below match `backend/models.py` exactly.
 
 | Field | Type | Example | Notes / Limitations |
 |---|---|---|---|
-| `farm_name` | text | `"Boord Boerdery"` | Blank on a fresh install - set it in Settings. |
-| `farm_location` | text | `"Bekfontein, Mpumalanga"` (example) | Free text description, not used for weather (see `gps_lat`/`gps_lon`). |
-| `current_harvest_year` | number | `2026` | Drives what "Season" means throughout the app (chapters 7, 9, 10). |
+| `packhouse_name` | text | `"Boord Pack House"` | Blank on a fresh install - set it in Settings. |
+| `packhouse_location` | text | `"Bekfontein, Mpumalanga"` (example) | Free text description, not used for weather (see `gps_lat`/`gps_lon`). |
+| `packhouse_code` | text | `"PH1234567"` | PHC - the pack house's registered code. Blank until set in Settings. |
+| `season_start_month` / `season_start_day` | number | `9` / `1` | The recurring season start (defaults to `1` / `1` = calendar year). Drives what "Season" means throughout the app (chapters 7, 9, 10). |
+| `current_harvest_year` | number | `2026` | Derived label for the current season - the year it starts in. Kept in sync from the season start date. |
 | `green_to_yellow_minutes` / `yellow_to_red_minutes` | number | `90` / `150` | The urgency color thresholds referenced throughout chapters 1, 4, 6, 7. |
 | `gps_lat` / `gps_lon` | decimal (optional) | `-25.572747` / `31.606722` | Setting both enables automatic weather capture on dispatch. |
 

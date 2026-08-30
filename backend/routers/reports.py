@@ -346,7 +346,7 @@ def harvesting_list_report(period_start: date, period_end: date, supplier_id: Op
                             session: Session = Depends(get_session), admin=Depends(get_current_admin)):
     lots_data = list_pending(supplier_id=supplier_id, period_start=period_start, period_end=period_end,
                               session=session)
-    headers = ["Slip Number", "Farm/Supplier", "Team", "Driver", "Crates", "Kg", "Age (min)"]
+    headers = ["Slip Number", "Supplier", "Team", "Driver", "Crates", "Kg", "Age (min)"]
     return _xlsx_response(headers, _lot_rows(lots_data), "Harvesting",
                            f"Harvesting_{period_start}_{period_end}.xlsx")
 
@@ -356,7 +356,7 @@ def in_transit_list_report(period_start: date, period_end: date, supplier_id: Op
                             session: Session = Depends(get_session), admin=Depends(get_current_admin)):
     lots_data = list_in_transit(supplier_id=supplier_id, period_start=period_start, period_end=period_end,
                                  session=session)
-    headers = ["Slip Number", "Farm/Supplier", "Team", "Driver", "Crates", "Kg", "Age (min)"]
+    headers = ["Slip Number", "Supplier", "Team", "Driver", "Crates", "Kg", "Age (min)"]
     return _xlsx_response(headers, _lot_rows(lots_data), "In Transit",
                            f"In_Transit_{period_start}_{period_end}.xlsx")
 
@@ -377,7 +377,7 @@ def received_list_report(period_start: date, period_end: date, supplier_id: Opti
         if c.block_id:
             blocks_by_lot.setdefault(c.lot_id, set()).add(c.block_id)
 
-    headers = ["Slip Number", "Date", "Time", "Block", "Farm/Supplier", "Team", "Driver", "Crates", "Kg",
+    headers = ["Slip Number", "Date", "Time", "Block", "Supplier", "Team", "Driver", "Crates", "Kg",
                "Rejected"]
     rows = []
     for l in lots_data:
@@ -398,7 +398,7 @@ def received_list_report(period_start: date, period_end: date, supplier_id: Opti
 def worker_harvest_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
                            session: Session = Depends(get_session), admin=Depends(get_current_admin)):
     summary = dashboard_summary(period_start, period_end, supplier_id, session, admin)
-    headers = ["Emp Nr", "Name", "Farm/Supplier", "Crates", "Kg", "Amount Due", "Avg Kg/Crate"]
+    headers = ["Emp Nr", "Name", "Supplier", "Crates", "Kg", "Amount Due", "Avg Kg/Crate"]
     rows = [[
         w["worker_id"], w["name"], w["supplier_name"], w["crates"], w["total_kg"], w["amount_due"],
         w["avg_kg_crate"],

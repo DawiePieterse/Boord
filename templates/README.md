@@ -1,13 +1,13 @@
 # Import templates
 
-Blank templates for the bulk-import screens under **Admin → Master Data**.
+Blank templates for the bulk-import screens under **Admin → Settings → Master Data**.
 Headings only, no example rows - anything in these files would be imported
 as real data.
 
 ## blocks.csv
 
 A new install has no blocks. Fill this in and import it via
-**Admin → Master Data → Blocks → Import**.
+**Admin → Settings → Master Data → Blocks → Import**.
 
 | Column | Required | Notes |
 |---|---|---|
@@ -16,6 +16,7 @@ A new install has no blocks. Fill this in and import it via
 | `variety` | no | Free text - `Mauritius`, `Early Delight`. Used for grouping in reports. |
 | `trees` | no | Tree count, whole number. Feeds per-tree yield figures. |
 | `hectares` | no | Decimal, e.g. `2.1`. Feeds per-hectare yield figures. |
+| `supplier_id` | no | Numeric id of the supplier whose orchard this block is (see the Suppliers screen). Blank means the pack house's own fruit. |
 | `active` | no | `false` hides a block from capture without deleting its history. Defaults to true. |
 
 Import accepts `.csv` and `.xlsx`. Importing again updates blocks with a

@@ -16,6 +16,7 @@ class DeviceIn(SQLModel):
     station: str = ""
     role: DeviceRole
     team_id: Optional[str] = None
+    supplier_id: Optional[int] = None
     induna: str = ""
     data_capturer: str = ""
     active: bool = True
@@ -26,7 +27,7 @@ class DeviceIn(SQLModel):
 @router.get("/setup-options")
 def list_setup_options(session: Session = Depends(get_session)):
     """The devices offered on the one-time device setup screen, so a device
-    added in Master Data is immediately pickable. No auth: this screen runs
+    added in Settings -> Master Data is immediately pickable. No auth: this screen runs
     before any sign-in, and /api/devices/{id} is already public. Returns only
     what the screen needs to show and route a choice - never the whole record,
     which carries induna and data-capturer names."""

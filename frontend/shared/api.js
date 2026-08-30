@@ -11,7 +11,19 @@ const Boord = {
   VERSION: "2.14",
 
   getDeviceId() { return localStorage.getItem("boord_device_id"); },
-  setDeviceId(id) { localStorage.setItem("boord_device_id", id); },
+  // Re-pointing a tablet at a different device slot has to drop the picking
+  // slip in progress. A slip is minted from the device id
+  // (device-01-20260830132301), so one left over from the previous identity
+  // makes every crate captured next carry a slip that names a station this
+  // tablet is no longer standing at - and the lot then arrives at the pack
+  // house filed under the wrong one. Crates already saved keep their own
+  // slip and still sync; only the next one starts fresh.
+  setDeviceId(id) {
+    if (localStorage.getItem("boord_device_id") !== id) {
+      localStorage.removeItem("boord_current_slip");
+    }
+    localStorage.setItem("boord_device_id", id);
+  },
   clearDeviceId() { localStorage.removeItem("boord_device_id"); },
 
   getToken() { return localStorage.getItem("boord_admin_token"); },
@@ -271,10 +283,22 @@ const Boord = {
   beepScanned() { Boord._tone(880, 0.12); },
   beepSaved() { Boord._tone(660, 0.09); Boord._tone(988, 0.14, 0.1); },
 
+  // The year a season starting on month/day (1-based month) is in on date `d`:
+  // if `d` is on or after this year's anchor it is this year's season,
+  // otherwise last year's. A season is labelled by the year it starts in.
+  seasonYearFor(month, day, d = new Date()) {
+    const m = parseInt(month, 10) || 1;
+    const dy = parseInt(day, 10) || 1;
+    const anchorThisYear = new Date(d.getFullYear(), m - 1, dy);
+    return d >= anchorThisYear ? d.getFullYear() : d.getFullYear() - 1;
+  },
+
   // Wires a Today/Week/Season button group to a pair of date inputs: clicking
   // a button sets the inputs and highlights that button; editing a date input
   // directly clears the highlight since the selection no longer matches a preset.
-  bindDateRangePresets({ todayBtn, weekBtn, seasonBtn, startInput, endInput, seasonYear, onChange }) {
+  // `seasonAnchor()` returns {month, day} (1-based month) for the season start;
+  // the Season preset then spans [anchor(year), anchor(year+1) - 1 day].
+  bindDateRangePresets({ todayBtn, weekBtn, seasonBtn, startInput, endInput, seasonAnchor, onChange }) {
     const buttons = [todayBtn, weekBtn, seasonBtn];
     const setActive = (btn) => buttons.forEach((b) => b.classList.toggle("active", b === btn));
     const clearActive = () => buttons.forEach((b) => b.classList.remove("active"));
@@ -291,8 +315,15 @@ const Boord = {
       setActive(weekBtn); if (onChange) onChange();
     });
     seasonBtn.addEventListener("click", () => {
-      const year = seasonYear ? seasonYear() : new Date().getFullYear();
-      startInput.value = `${year}-01-01`; endInput.value = `${year}-12-31`;
+      const anchor = seasonAnchor ? seasonAnchor() : null;
+      const month = anchor && anchor.month ? parseInt(anchor.month, 10) : 1;
+      const day = anchor && anchor.day ? parseInt(anchor.day, 10) : 1;
+      const year = Boord.seasonYearFor(month, day);
+      const start = new Date(year, month - 1, day);
+      const end = new Date(year + 1, month - 1, day);
+      end.setDate(end.getDate() - 1);
+      startInput.value = Boord.localDateStr(start);
+      endInput.value = Boord.localDateStr(end);
       setActive(seasonBtn); if (onChange) onChange();
     });
     startInput.addEventListener("change", clearActive);

@@ -41,7 +41,7 @@ async function routeDevice(deviceId) {
   location.href = destinationFor(config);
 }
 
-// The list comes from the server so a device added in Master Data can be
+// The list comes from the server so a device added in Settings -> Master Data can be
 // picked straight away. If the list can't be fetched the screen falls back to
 // typing the id by hand, which is all setup ever really needs.
 async function loadDeviceOptions() {
@@ -103,7 +103,7 @@ function chosenDeviceId() {
     } catch (e) {
       errEl.textContent = Boord.isNetworkError(e)
         ? "Can't reach the server - check the connection and try again."
-        : "Unknown device id. Check with the admin, or add this device in Master Data.";
+        : "Unknown device id. Check with the admin, or add this device in Settings -> Master Data.";
       errEl.classList.remove("hidden");
     }
   });

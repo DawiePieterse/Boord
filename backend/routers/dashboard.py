@@ -44,7 +44,7 @@ def dashboard_summary(period_start: date, period_end: date, supplier_id: Optiona
     suppliers_by_id = {s.id: s for s in session.exec(select(Supplier)).all()}
     own_id = get_own_supplier_id(session)
     own_supplier = suppliers_by_id.get(own_id)
-    own_name = own_supplier.name if own_supplier else "Own Farm"
+    own_name = own_supplier.name if own_supplier else "Own fruit"
     workers = []
     for worker_id, data in totals.items():
         w = workers_by_id.get(worker_id)

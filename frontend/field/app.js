@@ -93,6 +93,10 @@ async function resolveDeviceConfig(deviceId, cachedConfig) {
   try {
     deviceConfig = await Boord.fetchDeviceConfig(deviceId);
     renderStationLabel();
+    // A re-allocated device gets its block list corrected on this load
+    // rather than at the next 30s refresh - the crates in between would
+    // otherwise be captured against the previous supplier's orchard.
+    renderCachedBlocks();
     return deviceConfig;
   } catch (e) {
     if (Boord.isNetworkError(e)) {
@@ -110,10 +114,44 @@ async function resolveDeviceConfig(deviceId, cachedConfig) {
 function renderStationLabel() {
   document.getElementById("stationLabel").textContent =
     `${deviceConfig.station} - Team ${deviceConfig.team_id || "?"} - Induna ${deviceConfig.induna || "?"}`;
+  renderSupplierLabel();
+}
+
+// Who this device is picking for, stated on the screen rather than left to
+// the admin's memory. The allocation decides which supplier every crate from
+// this device is filed against, and a wrong one is invisible from here
+// otherwise - the fruit simply arrives at the pack house under another
+// grower's name, all season.
+function renderSupplierLabel() {
+  const el = document.getElementById("supplierLabel");
+  if (!el) return;
+  const supplierId = deviceConfig && deviceConfig.supplier_id;
+  if (!supplierId) {
+    el.textContent = "Picking own fruit";
+    return;
+  }
+  const supplier = (Boord.getCachedJSON("boord_cached_suppliers") || [])
+    .find((s) => s.id === supplierId);
+  el.textContent = supplier ? `Picking for ${supplier.name}` : "Picking for another supplier";
+}
+
+async function loadSuppliers() {
+  try {
+    const suppliers = await Boord.api("/api/suppliers");
+    localStorage.setItem("boord_cached_suppliers", JSON.stringify(suppliers));
+    renderSupplierLabel();
+    // The block list is filtered by this device's supplier, so a supplier
+    // list that lands after the blocks did has to redraw them - these load
+    // concurrently, and whichever order they finish in must give the same
+    // dropdown.
+    renderCachedBlocks();
+  } catch (e) {
+    if (Boord.isNetworkError(e)) Boord.setOffline(true);
+  }
 }
 
 async function refreshLists() {
-  await Promise.allSettled([loadWorkers(), loadBlocks()]);
+  await Promise.allSettled([loadWorkers(), loadBlocks(), loadSuppliers()]);
 }
 
 async function loadSettings() {
@@ -131,7 +169,7 @@ async function loadSettings() {
 // timeout, and in series that would leave the refresh spinner up for the sum
 // of them rather than the longest.
 async function refreshFromServer() {
-  await Promise.allSettled([loadSettings(), loadWorkers(), loadBlocks(), syncLoop()]);
+  await Promise.allSettled([loadSettings(), loadWorkers(), loadBlocks(), loadSuppliers(), syncLoop()]);
   await renderLot();
   renderDispatchedLots();
 }
@@ -205,18 +243,55 @@ async function loadBlocks() {
   }
 }
 
+// The supplier every crate from this device is filed against: the device's
+// own allocation, or the pack house's own fruit when it has none. Null when
+// the supplier list has not reached this device yet.
+function effectiveSupplierId() {
+  if (deviceConfig && deviceConfig.supplier_id) return deviceConfig.supplier_id;
+  const own = (Boord.getCachedJSON("boord_cached_suppliers") || []).find((s) => s.is_own_farm);
+  return own ? own.id : null;
+}
+
+// Which blocks this device may pick from.
+//
+// Inactive blocks are dropped: deactivating a block is the documented way to
+// retire it from capture without deleting the history that references it, and
+// this list is the only place that promise is kept.
+//
+// The rest follows from the crate's own attribution. Every crate captured
+// here is filed against this device's supplier, so offering a block that
+// belongs to a different grower can only produce fruit recorded against the
+// wrong one - and that reads as perfectly ordinary data afterwards. Blocks
+// with no supplier are offered to everyone: unassigned means not yet
+// allocated, not "somebody else's", and that is the state every install
+// upgrading into this field starts in.
+//
+// The fallback matters as much as the rule: a pack house that allocates a
+// device before assigning its blocks would otherwise be left with an empty
+// dropdown and no way to pick at all, so an empty match falls back to the
+// whole list rather than stranding the picker mid-orchard.
+function blocksForThisDevice(blocks) {
+  const active = (blocks || []).filter((b) => b.active);
+  const supplierId = effectiveSupplierId();
+  if (!supplierId) return active;
+  const mine = active.filter((b) => !b.supplier_id || b.supplier_id === supplierId);
+  return mine.length ? mine : active;
+}
+
 function renderBlockOptions(blocks) {
   const select = document.getElementById("blockSelect");
   const current = select.value;
-  if (!blocks || !blocks.length) {
+  const usable = blocksForThisDevice(blocks);
+  if (!usable.length) {
     // A new install has no blocks until someone imports them (Admin ->
-    // Master Data). Without this the dropdown just renders empty, which is
-    // indistinguishable from the list having failed to load - and saveCrate
-    // would then only say "Select a worker and block" with nothing to pick.
+    // Settings -> Master Data). Without this the dropdown just renders
+    // empty, which is indistinguishable from the list having failed to load
+    // - and saveCrate would then only say "Select a worker and block" with
+    // nothing to pick.
     select.innerHTML = `<option value="">(no blocks set up yet - add them in Admin)</option>`;
     return;
   }
-  select.innerHTML = blocks.map((b) => `<option value="${b.id}">${b.name || b.id}</option>`).join("");
+  select.innerHTML = usable.map((b) => `<option value="${b.id}">${b.name || b.id}</option>`).join("");
   if (current && Array.from(select.options).some((o) => o.value === current)) {
     select.value = current;
   }
@@ -539,6 +614,17 @@ async function syncLoop() {
 
 let qrScanner = null;
 function openScanner() {
+  // A browser only hands out the camera on a secure origin - https, or
+  // localhost. A field tablet reaches this server as plain http://<ip>/ over
+  // the pack house LAN, which is neither, so getUserMedia is refused before
+  // any permission prompt appears. Saying so here is the difference between
+  // "this tablet's camera is broken" and "scanning needs https - pick the
+  // worker from the list instead", and the worker is standing in an orchard
+  // holding a full crate while they work it out.
+  if (!window.isSecureContext) {
+    Boord.toast("Scanning needs a secure (https) connection - pick the worker from the list below");
+    return;
+  }
   document.getElementById("scanModal").classList.remove("hidden");
   document.getElementById("scanModal").classList.add("flex");
   qrScanner = new Html5Qrcode("qrReader");
@@ -559,12 +645,25 @@ function openScanner() {
       closeScanner();
     },
     () => {}
-  ).catch(() => Boord.toast("Camera unavailable"));
+  ).catch(() => {
+    // Close it rather than leaving an empty black box on screen with a
+    // toast that has already faded - a modal that cannot scan is only in
+    // the way of the worker dropdown that still works.
+    closeScanner();
+    Boord.toast("Camera unavailable - pick the worker from the list below");
+  });
 }
 function closeScanner() {
   document.getElementById("scanModal").classList.add("hidden");
   document.getElementById("scanModal").classList.remove("flex");
-  if (qrScanner) { qrScanner.stop().catch(() => {}); qrScanner = null; }
+  // stop() throws - synchronously, so a .catch() alone does not hold it -
+  // when the scanner never started, which is exactly the case this is
+  // called in when the camera was refused. Closing the modal must not
+  // depend on the camera having worked.
+  if (qrScanner) {
+    try { Promise.resolve(qrScanner.stop()).catch(() => {}); } catch (e) { /* never started */ }
+    qrScanner = null;
+  }
 }
 
 const DISPATCHED_KEY = "boord_dispatched_lots";

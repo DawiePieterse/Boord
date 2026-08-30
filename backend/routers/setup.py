@@ -1,9 +1,9 @@
 """First-run setup wizard state.
 
-A fresh database is deliberately blank: no blocks, no wage rate, no farm
-name, no GPS (see db.seed_defaults). That is right - none of those are
-*a* farm's, they are *this* farm's - but it left a new customer hunting
-through Settings and Master Data for five unrelated fields in an order
+A fresh database is deliberately blank: no blocks, no wage rate, no pack
+house name, no GPS (see db.seed_defaults). That is right - none of those
+are *a* pack house's, they are *this* pack house's - but it left a new
+customer hunting through Settings for five unrelated fields in an order
 nothing states. This router is what the wizard reads to know which of
 those are still outstanding.
 
@@ -25,13 +25,16 @@ from security import get_current_admin
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 
-# The supplier name db.seed_defaults() writes for the farm's own fruit.
-# Still holding it means nobody has said whose farm this is.
-PLACEHOLDER_OWN_SUPPLIER = "Own Farm"
+# The supplier names db.seed_defaults() has written for the pack house's own
+# fruit. Still holding one means nobody has said whose pack house this is.
+# "Own Farm" is what installs seeded before the pack house rename carry, and
+# it has to keep counting as a placeholder - otherwise a farm that never
+# renamed it would upgrade into an identity step that claims to be done.
+PLACEHOLDER_OWN_SUPPLIERS = {"Own fruit", "Own Farm"}
 
 # The station names db.seed_defaults() writes for the eight device slots.
 # A device still carrying one has not been told where it actually stands, so
-# these count as unset rather than as named - the same reading as "Own Farm"
+# these count as unset rather than as named - the same reading as "Own fruit"
 # above. Keep in step with the seeding loop in db.seed_defaults().
 PLACEHOLDER_STATIONS = (
     {f"Field Station {i}" for i in range(1, 6)}
@@ -87,7 +90,7 @@ def build_setup_state(session: Session) -> dict:
         select(RateSetting).order_by(RateSetting.effective_date.desc(), RateSetting.id.desc())
     ).first()
 
-    farm_name = (settings.farm_name or "").strip() if settings else ""
+    packhouse_name = (settings.packhouse_name or "").strip() if settings else ""
     has_location = bool(settings and settings.gps_lat is not None and settings.gps_lon is not None)
     own_name = (own.name or "").strip() if own else ""
     crates = _count(session, HarvestRecord)
@@ -101,13 +104,13 @@ def build_setup_state(session: Session) -> dict:
     state = session.exec(select(SetupState)).first()
     completed_at = state.completed_at if state else None
     started_at = state.started_at if state else None
-    never_configured = not farm_name and crates == 0
+    never_configured = not packhouse_name and crates == 0
     steps = {
         # Note `is not None` on the coordinates, not truthiness: latitude 0
         # and longitude 0 are real places. Same trap weather.farm_coords()
         # documents.
-        "identity": {"done": bool(farm_name) and bool(own_name) and own_name != PLACEHOLDER_OWN_SUPPLIER,
-                      "farm_name": farm_name, "own_supplier_name": own_name},
+        "identity": {"done": bool(packhouse_name) and bool(own_name) and own_name not in PLACEHOLDER_OWN_SUPPLIERS,
+                      "packhouse_name": packhouse_name, "own_supplier_name": own_name},
         "location": {"done": has_location,
                       "gps_lat": settings.gps_lat if settings else None,
                       "gps_lon": settings.gps_lon if settings else None},
