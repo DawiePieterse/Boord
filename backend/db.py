@@ -1,5 +1,6 @@
 import os
 import secrets
+from typing import Optional
 
 from passlib.context import CryptContext
 from sqlalchemy import inspect, text
@@ -22,8 +23,10 @@ DEFAULT_ADMIN_USERNAME = "admin"
 # Where the password generated for this install is left for whoever is
 # standing at the machine. install.ps1 reads it back and prints it; it is
 # deleted the moment the password is changed (routers/auth.change_password).
-# data/ is gitignored, and backup.py only ever archives boord.db and photos/,
-# so this file never leaves the server.
+# backup.py only ever archives boord.db and photos/, and .gitignore names
+# this file explicitly, so it never leaves the server. The gitignore entry
+# is not incidental: only named paths under data/ are ignored, never data/
+# itself, so this file was untracked-but-committable until it was listed.
 INITIAL_PASSWORD_FILE = os.path.join(DATA_DIR, "initial_admin_password.txt")
 
 # No I, O, 0 or 1: this password gets read off one screen and typed into
@@ -199,10 +202,20 @@ def get_session():
 
 
 def get_own_supplier_id(session: Session):
-    """The supplier row representing the farm's own fruit - every lot
-    dispatched from a field device is auto-tagged with this id."""
+    """The supplier row representing the pack house's own fruit - the
+    fallback for a field lot whose device is not allocated to a supplier."""
     own = session.exec(select(Supplier).where(Supplier.is_own_farm == True)).first()  # noqa: E712
     return own.id if own else None
+
+
+def supplier_id_for_device(session: Session, device_id) -> Optional[int]:
+    """Which supplier a field lot from this device belongs to: the device's
+    own allocation if it has one, otherwise the pack house's own fruit. A
+    missing or unknown device_id also falls back to own fruit."""
+    device = session.get(Device, device_id) if device_id else None
+    if device is not None and device.supplier_id is not None:
+        return device.supplier_id
+    return get_own_supplier_id(session)
 
 
 def seed_defaults() -> None:
@@ -214,11 +227,11 @@ def seed_defaults() -> None:
         # Blocks are deliberately NOT seeded. This used to create 21 real
         # blocks - one farm's actual orchard, with its varieties, tree counts
         # and hectares - in every new database. Nobody else's orchard looks
-        # like that, so for any other farm it was both wrong and somebody
-        # else's business data. A new install starts with none and imports its
-        # own via Admin -> Master Data -> Blocks (templates/blocks.csv has the
-        # column headings); routers/master_data.py:import_blocks already
-        # handles csv and xlsx.
+        # like that, so for any other pack house it was both wrong and
+        # somebody else's business data. A new install starts with none and
+        # imports its own via Admin -> Settings -> Master Data -> Blocks
+        # (templates/blocks.csv has the column headings);
+        # routers/master_data.py:import_blocks already handles csv and xlsx.
 
         if not session.exec(select(Device)).first():
             for i in range(1, 6):
@@ -241,7 +254,7 @@ def seed_defaults() -> None:
             session.add(SystemSetting())
 
         if not session.exec(select(Supplier).where(Supplier.is_own_farm == True)).first():  # noqa: E712
-            session.add(Supplier(name="Own Farm", is_own_farm=True))
+            session.add(Supplier(name="Own fruit", is_own_farm=True))
 
         if not session.exec(select(AdminUser)).first():
             initial_password = generate_initial_password()

@@ -5,6 +5,11 @@ data/*.db
 data/*.db-journal
 data/.secret_key
 data/release_key.fpr
+# The admin password generated for this install, left on disk for whoever is
+# standing at the machine until it is changed (db.seed_defaults). Only named
+# paths under data/ are ignored, not data/ itself, so without this line a
+# live credential sits one `git add -A` away from being pushed to GitHub.
+data/initial_admin_password.txt
 data/imports/
 data/photos/
 data/backups/
