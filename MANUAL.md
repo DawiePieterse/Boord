@@ -312,6 +312,34 @@ checking the tag out by hand; find out why it failed first. The usual
 innocent cause is a rotated release key that this server wasn't told
 about.
 
+It also **stops the server properly before touching the database**, which
+is more than ending the Scheduled Task: ending the task kills the launcher,
+and the server process it started can outlive it and carry on serving. The
+script checks port 8000 is genuinely free and refuses to migrate if it is
+not, because a schema change applied underneath a running server does not
+report an error - it just leaves the farm with a database two things
+disagree about.
+
+**Being told when a release is out.** Nothing checks by itself unless you
+ask it to. Double-click **`setup_update_check.bat`** once and a Scheduled
+Task ("Boord Update Check") runs `update_server.bat --check` every morning
+at 07:30. That looks for a newer signed release, verifies its signature,
+and records what it found - **it installs nothing**. When there is one,
+[Settings → Server](#11-admin---settings) in the admin app says so, and
+installing it stays a double-click of `update_server.bat` at a time that
+suits the pack house.
+
+That task deliberately runs as **you**, not as SYSTEM, unlike the server
+and the heartbeat. Fetching from GitHub uses the deploy key in your own
+`%USERPROFILE%\.ssh`, and SYSTEM has a different profile with no key in
+it - a check running as SYSTEM would fail `Permission denied (publickey)`
+every morning, silently, forever. The trade is that the check only runs
+while you are logged on, which is also the only time anyone could act on
+what it finds. You can run it by hand at any time:
+```bat
+update_server.bat --check
+```
+
 The manual way, if you'd rather do each step yourself: open Command
 Prompt in `C:\Boord` and run:
 ```bat
@@ -456,6 +484,18 @@ schtasks /run /tn "Boord Server"
 
 **Simplest restart:** since the task launches automatically on every
 startup anyway, just restarting the PC has the same effect as End + Run.
+
+**If you need it definitely stopped** - before copying the database, or
+restoring a backup - use **`stop_server.ps1`** rather than End on its own:
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -File stop_server.ps1
+```
+End stops the launcher, and the server process it started can survive and
+keep the database open. This script ends the task, then waits until port
+8000 is actually free, and tells you what is holding it if it never comes
+free. It only ever stops processes running from Boord's own
+`backend\.venv` - if something else on the PC has taken port 8000, it says
+so and stops rather than killing it. `update_server.bat` calls it for you.
 
 **Checking it's actually running:** browse to `http://localhost:8000/` on
 the server PC itself - if the device setup screen loads, it's up. There's
@@ -901,6 +941,28 @@ That's it - as long as the check on healthchecks.io keeps receiving
 pings, nothing happens. If the server goes down and stays down past the
 1-hour grace period, healthchecks.io emails the account used to sign up.
 
+**What the ping carries.** Each successful ping sends a short line of text
+with it, visible in the check's log on healthchecks.io. It is there so the
+release a site is running can be read from the monitoring account instead
+of phoning someone and asking them to read a screen. It contains exactly:
+
+- the release tag and whether it is a release, a checkout between releases,
+  or unknown
+- the version the app screens display
+- the database schema revision the code expects, and the one the database
+  is actually at - so a farm that never ran its migrations is visible
+- the date of the last backup, and how many are kept
+
+**It contains nothing about any person** - no worker names, ID numbers,
+banking details, photographs or counts, no supplier or block names, no
+crate or lot figures, no coordinates, no file paths and no usernames. The
+pack house's own name is deliberately left out too: the check already
+carries whatever name you gave it in your own account.
+
+> **healthchecks.io is a third party.** Anyone with access to that account
+> can read these lines. The ping URL in `heartbeat_url.txt` is a password
+> in every practical sense - anyone holding it can post to your check.
+
 ### Keeping the server running
 
 However it's started, leave it running continuously during harvest
@@ -1121,6 +1183,13 @@ If one is behind, do a normal open-close-reopen of the app icon (see
 unavailable" screen); a full close and reopen is what lets the app notice
 and install the new cached version in the background, then show it on the
 next open.
+
+**What the server itself is running** is a separate question, and the
+header cannot answer it - the header says what *that browser* loaded, which
+is exactly what goes stale. [Settings → Server](#11-admin---settings) in
+the admin app asks the server directly and shows both, so "the update did
+not apply" and "this one device is showing an old cached copy" stop looking
+the same.
 
 The version number only changes when the code that ships it changes - it's
 incremented deliberately each time a real update goes out, not tied to the
@@ -1571,6 +1640,30 @@ back up anything else in `data\`.
 
 ## 11. Admin - Settings
 
+### Server
+
+What this server is actually running, read from the server rather than from
+the page you are looking at:
+
+- **Release** - the signed release tag the server is checked out on. A
+  checkout between releases shows as e.g. `v3.0-4-gb1182b3 (between
+  releases)`, which is normal on a development machine and unexpected on a
+  farm
+- **Database schema** - the migration revision the database is at. If it is
+  behind what the code expects, this says so in red: the migrations did not
+  run, and the app should not be used until that is sorted out
+- **Last backup** - the date of the most recent one, and how many are kept
+- **This device** - the version this browser has loaded
+
+If the last two disagree, this device is showing cached code and the card
+says so: close the app completely and reopen it (see
+[chapter 3](#confirming-devices-picked-up-an-update-version-numbers)).
+
+If the daily update check is set up
+([chapter 2](#2-initial-server-setup)), this card is also where **"v3.1 is
+available"** appears. Nothing installs itself - that stays a double-click
+of `update_server.bat` on the server PC.
+
 ### Data Backup
 
 - **Backup Now** - immediately zips the pack house data and worker photos
@@ -1603,14 +1696,61 @@ back up anything else in `data\`.
 > it. Keep the server running continuously during harvest season (see
 > [chapter 2](#2-initial-server-setup)).
 
-> **Recommended: copy backups off the server regularly.** The 14-backup
-> retention only protects against recent mistakes (e.g. accidentally
-> deleting a worker) - it does **not** protect against the server's disk
-> failing entirely, since all 14 copies live on that same machine. Every
-> so often, download the latest backup from this list and copy it
-> somewhere off the machine - a cloud drive such as Google Drive, Dropbox,
-> or similar is a simple, effective option. That off-machine copy is the
-> only real safeguard against losing everything if the hardware fails.
+> **Copy backups off the server.** The 14-backup retention only protects
+> against recent mistakes (e.g. accidentally deleting a worker) - it does
+> **not** protect against the server's disk failing, the PC being stolen,
+> or a fire, since all 14 copies live on that same machine. A copy that
+> leaves the machine is the only real safeguard.
+
+**Setting up an automatic off-site copy.** Create a text file at
+`data\backup_copy_to.txt` containing one line: the folder every finished
+backup should be copied to. Lines starting with `#` are ignored, so it is
+worth writing down what the folder is:
+
+```
+# Off-site backup copies. See MANUAL.md chapter 11.
+# NOT a synced cloud folder - these files are not encrypted and contain
+# every worker's ID number, banking details and photograph.
+E:\BoordBackups
+```
+
+From then on, each backup is copied there as soon as it is written, and
+the Data Backup card reports when it last succeeded, or fails loudly in red
+if it did not. No file means the feature is simply off. Nothing is ever
+deleted at the destination - the folder is yours, and Boord only ever adds
+to it. The folder must already exist: a missing one is reported rather than
+created, because a folder that appears on the wrong drive is worse than an
+error message.
+
+> **⚠️ Do not point this at a synced cloud folder - Google Drive, OneDrive,
+> Dropbox, iCloud.** A backup archive contains `boord.db`, which holds
+> **every worker's SA ID number, bank and account number, WhatsApp number
+> and photograph**, plus every photo file. The archives are not encrypted
+> yet, so copying them into a personal cloud account puts the pack house's
+> worker records on someone else's servers, under a personal login, outside
+> the farm's control. The app warns if the destination looks like one of
+> those folders, but it cannot tell for certain - any folder can be added
+> to a sync client's backup set, and the folder's name proves nothing
+> either way.
+>
+> **Use somewhere the farm physically controls:** a plugged-in USB stick or
+> external drive, a second disk inside the PC, or a shared folder on
+> another machine on the farm's own network. Cloud destinations become
+> reasonable once backup encryption exists; until then they are a way of
+> losing control of worker data quietly.
+>
+> This is not hypothetical. Google Drive was found to be syncing an earlier
+> Boord install, live database included - see chapter 2.
+
+The card also shows **how much space `data\backups\` is using**. Most of
+it is usually not the nightly archives at all but the `pre_migration_*.db`
+rollback copies, which are full uncompressed databases. Only three are
+ever kept, and each schema change evicts the oldest - but if no release has
+changed the schema for a while, old ones sit there. They are safe to delete
+by hand once a release has been running happily for a few weeks. Nothing in
+the app deletes them on a timer, on purpose: code that removes rollback
+copies to save disk space is the code that one day removes the one somebody
+needed.
 
 ### Restoring from a backup
 
@@ -1674,6 +1814,23 @@ check of conditions without leaving the app.
 ---
 
 ## 12. Troubleshooting / FAQ
+
+**The version in the corner and the server disagree**
+Settings → Server shows what the server is running; the header shows what
+that browser loaded. If they differ, that device is serving cached code:
+close the app completely (not just backgrounded) and reopen it. If instead
+Settings → Server says the **database schema** is behind, that is a
+different and more serious thing - the migrations did not run. Restart the
+server, and if that does not fix it, stop using the app and see
+[Database changes on update](#database-changes-on-update).
+
+**Settings → Server says the release is "unknown"**
+The server could not read its own version from git. The card shows why.
+The usual cause on Windows is git refusing a repository owned by a
+different user account than the one the server runs as ("detected dubious
+ownership"). The app works normally; only the version reporting is
+affected. Running `update_server.bat` once fixes the display either way, by
+leaving a note of the tag it installed.
 
 **"Unknown device id" on a device's first setup**
 The device ID hasn't been created yet. An admin must add it in

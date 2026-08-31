@@ -16,6 +16,7 @@ the database, and the special case is gone.
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import tempfile
 import threading
@@ -36,6 +37,194 @@ MAX_DAYS_WITHOUT_BACKUP = 30
 # Lives in BACKUPS_DIR on purpose - _backup_filenames() only matches
 # backup_*.zip, so the pruner will never delete it.
 STATE_PATH = os.path.join(BACKUPS_DIR, "last_backup.json")
+
+# ---------------------------------------------------------------------------
+# Copying a finished archive off the machine
+#
+# Fourteen rolling backups on the same disk as the database protect against a
+# mistake - deleting a worker, a bad import. They protect against nothing at
+# all if the disk fails, the PC is stolen, or the shed burns down, because
+# every copy is on that one machine.
+#
+# The destination is a path in a file rather than a setting in the admin
+# screen, for two reasons. It is a SERVER-side folder, and the person filling
+# in the settings form is usually on a tablet in another building where a
+# folder picker means nothing. And SystemSetting is served publicly to every
+# unauthenticated device and round-tripped whole by PUT /api/system-settings,
+# which blanks any field the form does not know about - see models.py.
+#
+# The same one-line-in-data\ idiom as data/release_key.fpr and
+# heartbeat_url.txt. No file means the feature is off.
+COPY_DEST_FILE = os.path.join(DATA_DIR, "backup_copy_to.txt")
+OFFSITE_STATE_PATH = os.path.join(BACKUPS_DIR, "last_offsite_copy.json")
+REPO_ROOT = os.path.abspath(os.path.join(DATA_DIR, ".."))
+
+# Folder names that usually mean a sync client is watching. Only ever used to
+# WARN - see _describe_destination(). A refusal would be both too strict and
+# too weak: any folder can be added to a sync client's backup set (the farm
+# server had C:\Boord itself in one, and that name says nothing), and a farm
+# that really does want a folder called "Dropbox archive" on a USB stick
+# would be blocked for no reason.
+CLOUD_HINTS = ("google drive", "googledrive", "onedrive", "dropbox", "icloud",
+               "\\box\\", "pcloud", "mega")
+
+
+def _read_copy_destination() -> Optional[str]:
+    """The configured off-site folder, or None. Erring towards "not
+    configured" on anything unreadable, exactly like _read_state()."""
+    try:
+        with open(COPY_DEST_FILE, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return line
+    except OSError:
+        return None
+    return None
+
+
+def _is_inside(path: str, parent: str) -> bool:
+    try:
+        return os.path.commonpath([os.path.abspath(path), parent]) == parent
+    except ValueError:
+        return False  # different drives on Windows - not inside, and not an error
+
+
+def looks_like_cloud_folder(path: str) -> bool:
+    lowered = path.replace("/", "\\").lower()
+    return any(hint in lowered for hint in CLOUD_HINTS)
+
+
+def _reject_destination(dest: str) -> Optional[str]:
+    """Why this destination cannot be used, or None if it can.
+
+    Only the two cases that are certainly wrong rather than merely unwise:
+    both mean "not off the machine at all", so copying there would produce a
+    green light for a backup that dies with the same disk.
+    """
+    if _is_inside(dest, os.path.abspath(BACKUPS_DIR)):
+        return "that is the backups folder itself - an off-site copy has to leave the machine"
+    if _is_inside(dest, REPO_ROOT):
+        return "that is inside the Boord folder - an off-site copy has to leave the machine"
+    if not os.path.isdir(dest):
+        # Deliberately not created. A missing folder is nearly always an
+        # unplugged drive or a typo, and silently creating E:\BoordBackups on
+        # whatever E: happens to be today is worse than saying so.
+        return "the folder does not exist - check the drive is plugged in"
+    return None
+
+
+def _read_offsite_state() -> Optional[dict]:
+    try:
+        with open(OFFSITE_STATE_PATH, "r", encoding="utf-8") as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return state if isinstance(state, dict) else None
+
+
+def _write_offsite_state(record: dict) -> None:
+    try:
+        with open(OFFSITE_STATE_PATH, "w", encoding="utf-8") as fh:
+            json.dump(record, fh)
+    except OSError as e:
+        print(f"[backup] could not record the off-site copy result: {e!r}", flush=True)
+
+
+def copy_offsite(filename: str) -> dict:
+    """Copy one finished archive to the configured folder.
+
+    Returns the record it wrote, and never raises: a missing USB stick must
+    not kill the nightly scheduler thread, and it must not make a local
+    backup that genuinely succeeded look like a failure. The result is
+    reported in the admin screen instead, where somebody can see it.
+
+    Only backup_*.zip. The pre-migration .db copies stay on the machine on
+    purpose - they are a rollback point for an update happening right now,
+    not an archive.
+    """
+    previous = _read_offsite_state() or {}
+    failures = previous.get("consecutive_failures", 0)
+    record = {
+        "ok": False,
+        "at": datetime.now().isoformat(),
+        "filename": filename,
+        "destination": None,
+        "error": None,
+        "consecutive_failures": failures,
+    }
+
+    dest = _read_copy_destination()
+    if dest is None:
+        return {"configured": False}
+    record["destination"] = dest
+
+    problem = _reject_destination(dest)
+    if problem is None:
+        source = os.path.join(BACKUPS_DIR, filename)
+        # Written under a .part name and renamed within the same folder, so
+        # an interrupted copy is never mistaken for a good archive by whoever
+        # goes looking for one under pressure.
+        partial = os.path.join(dest, filename + ".part")
+        try:
+            shutil.copy2(source, partial)
+            os.replace(partial, os.path.join(dest, filename))
+            record["ok"] = True
+            record["consecutive_failures"] = 0
+        except OSError as e:
+            problem = f"{type(e).__name__}: {e}"
+            try:
+                if os.path.exists(partial):
+                    os.remove(partial)
+            except OSError:
+                pass
+
+    if problem is not None:
+        record["error"] = problem
+        record["consecutive_failures"] = failures + 1
+        print(f"[backup] off-site copy to {dest} FAILED: {problem}", flush=True)
+
+    _write_offsite_state(record)
+    return record
+
+
+def _backups_folder_size() -> tuple:
+    """(total bytes, file count) for everything in data/backups.
+
+    Shown in the admin screen so the folder stays visible. The pre-migration
+    copies are pruned only when a migration runs, so a long stretch of
+    releases with no schema change leaves them sitting - which is fine, and
+    is a person's decision to make rather than something code should tidy
+    away. Deleting rollback copies to save disk is exactly the code that one
+    day deletes the copy somebody needed.
+    """
+    total = count = 0
+    try:
+        for name in os.listdir(BACKUPS_DIR):
+            full = os.path.join(BACKUPS_DIR, name)
+            if os.path.isfile(full):
+                total += os.path.getsize(full)
+                count += 1
+    except OSError:
+        pass
+    return total, count
+
+
+def offsite_status() -> dict:
+    """Everything the admin screen needs to say whether the off-site copy is
+    working, in one call."""
+    dest = _read_copy_destination()
+    total, count = _backups_folder_size()
+    return {
+        "configured": dest is not None,
+        "destination": dest,
+        "problem": _reject_destination(dest) if dest else None,
+        "looks_like_cloud": looks_like_cloud_folder(dest) if dest else False,
+        "last": _read_offsite_state(),
+        "folder_bytes": total,
+        "folder_files": count,
+        "pre_migration_count": len(_pre_migration_filenames()),
+    }
 
 
 def _backup_filenames() -> list[str]:
@@ -210,6 +399,13 @@ def create_backup(skip_if_unchanged: bool = False) -> Optional[str]:
             os.remove(snapshot)
     _write_state(fingerprint, filename)
     _prune_old_backups()
+    # Last, and unable to affect anything above it: the local archive is
+    # already written and pruned by this point, so however badly the off-site
+    # copy goes, the backup itself stands.
+    try:
+        copy_offsite(filename)
+    except Exception as e:  # noqa: BLE001 - copy_offsite handles its own, this is the net
+        print(f"[backup] off-site copy raised unexpectedly: {e!r}", flush=True)
     return filename
 
 

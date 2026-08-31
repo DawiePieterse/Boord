@@ -494,9 +494,24 @@
         </div>
       </div>
       <div class="bg-white rounded-xl shadow p-4 space-y-3">
+        <div class="font-semibold">Server</div>
+        <div class="text-xs text-slate-500">What this server is running, as opposed to what this browser has cached. If the two disagree, this device is showing old code.</div>
+        <div class="bg-slate-50 rounded-lg p-3 text-sm space-y-1">
+          <div class="flex justify-between gap-4"><span class="text-slate-500">Release</span><span id="srvRelease" class="font-semibold">-</span></div>
+          <div class="flex justify-between gap-4"><span class="text-slate-500">Database schema</span><span id="srvSchema">-</span></div>
+          <div class="flex justify-between gap-4"><span class="text-slate-500">Last backup</span><span id="srvBackup">-</span></div>
+          <div class="flex justify-between gap-4"><span class="text-slate-500">This device</span><span id="srvDevice">-</span></div>
+        </div>
+        <div id="srvUpdate" class="hidden text-sm rounded-lg p-3"></div>
+        <div id="srvWarning" class="hidden text-sm rounded-lg p-3"></div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow p-4 space-y-3">
         <div class="font-semibold">Data Backup</div>
         <div class="text-xs text-slate-500">Backs up the pack house data and worker photos. Runs automatically every day at 02:00, but only saves a backup when something actually changed that day - quiet days add no entry. The last 14 are kept. <b>Backup Now</b> always creates one.</div>
         <button id="runBackupBtn" class="px-4 py-2 boord-btn-primary rounded-lg">Backup Now</button>
+        <div id="offsiteStatus" class="text-sm rounded-lg p-3 bg-slate-50 text-slate-600">Checking the off-site copy...</div>
+        <div id="offsiteWarning" class="hidden text-sm rounded-lg p-3"></div>
         <div class="bg-slate-50 rounded-lg overflow-x-auto">
           <table class="w-full text-sm">
             <thead><tr class="text-left border-b"><th class="p-2">Created</th><th class="p-2">Size</th><th></th></tr></thead>

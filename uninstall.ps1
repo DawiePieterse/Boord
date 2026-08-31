@@ -25,6 +25,7 @@ $LauncherPath = Join-Path $RepoRoot "start_server.bat"
 $Port = 8000
 $TaskName = "Boord Server"
 $HeartbeatTaskName = "Boord Heartbeat"
+$UpdateCheckTaskName = "Boord Update Check"
 $FirewallRuleName = "Boord Server"
 
 function Write-Step($msg) {
@@ -85,25 +86,34 @@ try {
         Write-Ok "No heartbeat task registered"
     }
 
+    Write-Step "Removing the update-check task (if it was ever set up)..."
+    cmd /c "schtasks /query /tn ""$UpdateCheckTaskName"" >nul 2>&1"
+    if ($LASTEXITCODE -eq 0) {
+        cmd /c "schtasks /delete /tn ""$UpdateCheckTaskName"" /f >nul 2>&1"
+        Write-Ok "Removed the '$UpdateCheckTaskName' scheduled task"
+    } else {
+        Write-Ok "No update-check task registered"
+    }
+
     # --- Step 2: Make sure the server is really stopped ---
     # schtasks /end kills the launcher, but the uvicorn process it spawned can
     # outlive it and keep holding backend\.venv - which then blocks the venv
     # removal below and, later, any attempt to delete the folder.
-    Write-Step "Checking nothing is still listening on port $Port..."
-    $stillUp = $false
-    try {
-        $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-        foreach ($c in $conns) {
-            $stillUp = $true
-            try {
-                Stop-Process -Id $c.OwningProcess -Force -ErrorAction Stop
-                Write-Ok "Stopped the process still holding port $Port (PID $($c.OwningProcess))"
-            } catch {
-                Write-Warn "Could not stop PID $($c.OwningProcess) - stop it by hand before deleting the folder."
-            }
+    #
+    # This used to be done inline here. It now lives in stop_server.ps1, which
+    # update_server.bat also calls before migrating - one implementation, so
+    # the two paths cannot drift apart about what "stopped" means. Note the
+    # task has already been deleted above, so this call only does the port
+    # check and the cleanup; that is the part that matters here.
+    $stopScript = Join-Path $RepoRoot "stop_server.ps1"
+    if (Test-Path $stopScript) {
+        & $stopScript -Port $Port -TaskName $TaskName
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "Something is still holding port $Port - stop it by hand before deleting the folder."
         }
-    } catch { }
-    if (-not $stillUp) { Write-Ok "Port $Port is free" }
+    } else {
+        Write-Warn "stop_server.ps1 is missing - skipping the port check."
+    }
 
     # --- Step 3: Firewall rule ---
     Write-Step "Removing the firewall rule..."

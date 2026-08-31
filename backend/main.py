@@ -7,8 +7,10 @@ from fastapi.staticfiles import StaticFiles
 from backup import start_backup_scheduler
 from db import PHOTOS_DIR, seed_defaults
 from migrate import run_migrations
+from version import prime as prime_version
 from routers import (auth, backups, dashboard, devices, harvest_records, master_data, lots,
-                      payments, processing, receiving, reports, setup, suppliers, sync, weather)
+                      payments, processing, receiving, reports, setup, suppliers, sync, version,
+                      weather)
 
 app = FastAPI(title="Boord Harvest & Receiving")
 
@@ -34,6 +36,7 @@ app.include_router(dashboard.router)
 app.include_router(weather.router)
 app.include_router(backups.router)
 app.include_router(setup.router)
+app.include_router(version.router)
 
 
 @app.on_event("startup")
@@ -43,6 +46,9 @@ def on_startup():
     run_migrations()
     seed_defaults()
     start_backup_scheduler()
+    # After the migrations, so the revision this reports is the one the
+    # server is about to serve against rather than the one it booted with.
+    prime_version()
 
 
 class NoCacheStaticFiles(StaticFiles):

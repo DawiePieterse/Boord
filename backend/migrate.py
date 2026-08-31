@@ -31,6 +31,7 @@ migration goes wrong, it goes wrong in front of the person who chose to
 update, instead of inside a Scheduled Task nobody is watching.
 """
 import os
+import sqlite3
 import sys
 
 from alembic import command
@@ -42,7 +43,7 @@ from sqlalchemy import create_engine, inspect
 from sqlmodel import SQLModel
 
 import models  # noqa: F401 - importing it registers every table on SQLModel.metadata
-from db import engine as default_engine, legacy_schema_catch_up
+from db import DB_PATH, engine as default_engine, legacy_schema_catch_up
 
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 ALEMBIC_INI = os.path.join(BACKEND_DIR, "alembic.ini")
@@ -239,10 +240,51 @@ def run_migrations(target_engine=None, snapshot: bool = True) -> None:
     _report_drift(target_engine)
 
 
+def _refuse_if_database_is_in_use() -> None:
+    """Refuse to migrate while something else is using the database.
+
+    Deliberately only called from __main__, never from run_migrations(): the
+    server calls run_migrations() on startup, and giving the startup path a
+    new way to refuse to boot would trade a rare problem for a common one.
+
+    This is a backstop, not the main defence. update_server.bat runs
+    stop_server.ps1 first, which checks port 8000 is actually free - that is
+    what catches the usual case of a uvicorn process outliving its launcher.
+    What this catches is the case the port check cannot see: somebody running
+    the server by hand, from a different folder or on another port, while an
+    update is applied.
+
+    Being honest about the limit: the database is in rollback-journal mode,
+    so an EXCLUSIVE lock is only refused while another connection actually
+    holds one. A completely idle second server will not be detected here. The
+    port check is what covers that.
+    """
+    if not os.path.exists(DB_PATH):
+        return  # a new install - nothing to be in use
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=2)
+    except sqlite3.Error:
+        return  # unreadable for some other reason; let the migration report it
+    try:
+        conn.execute("BEGIN EXCLUSIVE")
+        conn.rollback()
+    except sqlite3.OperationalError as e:
+        print("\n[migration] REFUSING TO RUN - the database is in use.", flush=True)
+        print(f"[migration] {e}", flush=True)
+        print("[migration] Something still has boord.db open. Migrating now would", flush=True)
+        print("[migration] alter tables underneath it. Stop every Boord server on", flush=True)
+        print("[migration] this machine - including any started by hand in a", flush=True)
+        print("[migration] console window - and run this again.", flush=True)
+        sys.exit(1)
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     # update_server.bat runs this between stopping and starting the server,
     # so the operator sees the migration happen and a failure stops the
     # update instead of being discovered later as a server that won't boot.
+    _refuse_if_database_is_in_use()
     try:
         run_migrations()
     except Exception as e:

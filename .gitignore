@@ -5,6 +5,14 @@ data/*.db
 data/*.db-journal
 data/.secret_key
 data/release_key.fpr
+# Written by update_server.bat with the tag it checked out. Only a fallback
+# for backend/version.py when git cannot answer - but it describes this one
+# install, so it does not belong in the repository.
+data/installed_version.txt
+# Written by "update_server.bat --check" - what the last check for a newer
+# signed release found. Describes this install's position, not the code.
+data/update_available.json
+data/update_available.tmp
 # The admin password generated for this install, left on disk for whoever is
 # standing at the machine until it is changed (db.seed_defaults). Only named
 # paths under data/ are ignored, not data/ itself, so without this line a

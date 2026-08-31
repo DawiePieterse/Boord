@@ -14,6 +14,25 @@ setlocal EnableDelayedExpansion
 :: if that signature is missing, broken, or made by any other key. Pushing
 :: code is then not enough to ship it; you also have to hold the signing key.
 
+:: --check looks for a newer signed release and writes what it found to
+:: data\update_available.json, without checking anything out. It is what the
+:: "Boord Update Check" scheduled task runs, and it shares this script rather
+:: than living in one of its own on purpose: the fingerprint pinning, the tag
+:: selection and the signature check below are the security-critical part, and
+:: a second copy of them would be a second thing to keep right.
+set "CHECK_ONLY="
+if /i "%~1"=="--check" set "CHECK_ONLY=1"
+if /i "%~1"=="/check" set "CHECK_ONLY=1"
+
+:: Only the update itself needs administrator rights - it restarts the server.
+:: Checking needs none, and asking for them would break it: run unattended
+:: from a Scheduled Task there is no desktop to show a UAC prompt on, so
+:: Start-Process -Verb RunAs either fails silently or hangs forever.
+:: Jumped over rather than wrapped in a block: with delayed expansion on,
+:: %errorLevel% inside a parenthesised block is expanded when the block is
+:: parsed - before net session has run - so the check would silently always
+:: see the previous command's code.
+if defined CHECK_ONLY goto :skip_elevation
 net session >nul 2>&1
 if %errorLevel% neq 0 (
     echo This needs administrator rights to restart the server - requesting them now...
@@ -21,6 +40,7 @@ if %errorLevel% neq 0 (
     powershell -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
     exit /b
 )
+:skip_elevation
 
 cd /d "%~dp0"
 
@@ -47,7 +67,7 @@ if not exist "%FPR_FILE%" (
     echo.
     echo The server has NOT been restarted and is still running whatever it
     echo was running before.
-    pause
+    if not defined CHECK_ONLY pause
     exit /b 1
 )
 for /f "usebackq eol=# tokens=1 delims= " %%F in ("%FPR_FILE%") do (
@@ -56,7 +76,7 @@ for /f "usebackq eol=# tokens=1 delims= " %%F in ("%FPR_FILE%") do (
 if not defined RELEASE_FPR (
     echo %FPR_FILE% is empty - expected a 40-character key fingerprint.
     echo Not updating. See MANUAL.md chapter 2, "Trusting the release key".
-    pause
+    if not defined CHECK_ONLY pause
     exit /b 1
 )
 echo     Only releases signed by !RELEASE_FPR! will be accepted.
@@ -82,7 +102,7 @@ if errorlevel 1 (
     echo     git config --global gpg.program "C:/Program Files/GnuPG/bin/gpg.exe"
     echo.
     echo Re-running install.bat does both of these for you.
-    pause
+    if not defined CHECK_ONLY pause
     exit /b 1
 )
 
@@ -96,7 +116,7 @@ if %errorLevel% neq 0 (
     echo Fetch failed - check the error above ^(no internet, or this folder
     echo isn't a git checkout^). The server has NOT been restarted, so it's
     echo still running whatever it was before.
-    pause
+    if not defined CHECK_ONLY pause
     exit /b 1
 )
 
@@ -110,7 +130,7 @@ if not defined NEWTAG (
     echo.
     echo No release tags ^(v*^) found in this repository. Nothing to update to.
     echo The server has NOT been restarted.
-    pause
+    if not defined CHECK_ONLY pause
     exit /b 1
 )
 
@@ -123,6 +143,10 @@ echo     Newest release:    !NEWTAG!
 
 if "!CURTAG!"=="!NEWTAG!" (
     echo     Already on the newest signed release - skipping the code update.
+    if defined CHECK_ONLY (
+        call :write_check_result ok false
+        exit /b 0
+    )
 ) else (
     echo.
     echo ==^> Verifying the signature on !NEWTAG!...
@@ -150,6 +174,7 @@ if "!CURTAG!"=="!NEWTAG!" (
             echo     "!GPG_PROG!" --import release-key.asc
             echo.
             echo Nothing has been changed. The server is still running !CURTAG!.
+            if defined CHECK_ONLY call :write_check_result no-pubkey false
         ) else (
             echo.
             echo *** SIGNATURE CHECK FAILED for !NEWTAG! ***
@@ -165,11 +190,18 @@ if "!CURTAG!"=="!NEWTAG!" (
             echo Nothing has been changed. The server has NOT been restarted and
             echo is still running !CURTAG!. Do not work around this by checking
             echo the tag out by hand - find out why it failed first.
+            if defined CHECK_ONLY call :write_check_result failed false
         )
-        pause
+        if not defined CHECK_ONLY pause
         exit /b 1
     )
     echo     Signature OK.
+
+    if defined CHECK_ONLY (
+        echo     !NEWTAG! is available and is properly signed.
+        call :write_check_result ok true
+        exit /b 0
+    )
 
     echo.
     echo ==^> Updating to !NEWTAG!...
@@ -181,10 +213,18 @@ if "!CURTAG!"=="!NEWTAG!" (
         echo.
         echo Checkout failed - check the error above. The server has NOT been
         echo restarted, so it's still running whatever it was before.
-        pause
+        if not defined CHECK_ONLY pause
         exit /b 1
     )
 )
+
+:: Leave a note of the tag that is now checked out, for the version endpoint
+:: to fall back on when git cannot answer - a copy taken without .git, or a
+:: repository git refuses to read because it is owned by another user. Written
+:: on both branches above, including the "already newest" one, so a server
+:: that never needed an update still ends up with a correct note.
+:: No space before the > - echo would write one into the file.
+echo !NEWTAG!> "%~dp0data\installed_version.txt"
 
 echo.
 echo ==^> Installing any new dependencies...
@@ -212,7 +252,7 @@ if errorlevel 1 (
     echo once the machine is online:
     echo     update_server.bat
     echo.
-    pause
+    if not defined CHECK_ONLY pause
     exit /b 1
 )
 
@@ -220,8 +260,30 @@ echo.
 echo ==^> Restarting the server...
 schtasks /query /tn "Boord Server" >nul 2>&1
 if %errorLevel% equ 0 (
-    schtasks /end /tn "Boord Server" >nul 2>&1
-    timeout /t 2 /nobreak >nul
+    echo.
+    echo ==^> Stopping the server...
+    :: Not just "schtasks /end". That ends the launcher; the uvicorn process
+    :: it spawned can outlive it and carry on serving requests with the
+    :: database open - which is the one thing that must not be true while
+    :: migrations run. stop_server.ps1 ends the task and then checks port
+    :: 8000 is actually free, and refuses rather than guessing.
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0stop_server.ps1"
+    if errorlevel 1 (
+        echo.
+        echo *** THE SERVER COULD NOT BE STOPPED ***
+        echo.
+        echo Something is still listening on port 8000, so the database is
+        echo still open. Migrating now would rewrite tables underneath a
+        echo running server, and it would not even report an error.
+        echo.
+        echo Nothing has been changed. The code is on !NEWTAG! but the server
+        echo was never restarted, so it is still serving !CURTAG!. Read the
+        echo message above for what holds the port, stop it, and run this
+        echo again.
+        echo.
+        if not defined CHECK_ONLY pause
+        exit /b 1
+    )
 
     echo.
     echo ==^> Bringing the database up to date...
@@ -249,7 +311,7 @@ if %errorLevel% equ 0 (
         echo The database itself was copied before anything touched it - look
         echo for the newest pre_migration_*.db in data\backups\.
         echo.
-        pause
+        if not defined CHECK_ONLY pause
         exit /b 1
     )
 
@@ -267,4 +329,36 @@ echo     app fully closed and reopened ^(not just backgrounded^) to pick up
 echo     the new version - see MANUAL.md chapter 12 if a device still shows
 echo     an old version.
 echo.
-pause
+if not defined CHECK_ONLY pause
+exit /b 0
+
+
+:write_check_result
+:: %1 = signature status (ok / failed / no-pubkey), %2 = whether an update is
+:: waiting. Read by the server and shown in Settings, so the office PC says
+:: "v3.1 is available" rather than nobody finding out for a season.
+::
+:: A file under data\, not a database row: this runs as a separate process
+:: from the server, data\ is gitignored so an update cannot overwrite it, and
+:: SystemSetting is served publicly to every unauthenticated device and blanked
+:: field-by-field on every settings Save.
+::
+:: Failures are written too, on purpose. A check that has not succeeded since
+:: April looks exactly like "no updates available" unless it says so.
+set "CHECK_STAMP="
+for /f "delims=" %%S in ('powershell -NoProfile -Command "Get-Date -Format o" 2^>nul') do set "CHECK_STAMP=%%S"
+set "RESULT_FILE=%~dp0data\update_available.json"
+set "RESULT_TMP=%~dp0data\update_available.tmp"
+> "!RESULT_TMP!" (
+    echo {
+    echo   "checked_at": "!CHECK_STAMP!",
+    echo   "current": "!CURTAG!",
+    echo   "latest": "!NEWTAG!",
+    echo   "signature": "%~1",
+    echo   "update_available": %~2
+    echo }
+)
+:: Renamed rather than written in place, so the server never reads a file that
+:: is half-written.
+move /y "!RESULT_TMP!" "!RESULT_FILE!" >nul
+exit /b 0

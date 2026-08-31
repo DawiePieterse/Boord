@@ -1314,6 +1314,82 @@ function bindSettings() {
   document.getElementById("setSeasonDay").addEventListener("input", updateSeasonYearLabel);
 }
 
+// The Server card. Answers the question the app could never answer before:
+// which release is this server actually on, and is this screen showing it?
+// Boord.VERSION in the header says what THIS browser loaded, which is a
+// different question the moment a device is serving a cached copy.
+async function loadServerCard() {
+  const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  const warn = document.getElementById("srvWarning");
+  const showWarning = (text, tone) => {
+    if (!warn) return;
+    warn.textContent = text;
+    warn.className = tone === "red"
+      ? "text-sm rounded-lg p-3 bg-red-50 text-red-800 border border-red-200"
+      : "text-sm rounded-lg p-3 bg-amber-50 text-amber-800 border border-amber-200";
+  };
+
+  let info;
+  try {
+    info = await Boord.api("/api/version");
+  } catch (e) {
+    set("srvRelease", "could not be read");
+    return;
+  }
+
+  const releaseText = {
+    release: info.tag,
+    ahead: `${info.describe} (between releases)`,
+    reported: `${info.tag} (reported by the last update)`,
+    unknown: "unknown",
+  }[info.state] || "unknown";
+  set("srvRelease", releaseText);
+
+  set("srvSchema", info.migrations_applied === false
+    ? `BEHIND - at ${info.alembic_current || "nothing"}, expected ${info.alembic_head}`
+    : (info.alembic_current || "unknown"));
+
+  const b = info.backups || {};
+  set("srvBackup", b.last ? `${b.last} (${b.count} kept)` : "none yet");
+  set("srvDevice", `v${Boord.VERSION}`);
+
+  // What the daily check last found, if setup_update_check.bat was ever run.
+  // Nothing installs itself - this is the whole of the "an update is out"
+  // mechanism, and applying it stays a person double-clicking
+  // update_server.bat when it suits the pack house.
+  const upd = document.getElementById("srvUpdate");
+  if (upd) {
+    upd.classList.add("hidden");
+    const u = info.update;
+    if (u && u.available) {
+      upd.classList.remove("hidden");
+      upd.className = "text-sm rounded-lg p-3 bg-blue-50 text-blue-800 border border-blue-200";
+      upd.innerHTML = `<b>${u.latest} is available.</b> This server is on ${u.current}. To install it, run <b>update_server.bat</b> on the server PC - it is not installed automatically. Checked ${Boord.fmtDateTime(u.checked_at)}.`;
+    } else if (u && u.signature && u.signature !== "ok") {
+      // A check that keeps failing looks exactly like "no updates" unless
+      // it says so.
+      upd.classList.remove("hidden");
+      upd.className = "text-sm rounded-lg p-3 bg-amber-50 text-amber-800 border border-amber-200";
+      const why = u.signature === "no-pubkey"
+        ? "the release key is not in this server's keyring"
+        : "the signature on the newest release did not verify";
+      upd.innerHTML = `<b>The update check is not working:</b> ${why}. Last tried ${Boord.fmtDateTime(u.checked_at)}. See the manual, chapter 2.`;
+    }
+  }
+
+  if (warn) warn.classList.add("hidden");
+  if (info.migrations_applied === false) {
+    warn.classList.remove("hidden");
+    showWarning("The database schema is older than this release expects. The migrations did not run - restart the server, and if that does not fix it, do not carry on using the app.", "red");
+  } else if (info.version && info.version !== Boord.VERSION) {
+    warn.classList.remove("hidden");
+    showWarning(`This device is showing cached code from v${Boord.VERSION}, but the server is running ${releaseText}. Close the app completely and reopen it to pick up the new version.`, "amber");
+  } else if (info.state === "unknown" && info.git_error) {
+    warn.classList.remove("hidden");
+    showWarning(`The server cannot read its own version from git: ${info.git_error}`, "amber");
+  }
+}
+
 async function loadBackupsList() {
   const backups = await Boord.api("/api/backups", { auth: true });
   document.getElementById("backupsTable").innerHTML = backups.map((b) => `
@@ -1332,11 +1408,63 @@ async function loadBackupsList() {
   });
 }
 
+// Whether backups are actually leaving this machine. Fourteen copies on the
+// server's own disk are no protection at all against that disk failing, so
+// "not configured" is a real answer worth showing rather than a blank.
+async function loadOffsiteStatus() {
+  const line = document.getElementById("offsiteStatus");
+  const warn = document.getElementById("offsiteWarning");
+  if (!line) return;
+  if (warn) warn.classList.add("hidden");
+
+  let s;
+  try {
+    s = await Boord.api("/api/backups/offsite", { auth: true });
+  } catch (e) {
+    line.textContent = "Could not read the off-site copy status.";
+    return;
+  }
+
+  const folder = `${(s.folder_bytes / 1024 / 1024).toFixed(1)} MB in ${s.folder_files} files on this server`;
+
+  if (!s.configured) {
+    line.className = "text-sm rounded-lg p-3 bg-slate-50 text-slate-600";
+    line.innerHTML = `<b>No off-site copy is set up.</b> Every backup is on this machine only - a failed disk takes all of them. ${folder}. See the manual, chapter 11, to set a destination.`;
+    return;
+  }
+
+  const last = s.last || {};
+  if (s.problem) {
+    line.className = "text-sm rounded-lg p-3 bg-red-50 text-red-800 border border-red-200";
+    line.innerHTML = `<b>Off-site copy is not working:</b> ${s.destination} - ${s.problem}. ${folder}.`;
+  } else if (last.ok) {
+    line.className = "text-sm rounded-lg p-3 bg-green-50 text-green-800 border border-green-200";
+    line.innerHTML = `<b>Last copied ${Boord.fmtDateTime(last.at)}</b> to ${s.destination}. ${folder}.`;
+  } else if (last.error) {
+    line.className = "text-sm rounded-lg p-3 bg-red-50 text-red-800 border border-red-200";
+    const runs = last.consecutive_failures > 1 ? `${last.consecutive_failures} times running` : "last night";
+    line.innerHTML = `<b>Off-site copy FAILED ${runs}:</b> ${last.error} - to ${s.destination}. ${folder}.`;
+  } else {
+    line.className = "text-sm rounded-lg p-3 bg-slate-50 text-slate-600";
+    line.innerHTML = `Copying to ${s.destination}. Nothing copied yet - the next backup will be the first. ${folder}.`;
+  }
+
+  // Warned about, not blocked. A synced folder is a decision for whoever
+  // runs the pack house to make knowingly, and the name of a folder is not
+  // proof either way - but nobody should discover afterwards what was in it.
+  if (s.looks_like_cloud && warn) {
+    warn.classList.remove("hidden");
+    warn.className = "text-sm rounded-lg p-3 bg-amber-50 text-amber-800 border border-amber-200";
+    warn.innerHTML = "<b>This destination looks like a synced cloud folder.</b> Backups are not encrypted and contain every worker's ID number, banking details and photograph. Until backup encryption is added, use a drive that stays on the farm - a plugged-in USB or external disk, a second disk in this PC, or another machine on the farm's own network.";
+  }
+}
+
 async function runBackupNow() {
   try {
     await Boord.api("/api/backups", { method: "POST", auth: true, timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
     Boord.toast("Backup created");
     await loadBackupsList();
+    await loadOffsiteStatus();
   } catch (e) {
     Boord.toast("Backup failed");
   }
@@ -1361,7 +1489,9 @@ async function loadSettingsForm() {
   if (rate) {
     document.getElementById("setRatePerKg").value = rate.default_rate_per_kg;
   }
+  await loadServerCard();
   await loadBackupsList();
+  await loadOffsiteStatus();
 }
 
 // The season year shown beside the anchor: derived, never typed, so it can

@@ -46,6 +46,8 @@ import asyncio  # noqa: E402
 from fastapi import HTTPException, UploadFile  # noqa: E402
 
 import backup  # noqa: E402
+import migrate  # noqa: E402
+import version  # noqa: E402
 from db import DB_PATH, engine, legacy_schema_catch_up  # noqa: E402
 from migrate import (BASELINE_REVISION, _baseline_database, _config,  # noqa: E402
                      current_revision, head_revision, run_migrations)
@@ -496,6 +498,248 @@ def test_setup_state_writes_nothing():
     assert before == after, f"SetupState rows changed: {before} -> {after}"
 
 
+def test_a_locked_database_refuses_to_migrate():
+    """migrate.py, run by hand, must refuse while something else has the
+    database open.
+
+    The real defence is stop_server.ps1 checking port 8000 is free, because
+    the usual case is a uvicorn process outliving the launcher that started
+    it. This is the backstop for what a port check cannot see - a second
+    server started by hand - and it matters because the failure it prevents
+    is silent: SQLite will let Alembic rewrite tables under a live reader,
+    and the pre-migration copy is taken through the backup API, which
+    coordinates with a live writer and succeeds. Nothing errors. The farm
+    finds out later.
+    """
+    tmp = tempfile.mkdtemp()
+    real_db = migrate.DB_PATH
+    holder = None
+    try:
+        path = os.path.join(tmp, "farm.db")
+        temp_engine = create_engine(f"sqlite:///{path}")
+        run_migrations(temp_engine, snapshot=False)
+        migrate.DB_PATH = path
+
+        # Nothing holding it: the guard must stay out of the way.
+        migrate._refuse_if_database_is_in_use()
+
+        holder = sqlite3.connect(path, timeout=1)
+        holder.execute("BEGIN EXCLUSIVE")
+        try:
+            migrate._refuse_if_database_is_in_use()
+        except SystemExit as exc:
+            assert exc.code == 1, f"refused with exit code {exc.code}, expected 1"
+        else:
+            raise AssertionError(
+                "migrate.py did not refuse to run against a database another "
+                "connection had locked")
+    finally:
+        if holder is not None:
+            holder.rollback()
+            holder.close()
+        migrate.DB_PATH = real_db
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Version
+#
+# The server had no version at all until recently - the only one anywhere was
+# the constant in frontend/shared/api.js, which describes what a browser
+# loaded rather than what the server is serving. These checks are about the
+# reporting staying true, not about the number itself: a version endpoint
+# that quietly reports null is worse than none, because it looks like an
+# answer.
+# ---------------------------------------------------------------------------
+
+def test_the_version_regex_still_matches_the_constant():
+    """backend/version.py reads Boord.VERSION out of api.js with the same
+    anchored expression scripts/release.sh greps with. Reformat that line -
+    change the indentation, drop the trailing comma - and both stop matching
+    at once: the release gate stops checking, and every farm reports a null
+    version. Neither failure announces itself."""
+    declared = version._declared_version()
+    assert declared is not None, (
+        f"could not read VERSION out of {version.API_JS} - the line no longer matches "
+        f"the expression this and scripts/release.sh both depend on")
+    assert declared.strip() == declared and declared, f"VERSION parsed as {declared!r}"
+
+
+def test_the_declared_version_matches_the_checked_out_tag():
+    """On a release checkout, api.js and the tag must agree. release.sh
+    refuses to sign a tag where they do not, so a disagreement here means
+    somebody moved the checkout by hand."""
+    info = version.version_info()
+    if info["state"] != "release":
+        raise Skip(f"not on a release tag (state: {info['state']}) - nothing to compare")
+    assert info["tag"].lstrip("v") == info["frontend_version"], (
+        f"tag {info['tag']} but api.js says {info['frontend_version']}")
+    assert info["matches"] is True
+
+
+def test_version_info_survives_without_git():
+    """Reported honestly rather than raised. The servers whose version you
+    most want to read are the ones where something is already wrong, so this
+    endpoint has to answer on a machine with no git, no tags, and a
+    repository git refuses to read."""
+    real_run, real_static = version._run_git, version._static
+    try:
+        version._run_git = lambda args: (False, "", "git not found on PATH")
+        version._static = None
+        info = version.version_info()
+    finally:
+        version._run_git, version._static = real_run, real_static
+
+    for key in ("version", "tag", "describe", "state", "frontend_version", "matches",
+                "git_error", "alembic_head", "alembic_current", "backups", "update"):
+        assert key in info, f"{key} missing from version_info() when git is unavailable"
+    assert info["state"] in ("reported", "unknown"), info["state"]
+    assert info["frontend_version"] is not None, (
+        "with no git, api.js is the only source left - it must still be read")
+
+
+def test_the_reported_alembic_head_is_the_real_head():
+    """The heartbeat sends head and current so a farm that never ran its
+    migrations is visible from off-site. That only works if head is the
+    genuine head rather than a copy that drifted."""
+    info = version.version_info()
+    assert info["alembic_head"] == head_revision(), (
+        f"version_info reports head {info['alembic_head']}, migrate says {head_revision()}")
+
+
+# ---------------------------------------------------------------------------
+# Backups leaving the machine
+#
+# All in temporary folders, monkey-patching backup.py's module-level paths and
+# putting them back in a finally - this suite never writes to the server's own
+# data/backups.
+#
+# The property worth protecting is that the off-site copy can fail in every
+# way a removable drive fails, and none of them may cost the farm its local
+# backup or its nightly scheduler thread.
+# ---------------------------------------------------------------------------
+
+def _offsite_sandbox():
+    """(tmp root, restore fn). Patches every path copy_offsite touches."""
+    tmp = tempfile.mkdtemp()
+    saved = (backup.BACKUPS_DIR, backup.COPY_DEST_FILE, backup.OFFSITE_STATE_PATH)
+    backup.BACKUPS_DIR = os.path.join(tmp, "backups")
+    backup.COPY_DEST_FILE = os.path.join(tmp, "backup_copy_to.txt")
+    backup.OFFSITE_STATE_PATH = os.path.join(backup.BACKUPS_DIR, "last_offsite_copy.json")
+    os.makedirs(backup.BACKUPS_DIR)
+
+    def restore():
+        backup.BACKUPS_DIR, backup.COPY_DEST_FILE, backup.OFFSITE_STATE_PATH = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    return tmp, restore
+
+
+def _write_dest(path):
+    with open(backup.COPY_DEST_FILE, "w", encoding="utf-8") as fh:
+        fh.write("# where finished backups are copied\n")
+        fh.write(path + "\n")
+
+
+def _fake_archive(name="backup_20260101_000000.zip"):
+    full = os.path.join(backup.BACKUPS_DIR, name)
+    with open(full, "wb") as fh:
+        fh.write(os.urandom(4096))
+    return name, full
+
+
+def test_no_destination_configured_is_not_a_failure():
+    """Most installs will never set this. Not configured has to be silent and
+    stateless - not an error, and not a state file that later reads as a
+    failed copy."""
+    _, restore = _offsite_sandbox()
+    try:
+        name, _ = _fake_archive()
+        result = backup.copy_offsite(name)
+        assert result == {"configured": False}, result
+        assert not os.path.exists(backup.OFFSITE_STATE_PATH), (
+            "an unconfigured install wrote an off-site state file")
+        status = backup.offsite_status()
+        assert status["configured"] is False and status["last"] is None
+    finally:
+        restore()
+
+
+def test_a_missing_destination_never_raises():
+    """The USB stick is unplugged. This is the normal case, not the strange
+    one, and it must cost nothing: the local backup still happens, the
+    scheduler thread survives, and the failure is recorded where somebody can
+    see it rather than thrown."""
+    tmp, restore = _offsite_sandbox()
+    try:
+        _write_dest(os.path.join(tmp, "not-plugged-in", "boord"))
+        name, _ = _fake_archive()
+        result = backup.copy_offsite(name)
+        assert result["ok"] is False
+        assert result["error"], "a missing destination recorded no reason"
+        assert result["consecutive_failures"] == 1
+
+        # And again - the count is what makes "failing every night since
+        # April" different from "failed once".
+        result = backup.copy_offsite(name)
+        assert result["consecutive_failures"] == 2, result
+
+        status = backup.offsite_status()
+        assert status["configured"] is True
+        assert status["problem"], "offsite_status did not report the missing folder"
+    finally:
+        restore()
+
+
+def test_the_offsite_copy_is_byte_identical():
+    """A copy that is not byte-for-byte the archive is not a backup. Also
+    checks no .part survives: an interrupted copy left under the real name
+    would be found by whoever is restoring, at the worst possible moment."""
+    tmp, restore = _offsite_sandbox()
+    try:
+        dest = os.path.join(tmp, "offsite")
+        os.makedirs(dest)
+        _write_dest(dest)
+        name, source = _fake_archive()
+
+        result = backup.copy_offsite(name)
+        assert result["ok"] is True, result
+
+        with open(source, "rb") as fh:
+            original = fh.read()
+        with open(os.path.join(dest, name), "rb") as fh:
+            copied = fh.read()
+        assert original == copied, "the off-site copy is not byte-identical"
+        assert [f for f in os.listdir(dest)] == [name], os.listdir(dest)
+
+        # A destination this code does not own: it may add, never remove.
+        theirs = os.path.join(dest, "someone-elses-file.txt")
+        with open(theirs, "w", encoding="utf-8") as fh:
+            fh.write("not ours")
+        backup.copy_offsite(name)
+        assert os.path.exists(theirs), "the off-site copy deleted a file it did not put there"
+    finally:
+        restore()
+
+
+def test_a_destination_inside_the_repo_is_refused():
+    """The two destinations that are certainly wrong, because they are not off
+    the machine at all - and would show a green light for a copy that dies
+    with the same disk."""
+    for path, what in ((backup.BACKUPS_DIR, "the backups folder"),
+                        (os.path.join(backup.REPO_ROOT, "data"), "inside the repo"),
+                        (backup.REPO_ROOT, "the repo root")):
+        assert backup._reject_destination(path), f"{what} was accepted as an off-site destination"
+
+    # And a folder that is genuinely elsewhere is not refused for being one.
+    elsewhere = tempfile.mkdtemp()
+    try:
+        assert backup._reject_destination(elsewhere) is None, (
+            f"a folder outside the machine's Boord install was refused: {elsewhere}")
+    finally:
+        shutil.rmtree(elsewhere, ignore_errors=True)
+
+
 def main():
     print("Boord self-test")
     print("=" * 60)
@@ -508,12 +752,27 @@ def main():
                test_baseline_is_still_the_root_revision,
                test_pre_migration_snapshot_is_a_faithful_full_copy,
                test_this_server_is_at_the_newest_revision,
-               test_this_server_matches_the_models):
+               test_this_server_matches_the_models,
+               test_a_locked_database_refuses_to_migrate):
+        check(fn.__name__, fn)
+
+    section("Version")
+    for fn in (test_the_version_regex_still_matches_the_constant,
+               test_the_declared_version_matches_the_checked_out_tag,
+               test_version_info_survives_without_git,
+               test_the_reported_alembic_head_is_the_real_head):
         check(fn.__name__, fn)
 
     section("Master data imports")
     for fn in (test_replacing_all_blocks_with_an_empty_file_is_refused,
                test_importing_blocks_without_a_supplier_column_keeps_the_supplier):
+        check(fn.__name__, fn)
+
+    section("Backups")
+    for fn in (test_no_destination_configured_is_not_a_failure,
+               test_a_missing_destination_never_raises,
+               test_the_offsite_copy_is_byte_identical,
+               test_a_destination_inside_the_repo_is_refused):
         check(fn.__name__, fn)
 
     section("Setup state")
