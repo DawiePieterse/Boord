@@ -474,7 +474,7 @@ function openEditModal(title, fields, initial, onSave) {
         ? `<label class="flex items-center gap-2 mt-1"><input data-key="${f.key}" type="checkbox" class="w-4 h-4"> <span class="text-sm">${f.label}</span></label>`
         : f.type === "file"
         ? `<div class="flex gap-2">
-             <input data-key="${f.key}" type="file" accept="image/*" capture="environment" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-2">
+             <input data-key="${f.key}" type="file" accept="image/*" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-2">
              <button type="button" data-camera-for="${f.key}" title="Take photo with camera" class="px-3 border border-slate-300 rounded-lg bg-slate-50"><i class="fa-solid fa-camera"></i></button>
            </div>`
         : `<input data-key="${f.key}" type="${f.type || "text"}" ${f.disabled ? "disabled" : ""} class="w-full border border-slate-300 rounded-lg p-2">`}
