@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlmodel import Session, select
 
-from db import DATA_DIR, get_session
+from db import DATA_DIR, get_own_supplier_id, get_session
 from excel_io import rows_to_xlsx_bytes
 from models import Block, Device, HarvestRecord, Lot, \
     ReceivingRecord, Supplier, SystemSetting, Team, Worker
@@ -34,6 +34,24 @@ def _xlsx_response(headers, rows, sheet_title, filename):
         f.write(data)
     return Response(content=data, media_type=XLSX_MEDIA,
                      headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+def _packhouse_code(session: Session) -> str:
+    """The installation's registered Pack House Code (PHC). One install is one
+    pack house, so it's the same value on every row - it's carried as a column
+    rather than a title because these sheets get filtered, split and pasted
+    into a grower's or an auditor's own workbook, where a header row would be
+    left behind."""
+    settings = session.exec(select(SystemSetting)).first()
+    return settings.packhouse_code if settings else ""
+
+
+def _traceability(supplier: Optional[Supplier]) -> list:
+    """A supplier's PUC and GlobalG.A.P. number, for the two traceability
+    columns that follow every Supplier column. Blank for an unknown supplier
+    or one whose numbers haven't been captured in Master Data - an empty cell
+    reads as "not registered with us", which is the truth."""
+    return [supplier.puc if supplier else "", supplier.global_gap_number if supplier else ""]
 
 
 def _mean(values: list, places: int):
@@ -182,8 +200,10 @@ def lot_receiving_report(date_from: date, date_to: date, supplier_id: Optional[i
     for rec in session.exec(select(ReceivingRecord)).all():
         receiving_by_lot.setdefault(rec.lot_id, rec)
     suppliers = {s.id: s for s in session.exec(select(Supplier)).all()}
+    phc = _packhouse_code(session)
 
-    headers = ["Slip Number", "Supplier", "Dispatched", "Team", "Driver", "Expected Crates", "Kg Sent",
+    headers = ["Pack House Code", "Slip Number", "Supplier", "PUC", "GlobalG.A.P. Number",
+               "Dispatched", "Team", "Driver", "Expected Crates", "Kg Sent",
                "Status", "Received At", "Actual Crates", "Discrepancy", "Condition", "Waste Kg",
                "Temp (°C)", "Humidity (%)", "Weather"]
     rows = []
@@ -191,7 +211,8 @@ def lot_receiving_report(date_from: date, date_to: date, supplier_id: Optional[i
         rec = receiving_by_lot.get(lot.id)
         supplier = suppliers.get(lot.supplier_id)
         rows.append([
-            lot.slip_number, supplier.name if supplier else "",
+            phc, lot.slip_number, supplier.name if supplier else "",
+            *_traceability(supplier),
             local_str(lot.timestamp), lot.team_id, lot.driver,
             lot.total_crates, round(lot.total_kg, 1), lot.status.value,
             local_str(lot.received_at),
@@ -217,9 +238,11 @@ def picking_notes_report(date_from: date, date_to: date, supplier_id: Optional[i
         receiving_by_lot.setdefault(rec.lot_id, rec)
     suppliers = {s.id: s for s in session.exec(select(Supplier)).all()}
     teams = {t.id: t for t in session.exec(select(Team)).all()}
+    phc = _packhouse_code(session)
 
-    headers = ["Slip Number", "Date", "Time", "Block", "Team", "Crates Sent", "Crates Received",
-               "Total Kg", "Driver", "Supplier", "Condition", "Notes", "Received By",
+    headers = ["Pack House Code", "Slip Number", "Date", "Time", "Block", "Team", "Crates Sent",
+               "Crates Received", "Total Kg", "Driver", "Supplier", "PUC", "GlobalG.A.P. Number",
+               "Condition", "Notes", "Received By",
                "Weather", "Temp (°C)", "Humidity (%)"]
     entries = []
     for lot in lots:
@@ -235,11 +258,11 @@ def picking_notes_report(date_from: date, date_to: date, supplier_id: Optional[i
         entries.append((
             local_ts.date() if local_ts else date.min, team_name, local_ts,
             [
-                lot.slip_number, local_ts.strftime("%Y-%m-%d") if local_ts else "",
+                phc, lot.slip_number, local_ts.strftime("%Y-%m-%d") if local_ts else "",
                 local_ts.strftime("%H:%M") if local_ts else "", ", ".join(blocks),
                 team_name, lot.total_crates,
                 rec.actual_crates if rec else "", round(lot.total_kg, 1), lot.driver,
-                supplier.name if supplier else "",
+                supplier.name if supplier else "", *_traceability(supplier),
                 rec.condition if rec else "", rec.notes if rec else "", rec.received_by if rec else "",
                 lot.weather_condition or "",
                 lot.weather_temp if lot.weather_temp is not None else "",
@@ -334,9 +357,14 @@ def team_picking_list_report(date_from: date, date_to: date, supplier_id: Option
     return _xlsx_response(headers, rows, "Team Picking List", f"Team_Picking_List_{date_from}_{date_to}.xlsx")
 
 
-def _lot_rows(lots_data: list) -> list:
+LOT_LIST_HEADERS = ["Pack House Code", "Slip Number", "Supplier", "PUC", "GlobalG.A.P. Number",
+                    "Team", "Driver", "Crates", "Kg", "Age (min)"]
+
+
+def _lot_rows(lots_data: list, suppliers: dict, phc: str) -> list:
     return [[
-        l["slip_number"], l["supplier_name"], l["team_id"] or "", l["driver"], l["total_crates"], l["total_kg"],
+        phc, l["slip_number"], l["supplier_name"], *_traceability(suppliers.get(l["supplier_id"])),
+        l["team_id"] or "", l["driver"], l["total_crates"], l["total_kg"],
         l["age_minutes"],
     ] for l in lots_data]
 
@@ -346,8 +374,9 @@ def harvesting_list_report(period_start: date, period_end: date, supplier_id: Op
                             session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     lots_data = list_pending(supplier_id=supplier_id, period_start=period_start, period_end=period_end,
                               session=session)
-    headers = ["Slip Number", "Supplier", "Team", "Driver", "Crates", "Kg", "Age (min)"]
-    return _xlsx_response(headers, _lot_rows(lots_data), "Harvesting",
+    suppliers = {s.id: s for s in session.exec(select(Supplier)).all()}
+    rows = _lot_rows(lots_data, suppliers, _packhouse_code(session))
+    return _xlsx_response(LOT_LIST_HEADERS, rows, "Harvesting",
                            f"Harvesting_{period_start}_{period_end}.xlsx")
 
 
@@ -356,8 +385,9 @@ def in_transit_list_report(period_start: date, period_end: date, supplier_id: Op
                             session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     lots_data = list_in_transit(supplier_id=supplier_id, period_start=period_start, period_end=period_end,
                                  session=session)
-    headers = ["Slip Number", "Supplier", "Team", "Driver", "Crates", "Kg", "Age (min)"]
-    return _xlsx_response(headers, _lot_rows(lots_data), "In Transit",
+    suppliers = {s.id: s for s in session.exec(select(Supplier)).all()}
+    rows = _lot_rows(lots_data, suppliers, _packhouse_code(session))
+    return _xlsx_response(LOT_LIST_HEADERS, rows, "In Transit",
                            f"In_Transit_{period_start}_{period_end}.xlsx")
 
 
@@ -377,18 +407,22 @@ def received_list_report(period_start: date, period_end: date, supplier_id: Opti
         if c.block_id:
             blocks_by_lot.setdefault(c.lot_id, set()).add(c.block_id)
 
-    headers = ["Slip Number", "Date", "Time", "Block", "Supplier", "Team", "Driver", "Crates", "Kg",
-               "Rejected"]
+    suppliers = {s.id: s for s in session.exec(select(Supplier)).all()}
+    phc = _packhouse_code(session)
+
+    headers = ["Pack House Code", "Slip Number", "Date", "Time", "Block", "Supplier", "PUC",
+               "GlobalG.A.P. Number", "Team", "Driver", "Crates", "Kg", "Rejected"]
     rows = []
     for l in lots_data:
         rec = receiving_by_lot.get(l["id"])
         local_ts = to_local(l["received_at"])
         rows.append([
-            l["slip_number"],
+            phc, l["slip_number"],
             local_ts.strftime("%Y-%m-%d") if local_ts else "",
             local_ts.strftime("%H:%M") if local_ts else "",
             ", ".join(sorted(blocks_by_lot.get(l["id"], []))),
-            l["supplier_name"], l["team_id"] or "", l["driver"], l["total_crates"], l["total_kg"],
+            l["supplier_name"], *_traceability(suppliers.get(l["supplier_id"])),
+            l["team_id"] or "", l["driver"], l["total_crates"], l["total_kg"],
             round(rec.waste_kg, 1) if rec else "",
         ])
     return _xlsx_response(headers, rows, "Received", f"Received_{period_start}_{period_end}.xlsx")
@@ -397,10 +431,26 @@ def received_list_report(period_start: date, period_end: date, supplier_id: Opti
 @router.get("/worker-harvest")
 def worker_harvest_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
                            session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
-    summary = dashboard_summary(period_start, period_end, supplier_id, session, admin)
-    headers = ["Emp Nr", "Name", "Supplier", "Crates", "Kg", "Amount Due", "Avg Kg/Crate"]
+    summary = dashboard_summary(period_start, period_end, supplier_id, session, _admin)
+    # dashboard_summary resolves each worker to a supplier NAME only, and an
+    # own-fruit worker has supplier_id left unset - so the traceability numbers
+    # are looked up the same way _supplier_display_name resolves that name,
+    # falling back to the own-fruit supplier rather than coming out blank.
+    workers_by_id = {w.id: w for w in session.exec(select(Worker)).all()}
+    suppliers_by_id = {s.id: s for s in session.exec(select(Supplier)).all()}
+    own_supplier = suppliers_by_id.get(get_own_supplier_id(session))
+
+    def _supplier_for(worker_id):
+        w = workers_by_id.get(worker_id)
+        if not w or w.supplier_id is None:
+            return own_supplier
+        return suppliers_by_id.get(w.supplier_id)
+
+    headers = ["Emp Nr", "Name", "Supplier", "PUC", "GlobalG.A.P. Number", "Crates", "Kg",
+               "Amount Due", "Avg Kg/Crate"]
     rows = [[
-        w["worker_id"], w["name"], w["supplier_name"], w["crates"], w["total_kg"], w["amount_due"],
+        w["worker_id"], w["name"], w["supplier_name"], *_traceability(_supplier_for(w["worker_id"])),
+        w["crates"], w["total_kg"], w["amount_due"],
         w["avg_kg_crate"],
     ] for w in summary["workers"]]
     return _xlsx_response(headers, rows, "Worker Harvest", f"Worker_Harvest_{period_start}_{period_end}.xlsx")
@@ -454,7 +504,7 @@ def litchi_wages_report(period_start: date, period_end: date, supplier_id: Optio
 @router.get("/block-harvest")
 def block_harvest_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
                           session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
-    summary = dashboard_summary(period_start, period_end, supplier_id, session, admin)
+    summary = dashboard_summary(period_start, period_end, supplier_id, session, _admin)
     headers = ["Block", "Crates", "Kg", "Avg Kg/Crate", "Avg Kg/Tree", "Avg Kg/Ha"]
     rows = [[
         b["name"], b["crates"], b["total_kg"], b["avg_kg_crate"],
