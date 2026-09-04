@@ -327,4 +327,6 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("service-worker.js").catch(() => {});
 }
 
-init();
+// Through Boord.boot so a failure in here shows a message and an Update
+// button rather than a blank screen - see shared/api.js.
+Boord.boot(init);

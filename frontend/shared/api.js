@@ -235,6 +235,88 @@ const Boord = {
   // Screens can set this to react to offline flips (e.g. recolor a status pill).
   onOfflineChange: null,
 
+  // Start a screen, and make sure a failure in its first moments is visible
+  // rather than a white page.
+  //
+  // Every screen's init() opens by reaching for elements out of its own
+  // index.html. If a device ends up with one release's HTML and another's
+  // JavaScript - which a service worker CAN do, by revalidating the two files
+  // at different moments - that lookup returns null, init() throws, and the
+  // screen paints nothing at all. That happened on 2026-09-04: the Admin app
+  // went blank on a farm server, and from the outside it looked exactly like
+  // the server was down.
+  //
+  // A blank screen is the worst possible presentation of this, because it
+  // gives whoever is standing there nothing to act on. So: catch it, say what
+  // it is in words a picker or an admin can use, and offer the one button
+  // that actually fixes it.
+  boot(init) {
+    try {
+      Promise.resolve(init()).catch(Boord._bootFailed);
+    } catch (e) {
+      Boord._bootFailed(e);
+    }
+  },
+
+  _bootFailed(error) {
+    console.error("Boord: this screen failed to start", error);
+    // Built with inline styles and no classes on purpose. The stylesheet is
+    // one of the files that may be stale or missing, so this has to look
+    // right without it.
+    const panel = document.createElement("div");
+    panel.setAttribute("style", [
+      "position:fixed", "inset:0", "z-index:99999",
+      "background:#f1f5f9", "color:#0f172a",
+      "font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif",
+      "display:flex", "align-items:center", "justify-content:center",
+      "padding:24px", "text-align:center",
+    ].join(";"));
+    panel.innerHTML = `
+      <div style="max-width:26rem">
+        <div style="font-size:20px;font-weight:700;margin-bottom:12px">
+          This device is running an old copy
+        </div>
+        <div style="margin-bottom:20px">
+          The app on this phone or PC does not match the farm server, so this
+          screen could not start. Nothing has been lost, and nothing is wrong
+          with the server - this device just needs to fetch the new version.
+        </div>
+        <button id="boord-boot-reload" style="
+          background:#0A2F6B;color:#fff;border:0;border-radius:10px;
+          padding:14px 22px;font-size:16px;font-weight:600;cursor:pointer">
+          Update this device
+        </button>
+        <div style="margin-top:16px;font-size:13px;color:#475569">
+          If this keeps happening, close the app completely and open it again.
+        </div>
+      </div>`;
+    document.body.appendChild(panel);
+    panel.querySelector("#boord-boot-reload")
+      .addEventListener("click", () => Boord._reinstall());
+  },
+
+  // Throw away everything this device has cached for the app and load it
+  // fresh. Deliberately more than location.reload(): a reload is answered by
+  // the very service worker whose cache is the problem, which is why "just
+  // refresh the page" does not clear this and people end up clearing site
+  // data by hand.
+  async _reinstall() {
+    try {
+      if ("serviceWorker" in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((r) => r.unregister()));
+      }
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+    } catch (e) {
+      // Nothing useful to do - reload anyway, it may be enough on its own.
+      console.error("Boord: could not clear the cache", e);
+    }
+    location.reload();
+  },
+
   toast(message) {
     let el = document.getElementById("boord-toast");
     if (!el) {

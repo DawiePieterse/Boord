@@ -1249,6 +1249,20 @@ The version number only changes when the code that ships it changes - it's
 incremented deliberately each time a real update goes out, not tied to the
 date or any automatic counter.
 
+**"This device is running an old copy"** is what a screen shows instead of
+starting, when the copy it has cached is too mixed up to run - one release's
+page with another release's code, which a device can end up holding if it
+caught an update halfway. It carries an **Update this device** button that
+throws away everything cached here and fetches the app fresh; that is the
+whole fix, and it needs no help from the office.
+
+Before v3.4 this situation produced a completely blank white screen with
+nothing on it, which is why it is worth recognising: whoever was looking at
+it had no way to tell it from the server being down, and the actual remedy -
+clearing the browser's site data by hand - is not something anyone guesses.
+Screens now refresh their cached files as one set rather than one at a time,
+so this should be rare; the button is there for when it happens anyway.
+
 ### "Unknown device id"
 
 If the ID isn't recognized, the device shows an error and refuses to

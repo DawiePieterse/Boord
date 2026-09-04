@@ -2,7 +2,7 @@
 // loads if the connection briefly drops. Data (dashboard, reports, etc.)
 // always goes over the network when available.
 const CACHE_PREFIX = "boord-admin-";
-const CACHE = "boord-admin-v49";
+const CACHE = "boord-admin-v50";
 const REVALIDATE_TIMEOUT_MS = 10000;
 const SHELL = [
   "./",
@@ -42,6 +42,63 @@ self.addEventListener("activate", (event) => {
 // signal still gets the whole UI), but refresh the cached copy in the
 // background whenever the server IS reachable. Without the revalidate half,
 // a cache-first worker pins a device to old JS until the CACHE name changes.
+// Absolute URLs for everything in SHELL, so the fetch handler can tell a shell
+// request from an ordinary one. Resolved against this file's own location, so
+// "./" is the screen's page and "../shared/x" is the shared copy.
+const SHELL_URLS = new Set(SHELL.map((path) => new URL(path, self.location.href).toString()));
+
+let shellRefresh = null;
+
+// Re-fetch the WHOLE shell and commit it in one go.
+//
+// Writing each revalidated file back on its own - which is what this used to
+// do - can leave a device holding one release's index.html beside another
+// release's app.js. That is not a gentle degradation: the older JavaScript
+// reaches for an element the newer HTML no longer has, throws before anything
+// renders, and the screen paints white. It happened to the Admin app on a farm
+// server on 2026-09-04, and from the outside it was indistinguishable from the
+// server being down.
+//
+// Nothing is committed unless every file arrives, so a refresh cut short by a
+// dropped connection leaves the previous, consistent set in place rather than
+// a half-updated one.
+function refreshShell() {
+  if (!shellRefresh) {
+    const urls = [...SHELL_URLS];
+    shellRefresh = Promise.all(urls.map((u) => fetch(u, { cache: "reload" }).catch(() => null)))
+      .then(async (responses) => {
+        if (responses.some((res) => !res || !res.ok)) return;
+        const cache = await caches.open(CACHE);
+        await Promise.all(responses.map((res, i) => cache.put(urls[i], res)));
+      })
+      .catch(() => { /* keep the shell that is already there */ })
+      .then(() => { shellRefresh = null; });
+  }
+  return shellRefresh;
+}
+
+// Whether the copy just fetched is a different build from the cached one.
+//
+// Compared by validator rather than by body: this runs on every shell request,
+// and reading two copies of app.js to compare them would cost more than the
+// caching saves. Starlette's StaticFiles sends both an ETag and a
+// Last-Modified, so on this server the first check answers.
+//
+// When neither is available the answer is "unchanged", deliberately. Guessing
+// "changed" would re-fetch the entire shell on every single request, which is
+// a far worse failure than a stale one - and staleness is already visible,
+// since every screen prints its version in the header next to the server's.
+async function shellFileChanged(cache, url, fresh) {
+  const cached = await cache.match(url);
+  if (!cached) return true;
+  for (const header of ["etag", "last-modified", "content-length"]) {
+    const before = cached.headers.get(header);
+    const after = fresh.headers.get(header);
+    if (before && after) return before !== after;
+  }
+  return false;
+}
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.pathname.startsWith("/api/")) return; // never cache API calls
@@ -63,13 +120,23 @@ self.addEventListener("fetch", (event) => {
   // background fetches never settle, and a browser allows only a handful of
   // connections per host - uncapped they pile up and starve the app's own
   // API requests of sockets.
+  // A shell file is looked up by URL either way; only the key differs.
+  const shellUrl = isPageLoad ? cacheKey : url.href;
+  const isShell = SHELL_URLS.has(shellUrl);
+
   const revalidateAbort = new AbortController();
   const revalidateTimer = setTimeout(() => revalidateAbort.abort(), REVALIDATE_TIMEOUT_MS);
   const update = fetch(event.request, { signal: revalidateAbort.signal })
     .then(async (res) => {
       if (res.ok) {
         const cache = await caches.open(CACHE);
-        await cache.put(cacheKey, res.clone());
+        if (isShell) {
+          // One shell file moving means the whole shell moved. Refresh them
+          // together or not at all - see refreshShell above for why.
+          if (await shellFileChanged(cache, shellUrl, res)) await refreshShell();
+        } else {
+          await cache.put(cacheKey, res.clone());
+        }
       }
       return res;
     })

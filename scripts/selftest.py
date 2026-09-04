@@ -26,6 +26,7 @@ Exits non-zero if anything fails.
 """
 import io
 import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -970,6 +971,87 @@ def test_a_request_with_no_peer_is_not_the_admin():
 
 
 
+# ---------------------------------------------------------------------------
+# Frontend app shell
+#
+# Each screen's service worker caches its shell - HTML, JS, CSS - and as of
+# v3.4 refreshes the whole set together or not at all. Writing each file back
+# on its own could leave a device holding one release's index.html beside
+# another's app.js, and the failure that produces is not a degraded screen but
+# a blank one: the older JavaScript reaches for an element the newer HTML does
+# not have and throws before anything renders. That happened on a farm server
+# on 2026-09-04 and read, from the outside, as the server being down.
+#
+# Refreshing atomically buys that safety at the cost of a new failure mode,
+# which is what the first check below exists for: if any single SHELL entry
+# cannot be fetched, refreshShell() commits nothing, and the screen is pinned
+# to its installed shell forever. One typo'd path would freeze updates for
+# every device, silently.
+# ---------------------------------------------------------------------------
+SERVICE_WORKERS = ("frontend/admin/service-worker.js",
+                   "frontend/field/service-worker.js",
+                   "frontend/packhouse/service-worker.js",
+                   "frontend/service-worker.js")
+
+SCREEN_ENTRY_POINTS = ("frontend/admin/app.js",
+                       "frontend/field/app.js",
+                       "frontend/packhouse/receiving.js")
+
+
+def _repo_file(relative):
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), relative)
+
+
+def _shell_entries(worker_path):
+    """The SHELL array's paths, read out of the worker's source."""
+    source = open(_repo_file(worker_path)).read()
+    start = source.index("const SHELL = [")
+    body = source[start:source.index("];", start)]
+    return re.findall(r'"([^"]+)"', body)
+
+
+def test_every_shell_file_a_worker_lists_actually_exists():
+    for worker in SERVICE_WORKERS:
+        base = os.path.dirname(_repo_file(worker))
+        for entry in _shell_entries(worker):
+            resolved = os.path.normpath(os.path.join(base, entry))
+            if entry.endswith("/"):
+                resolved = os.path.join(resolved, "index.html")
+            assert os.path.exists(resolved), (
+                f"{worker} caches {entry!r}, which is not on disk. Since v3.4 the "
+                f"shell refreshes all-or-nothing, so one unfetchable entry pins "
+                f"every device to its installed copy and no update ever lands.")
+
+
+def test_the_shell_refreshes_all_or_nothing():
+    """The property itself, asserted against the source: a shell file is never
+    written back on its own. Restoring the per-file `cache.put` would bring
+    back the blank screen without failing anything else."""
+    for worker in SERVICE_WORKERS[:3]:
+        source = open(_repo_file(worker)).read()
+        assert "refreshShell" in source, f"{worker} lost its atomic shell refresh"
+        assert "shellFileChanged" in source, f"{worker} no longer checks whether the shell moved"
+
+
+def test_every_screen_starts_through_the_boot_guard():
+    """Boord.boot turns a failure during startup into a message and an Update
+    button. Called directly, init() throwing paints nothing at all - which is
+    the worst way to tell a picker in an orchard that anything is wrong."""
+    for screen in SCREEN_ENTRY_POINTS:
+        source = open(_repo_file(screen)).read()
+        assert "Boord.boot(init)" in source, f"{screen} does not start through Boord.boot"
+        assert not re.search(r"^init\(\);", source, re.M), (
+            f"{screen} still calls init() directly somewhere - a throw there is a "
+            f"blank screen")
+
+
+def test_the_boot_guard_is_actually_in_the_shared_library():
+    source = open(_repo_file("frontend/shared/api.js")).read()
+    for name in ("boot(init)", "_bootFailed", "_reinstall"):
+        assert name in source, f"shared/api.js is missing {name}"
+
+
+
 def main():
     print("Boord self-test")
     print("=" * 60)
@@ -1003,6 +1085,13 @@ def main():
                test_a_missing_destination_never_raises,
                test_the_offsite_copy_is_byte_identical,
                test_a_destination_inside_the_repo_is_refused):
+        check(fn.__name__, fn)
+
+    section("Frontend app shell")
+    for fn in (test_every_shell_file_a_worker_lists_actually_exists,
+               test_the_shell_refreshes_all_or_nothing,
+               test_every_screen_starts_through_the_boot_guard,
+               test_the_boot_guard_is_actually_in_the_shared_library):
         check(fn.__name__, fn)
 
     section("Admin access")
