@@ -206,7 +206,7 @@ its own.
 
 The whole release in one command, runnable from any directory:
 
-```bash
+```
 ~/Documents/Boord/scripts/ship.sh v2.14
 ```
 
@@ -216,7 +216,7 @@ before pushing the tag - that last pause is where you check the fingerprint.
 
 To do the signing step on its own, or to see exactly what it refuses and
 why, use the helper directly rather than tagging by hand:
-```bash
+```
 scripts/release.sh v2.1
 ```
 It refuses to proceed unless the working tree is clean, the tag looks like
@@ -229,7 +229,7 @@ with the deployed release is worse than no version display at all.
 
 The tag is signed and verified locally, but **not pushed**. Push it
 yourself when you're ready for farms to see it:
-```bash
+```
 git push origin v2.1
 ```
 Never re-point a tag that has already been pushed. Servers compare the tag
@@ -760,7 +760,7 @@ equipment - it just needs the PC left on.
 
 From the `backend/` folder:
 
-```bash
+```
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -768,7 +768,7 @@ pip install -r requirements.txt
 
 Then, to run it:
 
-```bash
+```
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -893,7 +893,7 @@ requires no changes to the app itself:
    `login.tailscale.com/admin/dns` and enable **"HTTPS Certificates"**
    (requires MagicDNS, which is on by default).
 3. On the server, run:
-   ```bash
+   ```
    tailscale serve --bg --https=443 http://localhost:8000
    ```
    (use whichever port the app actually runs on). This runs in the
@@ -901,6 +901,43 @@ requires no changes to the app itself:
    plain-HTTP app - `uvicorn`/`main.py` don't need to change.
 4. Find the exact address to use with `tailscale status` - it looks like
    `https://<server-name>.<tailnet-name>.ts.net/`.
+
+#### If the Boord Owner app is on this machine too
+
+`:443` is one slot per machine, and both apps' instructions tell you to claim
+it - Boord for port 8000, Boord Owner for port 8010. Whichever command was run
+last silently wins, and the other app becomes unreachable over Tailscale
+without anything reporting an error.
+
+**Boord takes 443.** It is the app people use all day, and the Field QR
+scanner only works on an HTTPS origin, so a Field device pointed at the root
+address has to land here. Boord Owner moves to `:8443`:
+
+```
+tailscale serve reset
+tailscale serve --bg --https=443 http://localhost:8000
+tailscale serve --bg --https=8443 http://localhost:8010
+```
+
+The first is Boord, the second Boord Owner. `tailscale serve status` should
+then list both. The Owner app's address gains the port:
+`https://<server-name>.<tailnet-name>.ts.net:8443/`. Same certificate, so
+nothing else changes.
+
+**The symptom of getting this wrong is the giveaway**, because it looks like
+nothing to do with ports: the address loads, but answers
+`{"detail":"Not Found"}` for `/admin/` or `/field/`. That is the *other* app
+replying - a perfectly healthy server saying it has no such page. Check
+`tailscale serve status` before looking anywhere else.
+
+Seen in the field on 2026-09-04: `:443` had been pointing at Boord Owner, so
+Boord's Admin was reachable only on `localhost`, and the Field QR scanner
+could not have been working at all.
+
+One more consequence, once the mapping changes: both apps serve files under
+`/shared/`, so a browser that cached Boord Owner's `/shared/api.js` at that
+address will hand it to Boord afterwards. Clear the site data for the host
+once, on each browser that used the old mapping.
 
 Once this is done, every Field/Pack House device needs the Tailscale app
 installed and connected, and pointed at the new address - see
