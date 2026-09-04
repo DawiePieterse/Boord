@@ -1697,6 +1697,16 @@ Dashboard (Farm/Supplier + date range):
 | Lietsjie Lone / Litchi Wages | One row per worker, with the crates that worker harvested broken out per day - one column per date worked, plus a total - so a whole pay period reads off a single row |
 | Block Harvest Report | Per-block crates/kg/avg-kg-per-crate/avg-kg-per-tree |
 
+**Traceability columns.** The reports that follow a load through the pack
+house - Lot & Receiving, Picking Notes, Harvesting List, In Transit List and
+Pack House Receivables - each carry the Pack House Code (PHC) from Settings as
+their first column. Every report with a Supplier column - those five plus the
+Worker Harvest Report - follows it with that supplier's PUC and GlobalG.A.P.
+Number. All three come from Master Data, so a blank cell means the number has
+not been captured against that supplier (or, for the PHC, in Settings) rather
+than that the load is untraceable. Fill them in before sending a report to a
+buyer or an auditor.
+
 Every generated report is also saved on the server itself, in
 `data\reports\` (same filename as the download, e.g.
 `Daily_Harvest_2026-08-05.xlsx`) - not just wherever the browser that
