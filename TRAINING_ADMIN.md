@@ -11,11 +11,14 @@ no password, and nothing to forget. Open the Admin app and it is simply
 there.
 
 What takes the place of a password is **where you open it from**. The
-Admin screens answer two places only: the office PC the server runs on
-(`http://localhost:8000/`), and any device connected to your Tailscale
-network (the `https://...ts.net/` address). Open it on the farm Wi-Fi
-instead and you get *"The Admin app is only reachable from the server
-itself or over Tailscale"* — reconnect Tailscale, or use the office PC.
+Admin screens answer one thing only: a device connected to your Tailscale
+network, at the `https://...ts.net/` address. Anywhere else — the farm
+Wi-Fi, or even a browser on the office PC the server runs on — gets
+*"The Admin app is only reachable over Tailscale"*.
+
+So the answer is always the same: make sure Tailscale says **Connected**,
+then open the `https://...ts.net/` address. There is no local shortcut and
+no fallback, on purpose.
 
 That restriction is the point rather than an inconvenience: the pickers'
 and receiving tablets are on the farm Wi-Fi, and everything sensitive —

@@ -527,21 +527,25 @@ what's already in place first.
    and the app's dependencies) and finish with the address to browse to
    from other devices. Press Enter to close the window when it says
    "Setup complete!".
-6. **Note where the Admin app opens from.** There is no sign-in and no
-   password. Boord has one admin, so what decides who reaches the Admin
-   screens is which network the request comes from: **this PC, or a
-   device on your Tailscale tailnet**. On this PC, browse to
-   `http://localhost:8000/` and Admin opens straight up. From anywhere
-   else you need Tailscale - see [Connecting via Tailscale
+6. **Set up Tailscale before you try to use Admin.** There is no sign-in
+   and no password. Boord has one admin, so what decides who reaches the
+   Admin screens is which network the request comes from, and the answer
+   is **Tailscale only** - see [Connecting via Tailscale
    HTTPS](#enabling-the-qr-camera-scanner-https-via-tailscale---required-for-field-devices).
 
-   The Field and Pack House screens are unchanged: any phone or tablet on
+   That includes this PC. `http://localhost:8000/admin/` on the server
+   itself is refused like anywhere else; you open the
+   `https://...ts.net/` address whatever machine you are sitting at. The
+   reason is that this laptop is normally reached over AnyDesk, and a
+   loopback exemption is one that every remote desktop session inherits.
+
+   The Field and Pack House screens are unaffected: any phone or tablet on
    the farm Wi-Fi still reaches them at the LAN address the installer
-   printed. Only `/admin/` is restricted, and opening it from the farm
-   Wi-Fi answers *"The Admin app is only reachable from the server itself
-   or over Tailscale"*. That is what keeps worker ID numbers, bank details
-   and the payroll off the devices in the orchard now that there is no
-   password in front of them.
+   printed, and `http://localhost:8000/` on this PC still loads the device
+   setup screen. Only `/admin/` is restricted, and anything else asking
+   for it gets *"The Admin app is only reachable over Tailscale"*. That is
+   what keeps worker ID numbers, bank details and the payroll off the
+   devices in the orchard now that there is no password in front of them.
 
 If the installer fails partway, or you'd rather understand/do each part
 by hand, use the manual steps below instead - they're exactly what the
@@ -741,8 +745,10 @@ Then set Windows to run it automatically on startup:
    lock screen after a power cut, which is worse for unattended restarts
    than what it fixes.
 
-8. Right-click the task → **Run**, and check `http://localhost:8000/admin/`
-   loads on the server PC itself.
+8. Right-click the task → **Run**, and check `http://localhost:8000/`
+   loads on the server PC itself - the device setup screen is enough to
+   prove the server is up. (`/admin/` deliberately will not load here; it
+   answers only on the `https://...ts.net/` address.)
 9. **Then restart the PC and, without touching anything, check the app
    again from another device.** An auto-start that was never tested this
    way is worse than none, because everyone assumes it's covered.
@@ -838,12 +844,13 @@ Tailscale address from anywhere with an internet connection - e.g.
 Wi-Fi reaches it by LAN address. The device setup screen and roles work
 identically.
 
-One thing is **not** identical, and it is the reason to read this chapter
-even if nobody outside the farm needs access: the **Admin app is served
-only to this server's own console and to the tailnet**. A device on the
-farm Wi-Fi gets the Field and Pack House screens and nothing else. So a
-tailnet address is not merely a convenience for working off-site - it is
-the only way to open Admin from anywhere but the server PC itself.
+One thing is **not** identical, and it is the reason this chapter is not
+optional even if nobody outside the farm needs access: the **Admin app is
+served to the tailnet and to nothing else at all**. A device on the farm
+Wi-Fi gets the Field and Pack House screens; the server's own console gets
+the same. So a tailnet address is not a convenience for working off-site -
+it is the only way to open Admin from anywhere, including the machine
+Boord is running on.
 
 **Step 4 - Removing access later.**
 When an external person no longer needs access (e.g. a contractor's
@@ -1489,8 +1496,8 @@ back.
 There is no session to lose, so a dropped connection cannot sign anybody
 out. If the Admin app is open over Tailscale and Tailscale itself drops,
 requests start coming from an address the server does not serve Admin to,
-and it answers *"The Admin app is only reachable from the server itself or
-over Tailscale"* - reconnect Tailscale and reload.
+and it answers *"The Admin app is only reachable over Tailscale"* -
+reconnect Tailscale and reload.
 
 ### KPI cards
 
@@ -1921,9 +1928,10 @@ end wastes the most time:
    instance while you are reading the other, and the two disagree about
    what has been saved. End every `python.exe` task, confirm none remain,
    then start exactly one.
-2. **Try `http://localhost:8000/admin/` on the server PC.** This bypasses
-   the network entirely. If this works but the `.ts.net` address doesn't,
-   the app and its data are fine and the problem is purely Tailscale -
+2. **Try `http://localhost:8000/` on the server PC.** The root address,
+   not `/admin/` - Admin is Tailscale-only and will refuse here by
+   design, so it tells you nothing. If the device setup screen loads, the
+   app and its data are fine and the problem is purely Tailscale -
    continue to step 3. If this *also* fails, go back to step 1.
 3. **Check Tailscale.** Its tray icon should read Connected. If the
    browser shows `ERR_NAME_NOT_RESOLVED` on the `.ts.net` address, the
@@ -1951,14 +1959,20 @@ You tried to split a load (send fewer crates than captured) while offline.
 Splitting needs a connection because the server decides the split; either
 wait for a connection or send the full load instead.
 
-**"The Admin app is only reachable from the server itself or over
-Tailscale"**
-The Admin screens are served to the server's own console and to the
-tailnet, and nothing else - the Field and Pack House screens are what the
-farm Wi-Fi gets. Either open Admin on the server PC at
-`http://localhost:8000/`, or connect Tailscale on the device you are using
-and open the `https://...ts.net/` address instead of the LAN one. There is
-no password involved and nothing to reset; the address is the whole of it.
+**"The Admin app is only reachable over Tailscale"**
+The Admin screens answer the tailnet and nothing else - not the farm
+Wi-Fi, and not the server's own console either. Connect Tailscale on
+whatever device you are using and open the `https://...ts.net/` address.
+There is no password involved and nothing to reset; the address is the
+whole of it.
+
+Note that this means **if Tailscale is down, Admin is unreachable**, with
+no local fallback by design. Recover it by fixing Tailscale on the server
+rather than by looking for another way into the app: check the tray icon
+reads Connected, and that `tailscale serve status` still shows the
+mapping to `http://localhost:8000`. The Field and Pack House screens keep
+running on the farm Wi-Fi throughout, so picking and receiving are never
+blocked by this.
 
 ---
 

@@ -748,9 +748,9 @@ def test_a_destination_inside_the_repo_is_refused():
 # Admin access
 #
 # Boord has no login. What decides who sees Settings, payments, exports and
-# every worker's ID and bank number is the network a request arrives on:
-# loopback (which is where `tailscale serve` delivers) and the tailnet get in,
-# the farm wifi does not (backend/security.py).
+# every worker's ID and bank number is the network a request arrives on: only
+# Tailscale gets in - not the farm wifi, and as of this release not the
+# server's own console either (backend/security.py).
 #
 # That makes these checks load-bearing in a way the old password never was.
 # The Field and Pack House screens are still served to every phone on the farm
@@ -823,16 +823,41 @@ def _guarded_routes():
     return found
 
 
-def _request_from(host):
-    """The smallest thing security.py will read an address off. It only ever
-    touches request.client, so there is no need to stand up a server to ask it
-    what it makes of an address."""
+def _request_from(host, http_host=None):
+    """The smallest thing security.py will read from. It only touches
+    request.client and the Host headers, so there is no need to stand up a
+    server to ask it what it makes of an address."""
     from fastapi import Request  # noqa: E402
 
-    scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
+    headers = []
+    if http_host is not None:
+        headers.append((b"host", http_host.encode()))
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": headers}
     if host is not None:
         scope["client"] = (host, 54321)
     return Request(scope)
+
+
+def _without_dev_loopback():
+    """security.py reads DEV_LOOPBACK_ENV at call time, and run_preview.py sets
+    it - so a developer running this suite after the preview server, in the same
+    shell, would otherwise have every loopback assertion below silently invert."""
+    import os  # noqa: E402
+    from security import DEV_LOOPBACK_ENV  # noqa: E402
+
+    return _EnvUnset(os, DEV_LOOPBACK_ENV)
+
+
+class _EnvUnset:
+    def __init__(self, os_module, name):
+        self.os, self.name = os_module, name
+
+    def __enter__(self):
+        self.old = self.os.environ.pop(self.name, None)
+
+    def __exit__(self, *exc):
+        if self.old is not None:
+            self.os.environ[self.name] = self.old
 
 
 def test_every_admin_only_endpoint_is_still_guarded():
@@ -856,21 +881,81 @@ def test_nothing_new_slipped_behind_the_admin_guard():
 def test_the_farm_wifi_cannot_reach_the_admin_app():
     from security import is_admin_client  # noqa: E402
 
-    for host in ("192.168.68.114", "192.168.68.1", "10.0.0.5", "172.16.4.9",
-                 "41.13.7.22", "2c0f:f8f0::1"):
-        assert not is_admin_client(_request_from(host)), \
-            f"{host} was treated as the admin, and that is the farm wifi"
+    with _without_dev_loopback():
+        for host in ("192.168.68.114", "192.168.68.1", "10.0.0.5", "172.16.4.9",
+                     "41.13.7.22", "2c0f:f8f0::1"):
+            assert not is_admin_client(_request_from(host)), \
+                f"{host} was treated as the admin, and that is the farm wifi"
 
 
-def test_the_console_and_the_tailnet_can():
+def test_a_forged_host_header_is_not_enough():
+    """The .ts.net check is only ever a second signal on top of a loopback
+    peer. A Host header costs nothing to fake, so on its own it must buy
+    nothing - otherwise one curl from a picker's phone reads the payroll."""
     from security import is_admin_client  # noqa: E402
 
-    # 127.0.0.1 is both the server's own console and where `tailscale serve`
-    # delivers; the 100.64/10 and fd7a: addresses are a direct tailnet hit.
-    for host in ("127.0.0.1", "::1",
-                 "100.64.0.1", "100.101.102.103", "fd7a:115c:a1e0::1234"):
-        assert is_admin_client(_request_from(host)), \
-            f"{host} was locked out of the Admin app"
+    with _without_dev_loopback():
+        forged = _request_from("192.168.68.50",
+                               http_host="bekfontein-server.taile32cb0.ts.net")
+        assert not is_admin_client(forged), \
+            "a Host header alone let the farm wifi into the Admin app"
+
+
+def test_the_tailnet_can_reach_it():
+    """Signal 1: uvicorn rewrote request.client from X-Forwarded-For, which it
+    trusts only from loopback, so this is `tailscale serve` or a direct hit on
+    the tailnet IP."""
+    from security import is_admin_client  # noqa: E402
+
+    with _without_dev_loopback():
+        for host in ("100.64.0.1", "100.101.102.103", "fd7a:115c:a1e0::1234"):
+            assert is_admin_client(_request_from(host)), \
+                f"{host} was locked out of the Admin app"
+
+
+def test_loopback_alone_is_not_the_admin_any_more():
+    """The server's own console is refused like anywhere else. A loopback
+    exemption is one that anybody with a remote desktop session to that laptop
+    inherits, and AnyDesk is how this server is normally reached."""
+    from security import is_admin_client  # noqa: E402
+
+    with _without_dev_loopback():
+        for host in ("127.0.0.1", "::1"):
+            for http_host in (None, "localhost:8000", "127.0.0.1:8000"):
+                assert not is_admin_client(_request_from(host, http_host)), \
+                    f"the console got in as {host} with Host {http_host!r}"
+
+
+def test_loopback_carrying_a_tailnet_host_still_gets_in():
+    """Signal 2, and the reason this release cannot lock the farm out: if
+    Tailscale ever stops sending X-Forwarded-For, its traffic arrives as plain
+    loopback and signal 1 stops matching. The Host it asks for is what still
+    tells it apart from somebody sitting at the console."""
+    from security import is_admin_client  # noqa: E402
+
+    with _without_dev_loopback():
+        for http_host in ("bekfontein-server.taile32cb0.ts.net",
+                          "bekfontein-server.taile32cb0.ts.net:443"):
+            assert is_admin_client(_request_from("127.0.0.1", http_host)), \
+                f"tailscale serve would have been refused with Host {http_host!r}"
+
+
+def test_the_dev_escape_hatch_is_opt_in_and_off_by_default():
+    """run_preview.py sets this so a developer's Mac, which has no Tailscale in
+    front of it, can still open Admin. start_server.bat never does. If it ever
+    started defaulting to on, the farm's console would silently be let back
+    in."""
+    import os  # noqa: E402
+    from security import DEV_LOOPBACK_ENV, is_admin_client  # noqa: E402
+
+    with _without_dev_loopback():
+        assert not is_admin_client(_request_from("127.0.0.1", "localhost:8000"))
+        os.environ[DEV_LOOPBACK_ENV] = "1"
+        try:
+            assert is_admin_client(_request_from("127.0.0.1", "localhost:8000")), \
+                "run_preview.py could not open Admin - local development is broken"
+        finally:
+            os.environ.pop(DEV_LOOPBACK_ENV, None)
 
 
 def test_a_request_with_no_peer_is_not_the_admin():
@@ -879,8 +964,9 @@ def test_a_request_with_no_peer_is_not_the_admin():
     front of uvicorn."""
     from security import is_admin_client  # noqa: E402
 
-    assert not is_admin_client(_request_from(None))
-    assert not is_admin_client(_request_from("not-an-ip-address"))
+    with _without_dev_loopback():
+        assert not is_admin_client(_request_from(None))
+        assert not is_admin_client(_request_from("not-an-ip-address"))
 
 
 
@@ -923,7 +1009,11 @@ def main():
     for fn in (test_every_admin_only_endpoint_is_still_guarded,
                test_nothing_new_slipped_behind_the_admin_guard,
                test_the_farm_wifi_cannot_reach_the_admin_app,
-               test_the_console_and_the_tailnet_can,
+               test_a_forged_host_header_is_not_enough,
+               test_the_tailnet_can_reach_it,
+               test_loopback_alone_is_not_the_admin_any_more,
+               test_loopback_carrying_a_tailnet_host_still_gets_in,
+               test_the_dev_escape_hatch_is_opt_in_and_off_by_default,
                test_a_request_with_no_peer_is_not_the_admin):
         check(fn.__name__, fn)
 

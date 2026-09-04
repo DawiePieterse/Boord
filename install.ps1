@@ -382,14 +382,18 @@ cd /d "$BackendDir"
     # request arrives on (backend/security.py), so the thing worth saying here
     # is which address to open rather than what to type into it.
     Write-Host " There is no sign-in. The Admin screens open straight up - but only" -ForegroundColor Yellow
-    Write-Host " on this PC or over Tailscale. Opening /admin/ at the network address" -ForegroundColor Yellow
-    Write-Host " above answers with a refusal instead, which is what keeps worker ID" -ForegroundColor Yellow
-    Write-Host " and bank numbers off the phones in the orchard." -ForegroundColor Yellow
+    Write-Host " over Tailscale, and that includes this PC: /admin/ at the network" -ForegroundColor Yellow
+    Write-Host " address above, and at http://localhost:$Port/ here, both answer with a" -ForegroundColor Yellow
+    Write-Host " refusal. That is what keeps worker ID and bank numbers off the phones" -ForegroundColor Yellow
+    Write-Host " in the orchard, and off any remote desktop session to this laptop." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host " To use Admin from anywhere but this PC, set up Tailscale and open the"
+    Write-Host " So set up Tailscale before you try to use Admin, and open the"
     Write-Host " https://...ts.net/ address it gives you. MANUAL.md chapter 2,"
     Write-Host " 'Connecting via Tailscale HTTPS', has the steps - the Field app's QR"
     Write-Host " scanner already needs that same address, so most farms have it."
+    Write-Host ""
+    Write-Host " Field and Pack House are unaffected - they keep working on the farm"
+    Write-Host " wifi, and http://localhost:$Port/ here still loads the setup screen."
     Write-Host ""
     # An upgrade from a version that still had accounts finds a generated
     # password sitting in data\. It unlocks nothing now, so it goes.
