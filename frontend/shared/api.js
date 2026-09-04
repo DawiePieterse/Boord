@@ -8,7 +8,7 @@ const Boord = {
   // actually up to date - especially useful given the service workers'
   // cache-first strategy (see field/packhouse/admin service-worker.js).
   // Reset to 2.0 on 2026-08-26 for the Boord rename and clean reinstall.
-  VERSION: "3.4",
+  VERSION: "3.5",
 
   getDeviceId() { return localStorage.getItem("boord_device_id"); },
   // Re-pointing a tablet at a different device slot has to drop the picking
