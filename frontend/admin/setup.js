@@ -51,8 +51,6 @@ function wizEscape(value) {
 }
 
 async function showSetupWizard(state) {
-  document.getElementById("loginScreen").classList.add("hidden");
-  document.getElementById("pwChangeScreen").classList.add("hidden");
   document.getElementById("app").classList.add("hidden");
   document.getElementById("setupWizardScreen").classList.remove("hidden");
 
@@ -62,7 +60,7 @@ async function showSetupWizard(state) {
   // after step 1 drops straight into a half-set-up app with the remaining
   // steps unreachable.
   try {
-    await Boord.api("/api/setup/start", { method: "POST", auth: true });
+    await Boord.api("/api/setup/start", { method: "POST" });
   } catch (e) {
     // Not fatal: the wizard still works for as long as this tab stays open.
   }
@@ -176,7 +174,7 @@ async function advanceWizard(skipping) {
   }
 
   if (step.key === "finish") {
-    await Boord.api("/api/setup/complete", { method: "POST", auth: true });
+    await Boord.api("/api/setup/complete", { method: "POST" });
     document.getElementById("setupWizardScreen").classList.add("hidden");
     await showApp();
     return;
@@ -191,7 +189,7 @@ async function advanceWizard(skipping) {
 async function patchSystemSettings(changes) {
   const current = (await Boord.api("/api/system-settings")) || {};
   const merged = { ...current, ...changes };
-  await Boord.api("/api/system-settings", { method: "PUT", auth: true, body: merged });
+  await Boord.api("/api/system-settings", { method: "PUT", body: merged });
   return merged;
 }
 
@@ -219,7 +217,7 @@ async function saveWizardStep(key) {
     const ggn = value("wizOwnGlobalGap");
     if (own && (own.name !== ownName || own.puc !== puc || own.global_gap_number !== ggn)) {
       await Boord.api("/api/suppliers", {
-        method: "POST", auth: true,
+        method: "POST",
         body: { ...own, name: ownName, puc, global_gap_number: ggn },
       });
     }
@@ -243,7 +241,7 @@ async function saveWizardStep(key) {
     const rate = parseFloat(value("wizRatePerKg"));
     if (isNaN(rate) || rate <= 0) throw "Enter the rate you pay per kilogram";
     await Boord.api("/api/rate-settings", {
-      method: "POST", auth: true,
+      method: "POST",
       body: {
         effective_date: Boord.localDateStr(),
         rate_type: "per_kg",
@@ -269,7 +267,7 @@ async function saveWizardStep(key) {
       const station = row.querySelector("input").value.trim();
       const device = JSON.parse(row.dataset.device);
       if (station === device.station) continue;  // untouched - no pointless write
-      await Boord.api("/api/devices", { method: "POST", auth: true, body: { ...device, station } });
+      await Boord.api("/api/devices", { method: "POST", body: { ...device, station } });
     }
     return;
   }
@@ -290,7 +288,7 @@ async function wizImport(event, url, resultId, noun) {
   form.append("file", file);
   try {
     const result = await Boord.api(url, {
-      method: "POST", body: form, auth: true, isForm: true, timeoutMs: Boord.UPLOAD_TIMEOUT_MS,
+      method: "POST", body: form, isForm: true, timeoutMs: Boord.UPLOAD_TIMEOUT_MS,
     });
     const seasons = result.seasons && result.seasons.length
       ? ` &middot; seasons ${result.seasons[0]}-${result.seasons[result.seasons.length - 1]}` : "";
@@ -314,7 +312,7 @@ async function renderWizardDevices() {
   const list = document.getElementById("wizDevicesList");
   let devices;
   try {
-    devices = await Boord.api("/api/devices", { auth: true });
+    devices = await Boord.api("/api/devices");
   } catch (e) {
     list.innerHTML = `<div class="text-red-600">${wizEscape(wizFailure(e, "Could not load the device list"))}</div>`;
     return;
@@ -341,7 +339,7 @@ async function renderWizardFinish() {
   // with a silent gap would reproduce that exactly.
   let state;
   try {
-    state = await Boord.api("/api/setup/state", { auth: true });
+    state = await Boord.api("/api/setup/state");
   } catch (e) {
     return;
   }

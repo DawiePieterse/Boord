@@ -1,122 +1,91 @@
-import os
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+"""Who is allowed into the Admin app.
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
-from sqlmodel import Session, select
+There is one farm admin - the person who runs the pack house - so there is no
+account system any more. What used to be a username, a password and a 30-day
+token is now the network path a request arrived on: the Admin app answers the
+server's own console and the tailnet, and nothing else.
 
-from db import DATA_DIR, engine, pwd_context
-from models import AdminUser
+That substitution is only honest because of how the farm is actually wired.
+MANUAL.md has the server published with
 
-def _load_or_create_secret() -> str:
-    """The JWT signing key, stable across restarts.
+    tailscale serve --bg --https=443 http://localhost:8000
 
-    BOORD_SECRET_KEY wins if it's set. Otherwise the key is generated once and
-    kept in data/.secret_key rather than regenerated per process: a fresh
-    random key on every start invalidated every token ever issued, so the
-    scheduled task that launches this at boot - and every update_server.bat
-    restart - silently signed all admins out, despite TOKEN_EXPIRE_DAYS
-    promising a 30-day session. Never shipped in git (data/ is ignored) and
-    excluded from backups, so it is still not a hardcoded shared secret.
-    """
-    env = os.environ.get("BOORD_SECRET_KEY")
-    if env:
-        return env
-    key_path = os.path.join(DATA_DIR, ".secret_key")
-    try:
-        with open(key_path) as f:
-            existing = f.read().strip()
-        if existing:
-            return existing
-    except FileNotFoundError:
-        pass
-    key = os.urandom(32).hex()
-    try:
-        # 0600 where the OS honours it; on Windows the data dir is already
-        # restricted to the service account.
-        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(key)
-    except OSError as e:
-        # An unwritable data dir must not stop the server booting - fall back
-        # to the old per-process behaviour, just noisily.
-        print(f"[security] could not persist {key_path} ({e!r}) - admin sessions "
-              f"will not survive a restart", flush=True)
-    return key
+so every Tailscale visitor comes through a proxy running ON the server and
+reaches uvicorn from loopback, while a phone on the farm wifi hitting
+http://192.168.68.114:8000 directly arrives as 192.168.x.x. The two paths are
+distinguishable at the socket, which is the whole basis of this module.
 
+The Field and Pack House screens are deliberately NOT behind this. They are
+phones and tablets in an orchard and on a receiving bay, they have never had
+credentials, and uvicorn still binds 0.0.0.0 for them - see install.ps1.
+Removing the login without this file would have handed those same devices
+Settings, payments, exports and every worker's ID number and bank details.
+"""
+import ipaddress
+from typing import Optional, Union
 
-SECRET_KEY = _load_or_create_secret()
-ALGORITHM = "HS256"
-TOKEN_EXPIRE_DAYS = 30
+from fastapi import HTTPException, Request, status
 
-bearer_scheme = HTTPBearer(auto_error=False)
+_IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 
+# Tailscale's own address space. Needed for two paths that both end up here
+# with a tailnet address rather than a loopback one:
+#
+#  - a farm that reaches the server by its tailnet IP (`tailscale ip -4`,
+#    MANUAL.md step 2) instead of through `tailscale serve`;
+#  - `tailscale serve` itself, because uvicorn honours X-Forwarded-For from
+#    127.0.0.1 by default and so rewrites request.client to the visitor's
+#    tailnet IP. Dropping these ranges would lock the admin out of the very
+#    address the manual tells her to use.
+#
+# A LAN machine cannot borrow one of these addresses: the server routes
+# replies to them out of the Tailscale interface, so a 192.168.x.x host
+# claiming a 100.64.x.x source never completes the TCP handshake. And a
+# forged X-Forwarded-For from the LAN is ignored, because uvicorn only reads
+# that header when the immediate peer is itself loopback.
+_TAILNET_RANGES = (
+    ipaddress.ip_network("100.64.0.0/10"),        # CGNAT range - Tailscale IPv4
+    ipaddress.ip_network("fd7a:115c:a1e0::/48"),  # Tailscale IPv6
+)
 
-def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
-
-
-def create_access_token(username: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(days=TOKEN_EXPIRE_DAYS)
-    return jwt.encode({"sub": username, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+# What the server says when the Admin app is reached from the farm wifi. It
+# names the fix, because the person reading it is the one admin and the answer
+# is always the same: open the .ts.net address instead.
+ADMIN_ONLY_MESSAGE = (
+    "The Admin app is only reachable from the server itself or over Tailscale - "
+    "open the secure https://...ts.net/ address instead of the farm wifi one"
+)
 
 
-def _admin_for_credentials(credentials: Optional[HTTPAuthorizationCredentials]) -> Optional[AdminUser]:
-    """The AdminUser a bearer token identifies, or None if there is no token
-    or it doesn't check out. Never raises - callers decide what a miss means."""
-    if credentials is None:
+def _peer_address(request: Request) -> Optional[_IPAddress]:
+    """The address this request came from, or None if there isn't a usable
+    one. A missing or unparseable client counts as untrusted rather than as
+    an error: TestClient and ASGI transports that do not set a peer would
+    otherwise open the Admin app to everyone."""
+    client = request.client
+    if client is None or not client.host:
         return None
     try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-    except JWTError:
+        return ipaddress.ip_address(client.host)
+    except ValueError:
         return None
-    with Session(engine) as session:
-        return session.exec(select(AdminUser).where(AdminUser.username == username)).first()
 
 
-# What the server answers with while an admin still owes a password change.
-# The admin app matches on the 403 plus this text to send them to the
-# "set your password" screen rather than to the sign-in screen.
-PASSWORD_CHANGE_REQUIRED = "Set a new admin password before continuing"
+def is_admin_client(request: Request) -> bool:
+    """True when this request may see admin data. Usable as a dependency in
+    its own right for endpoints that serve everybody but serve the admin
+    more - see master_data.list_workers."""
+    address = _peer_address(request)
+    if address is None:
+        return False
+    if address.is_loopback:
+        return True
+    return any(address in network for network in _TAILNET_RANGES)
 
 
-def get_admin_pending_password_change(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
-) -> AdminUser:
-    """The signed-in admin, even if they have not yet replaced the password
-    generated at install. ONLY /api/auth/change-password may depend on this -
-    it is the one thing such an account is allowed to do. Everything else
-    takes get_current_admin, which turns them away."""
-    user = _admin_for_credentials(credentials)
-    if not user:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
-    return user
-
-
-def get_current_admin(credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme)) -> AdminUser:
-    user = get_admin_pending_password_change(credentials)
-    if user.must_change_password:
-        # Enforced here rather than in the browser: a warning on a login
-        # screen is a suggestion, and the whole point of generating a
-        # password per install is that nothing works until it is replaced.
-        raise HTTPException(status.HTTP_403_FORBIDDEN, PASSWORD_CHANGE_REQUIRED)
-    return user
-
-
-def get_optional_admin(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
-) -> Optional[AdminUser]:
-    """For endpoints that must stay reachable without a login but should hand
-    back more once an admin IS signed in - see master_data.list_workers, which
-    the unauthenticated Field app and badge printer both need, but which must
-    not serve ID/bank numbers to them."""
-    user = _admin_for_credentials(credentials)
-    # An account still on its generated password counts as not signed in for
-    # this purpose. It would otherwise be the one route by which such a token
-    # could pull out every worker's ID number and bank details.
-    if user is not None and user.must_change_password:
-        return None
-    return user
+def require_admin_client(request: Request) -> None:
+    """Admin-only endpoints depend on this. 403 rather than 401: there are no
+    credentials to go and fetch, so "try again with a token" would be a lie -
+    this request came in on the wrong network and always will."""
+    if not is_admin_client(request):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, ADMIN_ONLY_MESSAGE)

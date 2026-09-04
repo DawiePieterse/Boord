@@ -527,13 +527,21 @@ what's already in place first.
    and the app's dependencies) and finish with the address to browse to
    from other devices. Press Enter to close the window when it says
    "Setup complete!".
-6. **Write down the admin password it prints.** There is no default
-   password: the server generates a random one for this install and the
-   installer prints it under "Setup complete!", next to the address. Log
-   in with username `admin` and that password - Boord then asks you to
-   replace it before it will open, and no Admin screen works until you
-   do. (If you miss it, it is also in `data\initial_admin_password.txt`
-   until you change the password, at which point Boord deletes it.)
+6. **Note where the Admin app opens from.** There is no sign-in and no
+   password. Boord has one admin, so what decides who reaches the Admin
+   screens is which network the request comes from: **this PC, or a
+   device on your Tailscale tailnet**. On this PC, browse to
+   `http://localhost:8000/` and Admin opens straight up. From anywhere
+   else you need Tailscale - see [Connecting via Tailscale
+   HTTPS](#enabling-the-qr-camera-scanner-https-via-tailscale---required-for-field-devices).
+
+   The Field and Pack House screens are unchanged: any phone or tablet on
+   the farm Wi-Fi still reaches them at the LAN address the installer
+   printed. Only `/admin/` is restricted, and opening it from the farm
+   Wi-Fi answers *"The Admin app is only reachable from the server itself
+   or over Tailscale"*. That is what keeps worker ID numbers, bank details
+   and the payroll off the devices in the orchard now that there is no
+   password in front of them.
 
 If the installer fails partway, or you'd rather understand/do each part
 by hand, use the manual steps below instead - they're exactly what the
@@ -827,9 +835,15 @@ of the tailnet).
 Once accepted, the external device can reach this one server at its
 Tailscale address from anywhere with an internet connection - e.g.
 `http://100.x.x.x:8000/` - exactly the same way a device on the farm's own
-Wi-Fi reaches it by LAN address. Everything else (the device setup screen,
-roles, admin login) works identically; Tailscale only changes how the
-device reaches the server, not what it can do once it's there.
+Wi-Fi reaches it by LAN address. The device setup screen and roles work
+identically.
+
+One thing is **not** identical, and it is the reason to read this chapter
+even if nobody outside the farm needs access: the **Admin app is served
+only to this server's own console and to the tailnet**. A device on the
+farm Wi-Fi gets the Field and Pack House screens and nothing else. So a
+tailnet address is not merely a convenience for working off-site - it is
+the only way to open Admin from anywhere but the server PC itself.
 
 **Step 4 - Removing access later.**
 When an external person no longer needs access (e.g. a contractor's
@@ -986,14 +1000,10 @@ database and seeds a clean starting baseline:
   devices
 - One supplier row representing the pack house's own fruit ("Own fruit") -
   rename it under [Master Data](#8-admin---master-data)
-- An admin login: **username `admin`**, with a **random password generated
-  for this install** - printed by the installer, and kept in
-  `data\initial_admin_password.txt` until it is replaced. There is no
-  shared default password; the first sign-in forces you to set your own,
-  and every Admin screen refuses the account until you have. If the
-  password is lost before that first sign-in, delete
-  `data\initial_admin_password.txt` **and** `data\boord.db` on a server
-  that holds nothing yet - a new empty database generates a new password.
+**No admin account, because there are none.** Boord has one admin and no
+sign-in. Nothing is seeded, there is no password to write down or lose, and
+nothing to reset. Access is decided by the network a request arrives on -
+see step 6 of [the installer](#2-initial-server-setup).
 
 **No wage rate.** Nothing is seeded, and **Calculate** under
 [Payments](#9-admin---payments) refuses with "No wage rate has been set"
@@ -1018,9 +1028,9 @@ it is safe to correct a mistake and re-import.
 
 ### The setup wizard
 
-You do not have to hunt for any of the above. The first time you sign in to
-the Admin app on a new install — straight after choosing your own password —
-Boord shows an eight-step setup wizard instead of the usual tabs:
+You do not have to hunt for any of the above. The first time you open the
+Admin app on a new install, Boord shows an eight-step setup wizard instead
+of the usual tabs:
 
 1. **Whose pack house is this** — pack house name, location description,
    Pack House Code (PHC), how your own fruit is labelled as a supplier
@@ -1476,9 +1486,11 @@ screen, rather than the figures resetting to zero and reading as a real
 day of no harvest. Numbers refresh by themselves once the connection is
 back.
 
-A dropped connection does **not** sign the admin out - only the server
-actually rejecting the session does that, in which case the sign-in
-screen returns with *"Session expired - sign in again"*.
+There is no session to lose, so a dropped connection cannot sign anybody
+out. If the Admin app is open over Tailscale and Tailscale itself drops,
+requests start coming from an address the server does not serve Admin to,
+and it answers *"The Admin app is only reachable from the server itself or
+over Tailscale"* - reconnect Tailscale and reload.
 
 ### KPI cards
 
@@ -1799,12 +1811,6 @@ enables automatic weather capture on every dispatched load.
 
 The per-kg wage rate used by [Payments](#9-admin---payments).
 
-### Change admin password
-
-Change the admin login password - **do this immediately after first setup**
-([chapter 2](#2-initial-server-setup)).
-
-
 ### Header weather
 
 The admin screen's header shows a live current-weather readout (temperature,
@@ -1945,12 +1951,14 @@ You tried to split a load (send fewer crates than captured) while offline.
 Splitting needs a connection because the server decides the split; either
 wait for a connection or send the full load instead.
 
-**Forgotten admin password**
-There's currently no self-service "forgot password" flow in the app - a
-new password can only be set from inside Settings while already logged in.
-If the admin password is lost entirely, restoring access requires direct
-access to the server's database rather than anything available from the
-app's screens.
+**"The Admin app is only reachable from the server itself or over
+Tailscale"**
+The Admin screens are served to the server's own console and to the
+tailnet, and nothing else - the Field and Pack House screens are what the
+farm Wi-Fi gets. Either open Admin on the server PC at
+`http://localhost:8000/`, or connect Tailscale on the device you are using
+and open the `https://...ts.net/` address instead of the LAN one. There is
+no password involved and nothing to reset; the address is the whole of it.
 
 ---
 
@@ -2092,11 +2100,3 @@ keys below match `backend/models.py` exactly.
 | `current_harvest_year` | number | `2026` | Derived label for the current season - the year it starts in. Kept in sync from the season start date. |
 | `green_to_yellow_minutes` / `yellow_to_red_minutes` | number | `90` / `150` | The urgency color thresholds referenced throughout chapters 1, 4, 6, 7. |
 | `gps_lat` / `gps_lon` | decimal (optional) | `-25.572747` / `31.606722` | Setting both enables automatic weather capture on dispatch. |
-
-### AdminUser
-
-| Field | Type | Example | Notes / Limitations |
-|---|---|---|---|
-| `username` | text | `"admin"` | |
-| `password_hash` | text | (hashed) | Never shown or exported anywhere - only a hash is stored. |
-| `must_change_password` | yes/no | `no` | `yes` while the account still holds the password generated at install. Every admin endpoint refuses the account until it is replaced; only the password change itself is allowed through. |

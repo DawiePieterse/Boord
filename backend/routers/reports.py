@@ -15,7 +15,7 @@ from models import Block, Device, HarvestRecord, Lot, \
 from routers.dashboard import dashboard_summary
 from routers.lots import list_in_transit, list_pending, list_received
 from routers.payments import _worker_ids_for_supplier
-from security import get_current_admin
+from security import require_admin_client
 from timeutil import day_bounds, local_str, to_local
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -46,7 +46,7 @@ def _mean(values: list, places: int):
 
 @router.get("/daily-harvest")
 def daily_harvest_report(day: date = Query(default_factory=date.today), supplier_id: Optional[int] = None,
-                          session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                          session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     start, end = day_bounds(day)
     query = select(HarvestRecord).where(HarvestRecord.timestamp >= start, HarvestRecord.timestamp <= end)
     worker_ids = _worker_ids_for_supplier(session, supplier_id)
@@ -92,7 +92,7 @@ def daily_harvest_report(day: date = Query(default_factory=date.today), supplier
 
 @router.get("/harvest-data")
 def harvest_data_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                         session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                         session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     """Daaglikse Oesdata / Daily Harvest Data: the block x date pivot behind
     the paper "Daaglikse Oesdata" log - one column per block, one row per
     day, matching how the paper form and the season workbook both lay it
@@ -172,7 +172,7 @@ def harvest_data_report(period_start: date, period_end: date, supplier_id: Optio
 
 @router.get("/lot-receiving")
 def lot_receiving_report(date_from: date, date_to: date, supplier_id: Optional[int] = None,
-                          session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                          session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     start, end = day_bounds(date_from, date_to)
     query = select(Lot).where(Lot.timestamp >= start, Lot.timestamp <= end)
     if supplier_id is not None:
@@ -206,7 +206,7 @@ def lot_receiving_report(date_from: date, date_to: date, supplier_id: Optional[i
 
 @router.get("/picking-notes")
 def picking_notes_report(date_from: date, date_to: date, supplier_id: Optional[int] = None,
-                          session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                          session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     start, end = day_bounds(date_from, date_to)
     query = select(Lot).where(Lot.timestamp >= start, Lot.timestamp <= end)
     if supplier_id is not None:
@@ -253,7 +253,7 @@ def picking_notes_report(date_from: date, date_to: date, supplier_id: Optional[i
 
 @router.get("/team-picking-list")
 def team_picking_list_report(date_from: date, date_to: date, supplier_id: Optional[int] = None,
-                              session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                              session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     """Span Pluklys / Team Picking List: one row per team per day, with the
     day's blocks (kg + deductions) and dispatched lots (crates, time, slip
     number) laid out as repeating column groups - matching the fields on the
@@ -343,7 +343,7 @@ def _lot_rows(lots_data: list) -> list:
 
 @router.get("/harvesting-list")
 def harvesting_list_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                            session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                            session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     lots_data = list_pending(supplier_id=supplier_id, period_start=period_start, period_end=period_end,
                               session=session)
     headers = ["Slip Number", "Supplier", "Team", "Driver", "Crates", "Kg", "Age (min)"]
@@ -353,7 +353,7 @@ def harvesting_list_report(period_start: date, period_end: date, supplier_id: Op
 
 @router.get("/in-transit-list")
 def in_transit_list_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                            session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                            session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     lots_data = list_in_transit(supplier_id=supplier_id, period_start=period_start, period_end=period_end,
                                  session=session)
     headers = ["Slip Number", "Supplier", "Team", "Driver", "Crates", "Kg", "Age (min)"]
@@ -363,7 +363,7 @@ def in_transit_list_report(period_start: date, period_end: date, supplier_id: Op
 
 @router.get("/received-list")
 def received_list_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                          session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                          session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     """Matches the packhouse's paper "Packhouse Receipt Lists" slip: date and
     time split out, plus the receiving block and rejected (waste) amount."""
     lots_data = list_received(period_start=period_start, period_end=period_end, supplier_id=supplier_id,
@@ -396,7 +396,7 @@ def received_list_report(period_start: date, period_end: date, supplier_id: Opti
 
 @router.get("/worker-harvest")
 def worker_harvest_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                           session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                           session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     summary = dashboard_summary(period_start, period_end, supplier_id, session, admin)
     headers = ["Emp Nr", "Name", "Supplier", "Crates", "Kg", "Amount Due", "Avg Kg/Crate"]
     rows = [[
@@ -408,7 +408,7 @@ def worker_harvest_report(period_start: date, period_end: date, supplier_id: Opt
 
 @router.get("/litchi-wages")
 def litchi_wages_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                         session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                         session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     """Lietsjie Lone / Litchi Wages: one row per worker, with the crates that
     worker harvested broken out per day - one column per day worked, so the
     wage clerk can read a whole pay period off a single row."""
@@ -453,7 +453,7 @@ def litchi_wages_report(period_start: date, period_end: date, supplier_id: Optio
 
 @router.get("/block-harvest")
 def block_harvest_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                          session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                          session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     summary = dashboard_summary(period_start, period_end, supplier_id, session, admin)
     headers = ["Block", "Crates", "Kg", "Avg Kg/Crate", "Avg Kg/Tree", "Avg Kg/Ha"]
     rows = [[

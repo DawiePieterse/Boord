@@ -21,7 +21,7 @@ from sqlmodel import Session, select
 from db import get_session
 from models import (Block, Device, HarvestRecord, RateSetting, SetupState,
                     Supplier, SystemSetting, Worker)
-from security import get_current_admin
+from security import require_admin_client
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 
@@ -133,12 +133,12 @@ def build_setup_state(session: Session) -> dict:
 
 
 @router.get("/state")
-def setup_state(session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def setup_state(session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     return build_setup_state(session)
 
 
 @router.post("/start")
-def start_setup(session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def start_setup(session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     """Records that the wizard has been opened, so it survives a reload.
 
     Called by the wizard itself as it paints, not by anything a farm can
@@ -154,7 +154,7 @@ def start_setup(session: Session = Depends(get_session), admin=Depends(get_curre
 
 
 @router.post("/complete")
-def complete_setup(session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def complete_setup(session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     """Marks the wizard finished. Idempotent, and deliberately says nothing
     about whether every step was actually filled in - skipping the optional
     ones is a legitimate way to finish, and the steps that genuinely cannot

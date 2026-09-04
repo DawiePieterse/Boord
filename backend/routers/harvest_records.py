@@ -8,7 +8,7 @@ from sqlmodel import Session, SQLModel, select
 from db import get_session
 from models import HarvestRecord, Lot, Payment, Worker
 from routers.lots import recompute_lot_totals
-from security import get_current_admin
+from security import require_admin_client
 from timeutil import to_local
 
 router = APIRouter(prefix="/api/harvest-records", tags=["harvest-records"])
@@ -20,7 +20,7 @@ DEMO_UUID_PREFIX = "demo-"
 
 
 @router.get("/counts")
-def harvest_record_counts(session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def harvest_record_counts(session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     """How many crates this database holds, and how many of those the demo
     seeder wrote.
 
@@ -80,7 +80,7 @@ def _wages_affected(session: Session, record: HarvestRecord, worker_ids: set) ->
 
 @router.patch("/{record_uuid}")
 def edit_harvest_record(record_uuid: str, body: HarvestRecordEdit,
-                         session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                         session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     """Admin correction of a field-captured crate - a wrong worker picked on
     the keypad or a fat-fingered weight is otherwise a wrong wage with no
     remedy short of editing the database by hand.
@@ -116,7 +116,11 @@ def edit_harvest_record(record_uuid: str, body: HarvestRecordEdit,
     record.weight_kg = new_weight_kg
     record.deduction_kg = new_deduction_kg
     record.edited_at = datetime.now(timezone.utc)
-    record.edited_by = admin.username
+    # No accounts any more, so there is no username to record - and with one
+    # farm admin there never was more than one possible answer. "admin" is
+    # what the Admin app already falls back to for rows that predate this
+    # field, so the two read identically in the crate list.
+    record.edited_by = "admin"
     session.add(record)
     session.commit()
     session.refresh(record)

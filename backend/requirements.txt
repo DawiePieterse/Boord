@@ -5,9 +5,8 @@ sqlmodel==0.0.22
 # here, and 1.14.1 runs on Python 3.9, which is the minimum install.ps1
 # accepts on a farm that already had a Python.
 alembic==1.14.1
+# Not for sign-in forms any more - there is no sign-in. FastAPI needs this
+# to parse the multipart uploads behind the CSV/XLSX master-data imports.
 python-multipart==0.0.20
 openpyxl==3.1.5
 pandas==2.2.3
-passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
-python-jose[cryptography]==3.3.0

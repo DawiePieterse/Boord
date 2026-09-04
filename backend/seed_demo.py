@@ -26,73 +26,34 @@ into the same worker list that the payroll run reads. Hence:
     this script would overwrite is either absent or something it put there
     itself.
 
-The admin password comes from BOORD_ADMIN_PASSWORD, or - when seeding a
-fresh install on this machine - from data/initial_admin_password.txt.
+There is nothing to sign in as: the Admin endpoints this posts to are open
+to loopback and the tailnet (backend/security.py), and the default base URL
+is the local dev server, so running this from anywhere else now fails with a
+403 rather than with a bad password.
 """
 import json
 import os
 import random
 import sys
-import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8811"
-ADMIN_USER = os.environ.get("BOORD_ADMIN_USER", "admin")
 
 random.seed(42)  # deterministic demo data on re-runs
 
 
-def api(path, body=None, method=None, token=None, form=False):
+def api(path, body=None, method=None):
     url = f"{BASE}{path}"
     headers = {}
     data = None
     if body is not None:
-        if form:
-            data = body.encode()
-            headers["Content-Type"] = "application/x-www-form-urlencoded"
-        else:
-            data = json.dumps(body).encode()
-            headers["Content-Type"] = "application/json"
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers,
                                   method=method or ("POST" if body is not None else "GET"))
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read() or "null")
-
-
-def admin_password():
-    """BOORD_ADMIN_PASSWORD, or the one the install generated for itself.
-
-    There is no shared default password any more - db.seed_defaults() makes a
-    random one per install and leaves it in data/initial_admin_password.txt
-    until it is replaced, so a freshly created local database needs nothing
-    passed in."""
-    from_env = os.environ.get("BOORD_ADMIN_PASSWORD")
-    if from_env:
-        return from_env
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data",
-                         "initial_admin_password.txt")
-    try:
-        with open(path) as f:
-            return f.read().strip()
-    except OSError:
-        sys.exit("No admin password to sign in with. Either run this on the same machine\n"
-                 "as a fresh install (where data/initial_admin_password.txt still holds the\n"
-                 "generated one), or set BOORD_ADMIN_PASSWORD=<password>.")
-
-
-def login():
-    # urlencode, not an f-string: a generated password is not guaranteed to
-    # survive being pasted into a form body unescaped.
-    body = urllib.parse.urlencode({"username": ADMIN_USER, "password": admin_password()})
-    result = api("/api/auth/login", body, form=True)
-    if result.get("must_change_password"):
-        sys.exit("This server is still on the admin password it generated at install, and\n"
-                 "refuses every other endpoint until that is replaced. Open the Admin app,\n"
-                 "set a password, then re-run with BOORD_ADMIN_PASSWORD=<that password>.")
-    return result["access_token"]
 
 
 WORKERS = [
@@ -122,7 +83,7 @@ DEMO_BLOCK_IDS = set(BLOCK_DETAILS)
 DEMO_GPS = (-25.45, 30.95)  # White River - what this script sets below
 
 
-def refuse_unless_safe(token):
+def refuse_unless_safe():
     """Stop before writing anything if this database holds a real farm's data.
 
     Each check is scoped to what this script would actually overwrite, and
@@ -133,12 +94,12 @@ def refuse_unless_safe(token):
     among real ones."""
     reasons = []
 
-    counts = api("/api/harvest-records/counts", token=token)
+    counts = api("/api/harvest-records/counts")
     foreign_crates = counts["total"] - counts["demo"]
     if foreign_crates:
         reasons.append(f"{foreign_crates} harvest record(s) this script did not create")
 
-    other_workers = sorted({w["id"] for w in api("/api/workers", token=token)} - DEMO_WORKER_IDS)
+    other_workers = sorted({w["id"] for w in api("/api/workers")} - DEMO_WORKER_IDS)
     if other_workers:
         reasons.append(f"{len(other_workers)} worker(s) that are not the demo eight "
                        f"({', '.join(other_workers[:3])}...)")
@@ -174,21 +135,19 @@ def main():
                  f"target is a throwaway database ({BASE}) with:\n\n"
                  "    ALLOW_DEMO_SEED=1 python3 seed_demo.py [base_url]")
 
-    token = login()
-    refuse_unless_safe(token)
+    refuse_unless_safe()
     print(f"Seeding demo data into {BASE}")
 
     # --- Farm GPS location (White River, Mpumalanga - litchi country) ---
     settings = api("/api/system-settings")
     settings["gps_lat"] = -25.45
     settings["gps_lon"] = 30.95
-    api("/api/system-settings", settings, method="PUT", token=token)
+    api("/api/system-settings", settings, method="PUT")
     print("  farm location: GPS set")
 
     # --- Teams (induna names) ------------------------------------------
     for team_id, induna in INDUNAS.items():
-        api("/api/teams", {"id": team_id, "name": f"Span {team_id}", "induna": induna, "active": True},
-            token=token)
+        api("/api/teams", {"id": team_id, "name": f"Span {team_id}", "induna": induna, "active": True})
     print(f"  teams: {len(INDUNAS)} updated with indunas")
 
     # --- External suppliers (seeded before Workers so their ids are ------
@@ -205,7 +164,7 @@ def main():
                 "contact_email": "", "is_own_farm": False,
                 "packing_rate_per_kg": per_kg, "packing_rate_per_crate": per_crate,
                 "active": True,
-            }, token=token)
+            })
     suppliers = api("/api/suppliers")
     jansen = next(s for s in suppliers if s["name"] == "Jansen Boerdery")
 
@@ -222,13 +181,13 @@ def main():
             "whatsapp_number": f"08{random.randint(2, 4)}{random.randint(1000000, 9999999)}",
             "supplier_id": supplier_by_emp.get(emp),
             "active": True,
-        }, token=token)
+        })
     print(f"  workers: {len(WORKERS)} ({len(supplier_by_emp)} tagged to Jansen Boerdery)")
 
     # --- Block details ----------------------------------------------------
     for block_id, (variety, trees, hectares) in BLOCK_DETAILS.items():
         api("/api/blocks", {"id": block_id, "name": f"Block {block_id}", "variety": variety,
-                             "trees": trees, "hectares": hectares, "active": True}, token=token)
+                             "trees": trees, "hectares": hectares, "active": True})
     print(f"  blocks: {len(BLOCK_DETAILS)} updated with variety/trees/hectares")
     suppliers = api("/api/suppliers")
     external = [s for s in suppliers if not s["is_own_farm"]]

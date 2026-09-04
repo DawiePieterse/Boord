@@ -27,9 +27,12 @@ $PythonInstallerUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$
 $Gpg4winUrl = "https://files.gpg4win.org/gpg4win-latest.exe"
 $ReleaseKeyPath = Join-Path $RepoRoot "release-key.asc"
 $FprFile = Join-Path $RepoRoot "data\release_key.fpr"
-# Written by backend/db.py the first time the server builds its database, and
-# deleted by the server the moment the admin sets their own password.
-$InitialPasswordFile = Join-Path $RepoRoot "data\initial_admin_password.txt"
+# Left behind by older installs, back when the server generated an admin
+# password and wrote it here for this script to print. There are no accounts
+# any more, so the file opens nothing - but it is still a password somebody
+# may have reused elsewhere, so an upgrade deletes it rather than leaving it
+# lying in data\ forever.
+$LegacyPasswordFile = Join-Path $RepoRoot "data\initial_admin_password.txt"
 
 function Write-Step($msg) {
     Write-Host ""
@@ -367,29 +370,34 @@ cd /d "$BackendDir"
     Write-Host " Setup complete!" -ForegroundColor Green
     Write-Host "================================================" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host " On this PC:                        http://localhost:$Port/"
+    Write-Host " On this PC (all three screens):     http://localhost:$Port/"
     if ($ip) {
-        Write-Host " From other devices on the network: http://$ip`:$Port/"
+        Write-Host " Field and Pack House devices:      http://$ip`:$Port/"
     } else {
         Write-Warn "Could not detect this PC's network address automatically - run 'ipconfig' and look for 'IPv4 Address'."
     }
     Write-Host ""
-    # No shared default password any more: the server generates one per
-    # install and leaves it here for exactly this moment. Printing it is the
-    # whole reason step 10 waits for the server to answer before getting here.
-    if (Test-Path $InitialPasswordFile) {
-        $initialPassword = (Get-Content $InitialPasswordFile -TotalCount 1).Trim()
-        Write-Host " Sign in as:                        admin"
-        Write-Host " With this password:                $initialPassword" -ForegroundColor Yellow
-        Write-Host ""
-        Write-Warn "Write it down now. It was generated for this server alone, and Boord"
-        Write-Warn "will ask you to replace it the first time you sign in - nothing in the"
-        Write-Warn "Admin app opens until you do. Once you have, the copy in"
-        Write-Warn "data\initial_admin_password.txt is deleted automatically."
-    } else {
-        Write-Host " Sign in with the admin password already set on this server."
-    }
+    # There is no password to print any more. Boord has one admin and no
+    # accounts; what decides who gets into the Admin app is which network the
+    # request arrives on (backend/security.py), so the thing worth saying here
+    # is which address to open rather than what to type into it.
+    Write-Host " There is no sign-in. The Admin screens open straight up - but only" -ForegroundColor Yellow
+    Write-Host " on this PC or over Tailscale. Opening /admin/ at the network address" -ForegroundColor Yellow
+    Write-Host " above answers with a refusal instead, which is what keeps worker ID" -ForegroundColor Yellow
+    Write-Host " and bank numbers off the phones in the orchard." -ForegroundColor Yellow
     Write-Host ""
+    Write-Host " To use Admin from anywhere but this PC, set up Tailscale and open the"
+    Write-Host " https://...ts.net/ address it gives you. MANUAL.md chapter 2,"
+    Write-Host " 'Connecting via Tailscale HTTPS', has the steps - the Field app's QR"
+    Write-Host " scanner already needs that same address, so most farms have it."
+    Write-Host ""
+    # An upgrade from a version that still had accounts finds a generated
+    # password sitting in data\. It unlocks nothing now, so it goes.
+    if (Test-Path $LegacyPasswordFile) {
+        Remove-Item $LegacyPasswordFile -Force -ErrorAction SilentlyContinue
+        Write-Ok "Removed the old admin password file - accounts are gone, it opened nothing"
+        Write-Host ""
+    }
     Write-Host " The server will now start automatically every time this PC turns on."
 
     # The one thing this installer cannot do for you. The fingerprint is what

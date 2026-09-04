@@ -46,64 +46,23 @@ function initBanner() {
   setInterval(updateBannerClock, 1000);
 }
 
-// A stored token opens the app immediately and is validated afterwards, so an
-// unreachable server shows the cached app instead of a blank screen for as
-// long as the request takes to give up.
+// Straight into the app. There is no sign-in and nothing to validate first:
+// if this page loaded at all, the server has already decided this request may
+// see admin data, because it refuses to serve /admin/ to anything but its own
+// console and the tailnet (backend/main.py, backend/security.py).
 async function init() {
-  document.getElementById("loginBtn").addEventListener("click", login);
-  document.getElementById("logoutBtn").addEventListener("click", logout);
-  document.getElementById("firstPasswordBtn").addEventListener("click", setFirstPassword);
-
-  if (!Boord.getToken()) { showLogin(); return; }
-  showApp();
-
-  try {
-    await Boord.api("/api/devices", { auth: true });
-  } catch (e) {
-    // Don't sign the admin out over a network blip - only a real rejection
-    // from the server means the stored token is genuinely no good.
-    if (Boord.isNetworkError(e)) { Boord.setOffline(true); return; }
-    sessionExpired(e);
-  }
+  await showApp();
 }
 
-// The server answers 403 with security.PASSWORD_CHANGE_REQUIRED until the
-// admin replaces the password created at install. Matched on the text as
-// well as the status so an unrelated 403 can never strand someone on the
-// "set your password" screen.
-function _passwordChangeRequired(e) {
-  const message = String((e && e.message) || "");
-  return message.startsWith("403") && /new admin password/i.test(message);
-}
 
-function showLogin() {
-  document.getElementById("loginScreen").classList.remove("hidden");
-  document.getElementById("pwChangeScreen").classList.add("hidden");
-  document.getElementById("setupWizardScreen").classList.add("hidden");
-  document.getElementById("app").classList.add("hidden");
-}
-
-function showPasswordSetup() {
-  document.getElementById("loginScreen").classList.add("hidden");
-  document.getElementById("app").classList.add("hidden");
-  document.getElementById("setupWizardScreen").classList.add("hidden");
-  document.getElementById("pwChangeScreen").classList.remove("hidden");
-  document.getElementById("firstPassword").focus();
-}
-
-// What the setup wizard needs to know before the app paints, or null when
-// the question can't be answered right now. Never signs anybody out: an
-// unreachable server is not a rejected token, and a genuinely expired one is
-// already caught by init()'s own validation call.
+// What the setup wizard needs to know before the app paints, or null when the
+// question can't be answered right now - an unreachable server included, which
+// is why a failure here paints the app rather than a stop screen.
 async function fetchSetupState() {
   try {
-    return await Boord.api("/api/setup/state", { auth: true });
+    return await Boord.api("/api/setup/state");
   } catch (e) {
     if (Boord.isNetworkError(e)) { Boord.setOffline(true); return null; }
-    // A token belonging to an admin who still owes a password change is
-    // refused by every endpoint including this one. Send them to that screen
-    // rather than reading the 403 as "no setup needed".
-    if (_passwordChangeRequired(e)) { showPasswordSetup(); return { blocked: true }; }
     return null;
   }
 }
@@ -115,16 +74,12 @@ async function fetchSetupState() {
 let _appBound = false;
 
 async function showApp() {
-  document.getElementById("loginScreen").classList.add("hidden");
-  document.getElementById("pwChangeScreen").classList.add("hidden");
-
   // A database nobody has claimed yet gets the wizard instead of the tabs.
   // Deliberately decided here rather than by the server refusing every
-  // endpoint the way it does for an unchanged install password: that pattern
-  // is right for a credential, where being locked out beats being wide open.
-  // The equivalent bug here would lock a farm out of its own harvest data
-  // over an unset threshold value, and the settings that genuinely cannot be
-  // guessed already refuse at the point of use.
+  // endpoint until setup is done: the failure that pattern invites is locking
+  // a farm out of its own harvest data over an unset threshold value, and the
+  // settings that genuinely cannot be guessed already refuse at the point of
+  // use.
   const setup = await fetchSetupState();
   if (setup && setup.blocked) return;
   if (setup && setup.required) { await showSetupWizard(setup); return; }
@@ -161,69 +116,13 @@ async function showApp() {
   refreshDashboard();
 }
 
-async function login() {
-  const username = document.getElementById("loginUsername").value.trim();
-  const password = document.getElementById("loginPassword").value;
-  const errEl = document.getElementById("loginError");
-  try {
-    const session = await Boord.login(username, password);
-    errEl.classList.add("hidden");
-    // Correct password, but it is the one the installer generated - the
-    // token opens nothing except change-password until it is replaced.
-    if (session.must_change_password) { showPasswordSetup(); return; }
-    await showApp();
-  } catch (e) {
-    errEl.textContent = "Invalid username or password";
-    errEl.classList.remove("hidden");
-  }
-}
-
-function logout() {
-  Boord.clearToken();
-  showLogin();
-}
-
-// First sign-in on a new install: replace the generated password before the
-// app will open. Same endpoint as Settings -> Change admin password; the
-// difference is only that there is no way past this screen.
-async function setFirstPassword() {
-  const password = document.getElementById("firstPassword").value;
-  const repeat = document.getElementById("firstPasswordConfirm").value;
-  const errEl = document.getElementById("firstPasswordError");
-  const fail = (message) => { errEl.textContent = message; errEl.classList.remove("hidden"); };
-
-  if (password.length < 8) { fail("Password must be at least 8 characters"); return; }
-  if (password !== repeat) { fail("The two passwords do not match"); return; }
-  try {
-    await Boord.api("/api/auth/change-password", {
-      method: "POST", auth: true, body: { new_password: password },
-    });
-  } catch (e) {
-    fail(Boord.isNetworkError(e) ? "Cannot reach the server - try again"
-                                  : (_apiErrorDetail(e) || "Could not set the password"));
-    return;
-  }
-  errEl.classList.add("hidden");
-  document.getElementById("firstPassword").value = "";
-  document.getElementById("firstPasswordConfirm").value = "";
-  await showApp();
-}
-
-// The stored token is no longer accepted (expired, or the server was
-// restarted). Drop it and ask for a sign-in rather than leaving the admin
-// looking at a dashboard that silently fails to load.
-//
-// Takes the rejection, because one 403 is not an expired session: a valid
-// token is refused everywhere while the install's generated password stands.
-// Callers ALWAYS pass it - refreshDashboard() fires the moment showApp()
-// paints, so on a reload it reaches Boord.isAuthError before init()'s own
-// check does, and without this it would clear a perfectly good token and
-// strand the admin on the sign-in screen with the only password they have.
-function sessionExpired(e) {
-  if (_passwordChangeRequired(e)) { showPasswordSetup(); return; }
-  Boord.clearToken();
-  showLogin();
-  Boord.toast("Session expired - sign in again");
+// A refusal from an endpoint that normally answers. The middleware blocks the
+// Admin page itself, so reaching this means the tab was opened from an address
+// the server trusted and is no longer being served from one - Tailscale
+// dropping mid-session is the way that actually happens. Show what the server
+// said, which names the fix, rather than a generic "could not load".
+function accessRefused(e) {
+  Boord.toast(_apiErrorDetail(e) || "The server refused this request");
 }
 
 // ---------------------------------------------------------------------
@@ -303,11 +202,11 @@ async function refreshDashboard() {
       Boord.api(`/api/lots/pending?${qs}`),
       Boord.api(`/api/lots/in-transit?${qs}`),
       Boord.api(`/api/lots/received?${qs}`),
-      Boord.api(`/api/dashboard/summary?${qs}`, { auth: true }),
+      Boord.api(`/api/dashboard/summary?${qs}`),
     ]);
   } catch (e) {
     if (Boord.isNetworkError(e)) { Boord.setOffline(true); return; } // keep last data on screen
-    if (Boord.isAuthError(e)) { sessionExpired(e); return; }
+    if (Boord.isAuthError(e)) { accessRefused(e); return; }
     Boord.toast("Could not load the dashboard");
     return;
   }
@@ -444,9 +343,9 @@ function _workerName(workerId) {
 async function openLotCrates(lotId) {
   let data;
   try {
-    data = await Boord.api(`/api/lots/${lotId}`, { auth: true });
+    data = await Boord.api(`/api/lots/${lotId}`);
   } catch (e) {
-    if (Boord.isAuthError(e)) { sessionExpired(e); return; }
+    if (Boord.isAuthError(e)) { accessRefused(e); return; }
     Boord.toast("Could not load this lot's crates - check connection");
     return;
   }
@@ -533,10 +432,10 @@ function editCrate(crate) {
     let result;
     try {
       result = await Boord.api(`/api/harvest-records/${encodeURIComponent(crate.uuid)}`, {
-        method: "PATCH", auth: true, body,
+        method: "PATCH", body,
       });
     } catch (e) {
-      if (Boord.isAuthError(e)) { sessionExpired(e); return; }
+      if (Boord.isAuthError(e)) { accessRefused(e); return; }
       Boord.toast("Could not save: " + _apiErrorDetail(e));
       throw e; // the bindMasterData save handler only closes the modal on
       // success - rethrowing keeps it open so a bad number can be fixed
@@ -693,7 +592,7 @@ async function importFile(event, url, reload) {
   const form = new FormData();
   form.append("file", file);
   try {
-    const result = await Boord.api(url, { method: "POST", body: form, auth: true, isForm: true, timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+    const result = await Boord.api(url, { method: "POST", body: form, isForm: true, timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
     const extra = result.deactivated ? `, deactivated ${result.deactivated}` : "";
     Boord.toast(`Imported ${result.imported} rows${extra}`);
     await reload();
@@ -717,7 +616,7 @@ async function handleAction(action) {
 }
 
 async function exportFile(path, filename) {
-  const blob = await Boord.api(path, { auth: true, timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+  const blob = await Boord.api(path, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
   Boord.downloadBlob(blob, filename);
 }
 
@@ -733,10 +632,11 @@ async function loadAllMasterData() {
 
 // Workers
 async function loadWorkers() {
-  // auth: true so the server returns the full records - the Edit modal needs
-  // id_number/bank/account, which /api/workers only serves to a signed-in
-  // admin (unauthenticated callers get a reduced projection).
-  const workers = await Boord.api("/api/workers", { auth: true });
+  // Full records, because the Edit modal needs id_number/bank/account.
+  // /api/workers hands those back only to the admin - decided from the
+  // address this request arrives on, so there is nothing to ask for here.
+  // A Field tablet calling the same endpoint gets a reduced projection.
+  const workers = await Boord.api("/api/workers");
   window._workersCache = workers;
   renderWorkersTable();
 }
@@ -827,7 +727,7 @@ function editWorker(worker) {
   ], worker || { active: true }, async (values) => {
     const { photo, ...workerValues } = values;
     await Boord.api("/api/workers", {
-      method: "POST", auth: true,
+      method: "POST",
       body: { ...workerValues, supplier_id: workerValues.supplier_id || null, active: !!workerValues.active },
     });
     const fileInput = document.getElementById("editModalFields").querySelector('[data-key="photo"]');
@@ -837,7 +737,7 @@ function editWorker(worker) {
       const form = new FormData();
       form.append("file", file);
       try {
-        await Boord.api(`/api/workers/${encodeURIComponent(workerId)}/photo`, { method: "POST", auth: true, body: form, isForm: true });
+        await Boord.api(`/api/workers/${encodeURIComponent(workerId)}/photo`, { method: "POST", body: form, isForm: true });
       } catch (e) {
         Boord.toast("Worker saved, but photo upload failed - try again");
         await loadWorkers();
@@ -872,7 +772,7 @@ function editTeam(team) {
     { key: "induna", label: "Induna" },
     { key: "active", label: "Active", type: "checkbox" },
   ], { active: true, ...team }, async (values) => {
-    await Boord.api("/api/teams", { method: "POST", auth: true, body: { ...values, active: !!values.active } });
+    await Boord.api("/api/teams", { method: "POST", body: { ...values, active: !!values.active } });
     Boord.toast("Team saved");
     await loadTeams();
   });
@@ -916,7 +816,7 @@ function editBlock(block) {
     { key: "active", label: "Active", type: "checkbox" },
   ], { active: true, ...block }, async (values) => {
     await Boord.api("/api/blocks", {
-      method: "POST", auth: true,
+      method: "POST",
       body: {
         ...values,
         trees: parseInt(values.trees) || 0,
@@ -932,7 +832,7 @@ function editBlock(block) {
 
 // Devices
 async function loadDevices() {
-  const devices = await Boord.api("/api/devices", { auth: true });
+  const devices = await Boord.api("/api/devices");
   document.getElementById("devicesTable").innerHTML = devices.map((d) => `
     <tr class="border-b">
       <td class="p-2">${d.id}</td><td class="p-2">${d.role}</td><td class="p-2">${d.station}</td><td class="p-2">${d.team_id || ""}</td>
@@ -964,7 +864,7 @@ function editDevice(device) {
     { key: "data_capturer", label: "Data Capturer" },
   ], device || { role: "field" }, async (values) => {
     await Boord.api("/api/devices", {
-      method: "POST", auth: true,
+      method: "POST",
       body: { ...values, supplier_id: values.supplier_id ? parseInt(values.supplier_id) : null, active: true },
     });
     Boord.toast("Device saved");
@@ -1009,7 +909,7 @@ function editSupplier(supplier) {
     { key: "active", label: "Active", type: "checkbox" },
   ], supplier || { active: true }, async (values) => {
     await Boord.api("/api/suppliers", {
-      method: "POST", auth: true,
+      method: "POST",
       body: {
         ...values,
         id: supplier ? supplier.id : undefined,
@@ -1050,7 +950,7 @@ async function calculateBilling() {
   const end = document.getElementById("billingEnd").value;
   if (!supplierId) { Boord.toast("Add an external supplier first"); return; }
   try {
-    const data = await Boord.api(`/api/suppliers/${supplierId}/billing?period_start=${start}&period_end=${end}`, { auth: true });
+    const data = await Boord.api(`/api/suppliers/${supplierId}/billing?period_start=${start}&period_end=${end}`);
     const summaryEl = document.getElementById("billingSummary");
     summaryEl.textContent = `${data.lots.length} lot${data.lots.length === 1 ? "" : "s"} - ${data.total_crates} crates - ${data.total_kg.toFixed(1)} kg - Rate: R${data.rate.toFixed(2)} ${data.rate_type === "per_kg" ? "/kg" : "/crate"} - Amount Due: R${data.amount_due.toFixed(2)}`;
     summaryEl.classList.remove("hidden");
@@ -1096,7 +996,7 @@ async function calculatePayments() {
   const supplierId = document.getElementById("paySupplierFilter").value;
   const supplierParam = supplierId ? `&supplier_id=${supplierId}` : "";
   try {
-    const payments = await Boord.api(`/api/payments/calculate?period_start=${start}&period_end=${end}${supplierParam}`, { method: "POST", auth: true });
+    const payments = await Boord.api(`/api/payments/calculate?period_start=${start}&period_end=${end}${supplierParam}`, { method: "POST" });
     renderPayments(payments);
   } catch (e) {
     // A new install has no wage rate and the server refuses to calculate
@@ -1165,7 +1065,7 @@ async function exportPayments() {
   const end = document.getElementById("payEnd").value;
   const supplierId = document.getElementById("paySupplierFilter").value;
   const supplierParam = supplierId ? `&supplier_id=${supplierId}` : "";
-  const blob = await Boord.api(`/api/payments/export?period_start=${start}&period_end=${end}${supplierParam}&fmt=xlsx`, { auth: true });
+  const blob = await Boord.api(`/api/payments/export?period_start=${start}&period_end=${end}${supplierParam}&fmt=xlsx`);
   Boord.downloadBlob(blob, `Wages_${start}_${end}.xlsx`);
 }
 
@@ -1268,13 +1168,12 @@ async function downloadReport(key) {
   const supplierId = document.getElementById("reportsSupplierFilter").value;
   if (!d1 || !d2) { Boord.toast("Pick both dates first"); return; }
   try {
-    const blob = await Boord.api(`/api/reports/${key}?${report.params(d1, d2, supplierId)}`, { auth: true, timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+    const blob = await Boord.api(`/api/reports/${key}?${report.params(d1, d2, supplierId)}`, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
     Boord.downloadBlob(blob, `${report.label.replace(/[^a-zA-Z0-9]+/g, "_")}.xlsx`);
   } catch (e) {
     console.error("Report generation failed:", e);
-    const status = parseInt(String(e.message).slice(0, 3), 10);
-    if (status === 401 || status === 403) {
-      Boord.toast("Session expired - sign in again");
+    if (Boord.isAuthError(e)) {
+      accessRefused(e);
     } else {
       Boord.toast("Could not generate report - see browser console for details");
     }
@@ -1306,7 +1205,6 @@ function bindMapModal() {
 function bindSettings() {
   document.getElementById("saveSystemSettingsBtn").addEventListener("click", saveSystemSettings);
   document.getElementById("saveRateSettingsBtn").addEventListener("click", saveRateSettings);
-  document.getElementById("changePasswordBtn").addEventListener("click", changePassword);
   document.getElementById("pickMapBtn").addEventListener("click", () => openMapModal("setGpsLat", "setGpsLon"));
   bindMapModal();
   document.getElementById("runBackupBtn").addEventListener("click", runBackupNow);
@@ -1391,7 +1289,7 @@ async function loadServerCard() {
 }
 
 async function loadBackupsList() {
-  const backups = await Boord.api("/api/backups", { auth: true });
+  const backups = await Boord.api("/api/backups");
   document.getElementById("backupsTable").innerHTML = backups.map((b) => `
     <tr class="border-b">
       <td class="p-2">${Boord.fmtDateTime(b.created_at)}</td>
@@ -1402,7 +1300,7 @@ async function loadBackupsList() {
   document.querySelectorAll("#backupsTable [data-download]").forEach((a) => {
     a.addEventListener("click", async (e) => {
       e.preventDefault();
-      const blob = await Boord.api(`/api/backups/${a.dataset.download}/download`, { auth: true, timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+      const blob = await Boord.api(`/api/backups/${a.dataset.download}/download`, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
       Boord.downloadBlob(blob, a.dataset.download);
     });
   });
@@ -1419,7 +1317,7 @@ async function loadOffsiteStatus() {
 
   let s;
   try {
-    s = await Boord.api("/api/backups/offsite", { auth: true });
+    s = await Boord.api("/api/backups/offsite");
   } catch (e) {
     line.textContent = "Could not read the off-site copy status.";
     return;
@@ -1461,7 +1359,7 @@ async function loadOffsiteStatus() {
 
 async function runBackupNow() {
   try {
-    await Boord.api("/api/backups", { method: "POST", auth: true, timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+    await Boord.api("/api/backups", { method: "POST", timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
     Boord.toast("Backup created");
     await loadBackupsList();
     await loadOffsiteStatus();
@@ -1521,7 +1419,7 @@ async function saveSystemSettings() {
     gps_lat: lat,
     gps_lon: lon,
   };
-  await Boord.api("/api/system-settings", { method: "PUT", auth: true, body: newSettings });
+  await Boord.api("/api/system-settings", { method: "PUT", body: newSettings });
   _systemSettings = { ..._systemSettings, ...newSettings };
   updateBannerPackhouseName();
   updateSeasonYearLabel();
@@ -1530,7 +1428,7 @@ async function saveSystemSettings() {
 
 async function saveRateSettings() {
   await Boord.api("/api/rate-settings", {
-    method: "POST", auth: true,
+    method: "POST",
     body: {
       effective_date: Boord.localDateStr(),
       rate_type: "per_kg",
@@ -1539,24 +1437,6 @@ async function saveRateSettings() {
     },
   });
   Boord.toast("Rate saved");
-}
-
-async function changePassword() {
-  const newPassword = document.getElementById("newPassword").value;
-  if (!newPassword) return;
-  if (newPassword.length < 8) { Boord.toast("Password must be at least 8 characters"); return; }
-  try {
-    // Sent in the request BODY, never the query string - a password in the
-    // URL ends up in the server's access log, browser history and any proxy.
-    await Boord.api("/api/auth/change-password", {
-      method: "POST", auth: true, body: { new_password: newPassword },
-    });
-  } catch (e) {
-    Boord.toast(_apiErrorDetail(e) || "Could not change password");
-    return;
-  }
-  document.getElementById("newPassword").value = "";
-  Boord.toast("Password changed");
 }
 
 // GPS map modal. Takes the ids of the two inputs to write into so the setup

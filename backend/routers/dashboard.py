@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from db import get_own_supplier_id, get_session
 from models import Block, HarvestRecord, Supplier, Worker
 from routers.payments import _supplier_display_name, _worker_ids_for_supplier, _worker_totals
-from security import get_current_admin
+from security import require_admin_client
 from timeutil import day_bounds
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 @router.get("/summary")
 def dashboard_summary(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                       session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                       session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     """Active-entity counts + per-worker and per-block breakdowns for the
     admin Dashboard tab. "Active" means had harvest activity within the
     filtered period/supplier, not a static master-data active flag - so

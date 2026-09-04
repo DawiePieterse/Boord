@@ -51,7 +51,7 @@ import version  # noqa: E402
 from db import DB_PATH, engine, legacy_schema_catch_up  # noqa: E402
 from migrate import (BASELINE_REVISION, _baseline_database, _config,  # noqa: E402
                      current_revision, head_revision, run_migrations)
-from models import (AdminUser, Block, HarvestRecord, SetupState,  # noqa: E402
+from models import (Block, HarvestRecord, SetupState,  # noqa: E402
                     Supplier, SystemSetting, Worker)
 from routers.master_data import import_blocks  # noqa: E402
 from routers.setup import build_setup_state  # noqa: E402
@@ -190,7 +190,11 @@ def test_a_database_from_before_migrations_is_caught_up_and_stamped():
 
         con = sqlite3.connect(path)
         con.execute("DROP TABLE setupstate")
-        con.execute("ALTER TABLE adminuser DROP COLUMN must_change_password")
+        # supplier is empty here, so dropping a column off it damages the
+        # schema without touching the rows the assertions below count. It
+        # used to be adminuser.must_change_password, until the release that
+        # removed accounts dropped that table out from under this fixture.
+        con.execute("ALTER TABLE supplier DROP COLUMN is_own_farm")
         con.commit()
         con.close()
 
@@ -201,7 +205,7 @@ def test_a_database_from_before_migrations_is_caught_up_and_stamped():
             "an existing farm database did not end up at the newest revision")
         insp = inspect(old_engine)
         assert insp.has_table("setupstate"), "a table the farm never received was not restored"
-        assert "must_change_password" in {c["name"] for c in insp.get_columns("adminuser")}, \
+        assert "is_own_farm" in {c["name"] for c in insp.get_columns("supplier")}, \
             "a column the farm never received was not restored"
         assert not _drift(old_engine), (
             "an adopted database does not match models.py once it is up to date")
@@ -365,7 +369,7 @@ def test_replacing_all_blocks_with_an_empty_file_is_refused():
                                     file=io.BytesIO(b"id,name,variety,trees,hectares,active\n"))
         with Session(temp_engine) as s:
             try:
-                asyncio.run(import_blocks(file=headings_only, replace=True, session=s, admin=None))
+                asyncio.run(import_blocks(file=headings_only, replace=True, session=s, _admin=None))
             except HTTPException as e:
                 assert e.status_code == 400, e.status_code
                 assert "no data rows" in e.detail
@@ -406,7 +410,7 @@ def test_importing_blocks_without_a_supplier_column_keeps_the_supplier():
             filename="blocks.csv",
             file=io.BytesIO(b"id,name,variety,trees,hectares,active\n15,Blok 15,Mauritius,100,1.5,true\n"))
         with Session(temp_engine) as s:
-            asyncio.run(import_blocks(file=old_format, replace=False, session=s, admin=None))
+            asyncio.run(import_blocks(file=old_format, replace=False, session=s, _admin=None))
         with Session(temp_engine) as s:
             assert s.get(Block, "15").supplier_id == supplier_id, \
                 "a file with no supplier_id column unassigned the block's supplier"
@@ -416,7 +420,7 @@ def test_importing_blocks_without_a_supplier_column_keeps_the_supplier():
             filename="blocks.csv",
             file=io.BytesIO(b"id,name,variety,trees,hectares,supplier_id,active\n15,Blok 15,Mauritius,100,1.5,,true\n"))
         with Session(temp_engine) as s:
-            asyncio.run(import_blocks(file=with_blank, replace=False, session=s, admin=None))
+            asyncio.run(import_blocks(file=with_blank, replace=False, session=s, _admin=None))
         with Session(temp_engine) as s:
             assert s.get(Block, "15").supplier_id is None, \
                 "an explicitly blank supplier_id did not clear the block's supplier"
@@ -740,6 +744,146 @@ def test_a_destination_inside_the_repo_is_refused():
         shutil.rmtree(elsewhere, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# Admin access
+#
+# Boord has no login. What decides who sees Settings, payments, exports and
+# every worker's ID and bank number is the network a request arrives on:
+# loopback (which is where `tailscale serve` delivers) and the tailnet get in,
+# the farm wifi does not (backend/security.py).
+#
+# That makes these checks load-bearing in a way the old password never was.
+# The Field and Pack House screens are still served to every phone on the farm
+# wifi, so a guard silently dropped from one endpoint is not a locked door left
+# ajar - it is worker PII on the LAN, with nothing in the UI to show for it.
+# The route list below is asserted whole, in both directions, so adding an
+# endpoint or dropping a guard fails here rather than passing quietly.
+# ---------------------------------------------------------------------------
+ADMIN_ONLY_ROUTES = {
+    ("DELETE", "/api/blocks/{block_id}"),
+    ("DELETE", "/api/devices/{device_id}"),
+    ("DELETE", "/api/suppliers/{supplier_id}"),
+    ("DELETE", "/api/teams/{team_id}"),
+    ("DELETE", "/api/workers/{worker_id}"),
+    ("GET", "/api/backups"),
+    ("GET", "/api/backups/offsite"),
+    ("GET", "/api/backups/{filename}/download"),
+    ("GET", "/api/blocks/export"),
+    ("GET", "/api/dashboard/summary"),
+    ("GET", "/api/devices"),
+    ("GET", "/api/harvest-records/counts"),
+    ("GET", "/api/lots/{lot_id}"),
+    ("GET", "/api/payments"),
+    ("GET", "/api/payments/export"),
+    ("GET", "/api/reports/block-harvest"),
+    ("GET", "/api/reports/daily-harvest"),
+    ("GET", "/api/reports/harvest-data"),
+    ("GET", "/api/reports/harvesting-list"),
+    ("GET", "/api/reports/in-transit-list"),
+    ("GET", "/api/reports/litchi-wages"),
+    ("GET", "/api/reports/lot-receiving"),
+    ("GET", "/api/reports/picking-notes"),
+    ("GET", "/api/reports/received-list"),
+    ("GET", "/api/reports/team-picking-list"),
+    ("GET", "/api/reports/worker-harvest"),
+    ("GET", "/api/setup/state"),
+    ("GET", "/api/suppliers/{supplier_id}/billing"),
+    ("GET", "/api/workers/export"),
+    ("PATCH", "/api/harvest-records/{record_uuid}"),
+    ("POST", "/api/backups"),
+    ("POST", "/api/blocks"),
+    ("POST", "/api/blocks/import"),
+    ("POST", "/api/devices"),
+    ("POST", "/api/payments/calculate"),
+    ("POST", "/api/rate-settings"),
+    ("POST", "/api/setup/complete"),
+    ("POST", "/api/setup/start"),
+    ("POST", "/api/suppliers"),
+    ("POST", "/api/teams"),
+    ("POST", "/api/workers"),
+    ("POST", "/api/workers/import"),
+    ("POST", "/api/workers/{worker_id}/photo"),
+    ("PUT", "/api/system-settings"),
+}
+
+
+def _guarded_routes():
+    """(method, path) for every route that depends on require_admin_client."""
+    import main  # noqa: E402 - imported here so a broken app fails this check
+    from security import require_admin_client  # noqa: E402
+
+    found = set()
+    for route in main.app.routes:
+        dependant = getattr(route, "dependant", None)
+        if dependant is None:
+            continue
+        if any(d.call is require_admin_client for d in dependant.dependencies):
+            for method in set(route.methods) - {"HEAD", "OPTIONS"}:
+                found.add((method, route.path))
+    return found
+
+
+def _request_from(host):
+    """The smallest thing security.py will read an address off. It only ever
+    touches request.client, so there is no need to stand up a server to ask it
+    what it makes of an address."""
+    from fastapi import Request  # noqa: E402
+
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
+    if host is not None:
+        scope["client"] = (host, 54321)
+    return Request(scope)
+
+
+def test_every_admin_only_endpoint_is_still_guarded():
+    missing = ADMIN_ONLY_ROUTES - _guarded_routes()
+    assert not missing, (
+        "these endpoints no longer require the admin network - anything on the "
+        f"farm wifi can call them: {sorted(missing)}")
+
+
+def test_nothing_new_slipped_behind_the_admin_guard():
+    """The other direction, and not pedantry: the Field and Pack House screens
+    call this same API from tablets that are NOT on the admin network, so an
+    endpoint that quietly grows the guard breaks in the orchard rather than
+    anywhere a developer is looking."""
+    extra = _guarded_routes() - ADMIN_ONLY_ROUTES
+    assert not extra, (
+        "these endpoints became admin-only without this list being updated - "
+        f"check that no Field or Pack House screen calls them: {sorted(extra)}")
+
+
+def test_the_farm_wifi_cannot_reach_the_admin_app():
+    from security import is_admin_client  # noqa: E402
+
+    for host in ("192.168.68.114", "192.168.68.1", "10.0.0.5", "172.16.4.9",
+                 "41.13.7.22", "2c0f:f8f0::1"):
+        assert not is_admin_client(_request_from(host)), \
+            f"{host} was treated as the admin, and that is the farm wifi"
+
+
+def test_the_console_and_the_tailnet_can():
+    from security import is_admin_client  # noqa: E402
+
+    # 127.0.0.1 is both the server's own console and where `tailscale serve`
+    # delivers; the 100.64/10 and fd7a: addresses are a direct tailnet hit.
+    for host in ("127.0.0.1", "::1",
+                 "100.64.0.1", "100.101.102.103", "fd7a:115c:a1e0::1234"):
+        assert is_admin_client(_request_from(host)), \
+            f"{host} was locked out of the Admin app"
+
+
+def test_a_request_with_no_peer_is_not_the_admin():
+    """ASGI transports may omit the client entirely. Reading that as trusted
+    would open the Admin app to everyone the moment anything at all sat in
+    front of uvicorn."""
+    from security import is_admin_client  # noqa: E402
+
+    assert not is_admin_client(_request_from(None))
+    assert not is_admin_client(_request_from("not-an-ip-address"))
+
+
+
 def main():
     print("Boord self-test")
     print("=" * 60)
@@ -773,6 +917,14 @@ def main():
                test_a_missing_destination_never_raises,
                test_the_offsite_copy_is_byte_identical,
                test_a_destination_inside_the_repo_is_refused):
+        check(fn.__name__, fn)
+
+    section("Admin access")
+    for fn in (test_every_admin_only_endpoint_is_still_guarded,
+               test_nothing_new_slipped_behind_the_admin_guard,
+               test_the_farm_wifi_cannot_reach_the_admin_app,
+               test_the_console_and_the_tailnet_can,
+               test_a_request_with_no_peer_is_not_the_admin):
         check(fn.__name__, fn)
 
     section("Setup state")

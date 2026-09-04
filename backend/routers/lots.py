@@ -8,7 +8,7 @@ from sqlmodel import Session, SQLModel, select
 
 from db import get_session, supplier_id_for_device
 from models import HarvestRecord, Lot, LotStatus, Supplier, SystemSetting
-from security import get_current_admin
+from security import require_admin_client
 from timeutil import day_bounds
 from weather import fetch_weather_cached
 
@@ -234,7 +234,7 @@ def list_lots(status: Optional[str] = None, supplier_id: Optional[int] = None,
 
 
 @router.get("/{lot_id}")
-def get_lot(lot_id: int, session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def get_lot(lot_id: int, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     """Admin-only: a lot plus its individual crates, for the harvest-data
     edit screen. Not used by the field or pack house screens - those only
     ever need the aggregate totals from the list endpoints above."""

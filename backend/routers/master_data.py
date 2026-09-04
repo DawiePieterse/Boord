@@ -8,7 +8,7 @@ from sqlmodel import Session, SQLModel, select
 from db import PHOTOS_DIR, get_session
 from excel_io import parse_uploaded_table, rows_to_csv_bytes, rows_to_xlsx_bytes
 from models import Block, RateSetting, RateType, Supplier, SystemSetting, Team, Worker
-from security import get_current_admin, get_optional_admin
+from security import is_admin_client, require_admin_client
 
 router = APIRouter(prefix="/api", tags=["master-data"])
 
@@ -41,14 +41,14 @@ def list_teams(session: Session = Depends(get_session)):
 
 
 @router.post("/teams")
-def upsert_team(team: Team, session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def upsert_team(team: Team, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     session.merge(team)
     session.commit()
     return {"ok": True}
 
 
 @router.delete("/teams/{team_id}")
-def deactivate_team(team_id: str, session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def deactivate_team(team_id: str, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     obj = session.get(Team, team_id)
     if obj:
         obj.active = False
@@ -65,14 +65,14 @@ def list_blocks(session: Session = Depends(get_session)):
 
 
 @router.post("/blocks")
-def upsert_block(block: Block, session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def upsert_block(block: Block, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     session.merge(block)
     session.commit()
     return {"ok": True}
 
 
 @router.delete("/blocks/{block_id}")
-def deactivate_block(block_id: str, session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def deactivate_block(block_id: str, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     obj = session.get(Block, block_id)
     if obj:
         obj.active = False
@@ -83,7 +83,7 @@ def deactivate_block(block_id: str, session: Session = Depends(get_session), adm
 
 @router.get("/blocks/export")
 def export_blocks(fmt: str = Query("xlsx", pattern="^(csv|xlsx)$"), session: Session = Depends(get_session),
-                   admin=Depends(get_current_admin)):
+                   _admin=Depends(require_admin_client)):
     blocks = session.exec(select(Block)).all()
     headers = ["id", "name", "variety", "trees", "hectares", "supplier_id", "active"]
     rows = [[b.id, b.name, b.variety, b.trees, b.hectares, b.supplier_id or "", b.active]
@@ -94,7 +94,7 @@ def export_blocks(fmt: str = Query("xlsx", pattern="^(csv|xlsx)$"), session: Ses
 @router.post("/blocks/import")
 async def import_blocks(file: UploadFile, replace: bool = Query(False),
                          session: Session = Depends(get_session),
-                         admin=Depends(get_current_admin)):
+                         _admin=Depends(require_admin_client)):
     records = await parse_uploaded_table(file)
     # Refuse a file with nothing in it, before anything is written.
     # "Replace all" reads this file as the farm's new complete block list, so
@@ -166,26 +166,31 @@ async def import_blocks(file: UploadFile, replace: bool = Query(False),
 
 # --- Workers ---------------------------------------------------------------
 
-# What an unauthenticated caller gets back for each worker. The Field app
-# (renderWorkerOptions) and the badge printer both read this endpoint without
-# a token and need only these; everything else on Worker - id_number (SA ID),
-# bank, account, whatsapp_number - is personal data that used to go out to
-# anyone who could reach the server, no credentials needed.
+# What a caller off the farm wifi gets back for each worker. The Field app
+# (renderWorkerOptions) and the badge printer both read this endpoint from
+# tablets that have no admin access and need only these; everything else on
+# Worker - id_number (SA ID), bank, account, whatsapp_number - is personal
+# data that used to go out to anyone who could reach the server.
+#
+# This split is why deleting the login could not simply delete the check. The
+# Field and Pack House screens are still served to the whole LAN, so without
+# it every phone in the orchard would be one request away from a full list of
+# ID and bank numbers.
 _PUBLIC_WORKER_FIELDS = ("id", "first_name", "last_name", "name", "supplier_id", "photo_filename", "active")
 
 
 @router.get("/workers")
-def list_workers(session: Session = Depends(get_session), admin=Depends(get_optional_admin)):
-    """Full records for a signed-in admin (the Master Data edit modal needs
-    the bank/ID fields); a reduced projection for everyone else."""
+def list_workers(session: Session = Depends(get_session), is_admin=Depends(is_admin_client)):
+    """Full records for the admin (the Master Data edit modal needs the
+    bank/ID fields); a reduced projection for everyone else."""
     workers = session.exec(select(Worker)).all()
-    if admin:
+    if is_admin:
         return workers
     return [{f: getattr(w, f) for f in _PUBLIC_WORKER_FIELDS} for w in workers]
 
 
 @router.post("/workers")
-def upsert_worker(worker: Worker, session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def upsert_worker(worker: Worker, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     if worker.first_name or worker.last_name:
         worker.name = f"{worker.first_name} {worker.last_name}".strip()
     elif not worker.name:
@@ -200,7 +205,7 @@ def upsert_worker(worker: Worker, session: Session = Depends(get_session), admin
 
 @router.post("/workers/{worker_id}/photo")
 async def upload_worker_photo(worker_id: str, file: UploadFile, session: Session = Depends(get_session),
-                               admin=Depends(get_current_admin)):
+                               _admin=Depends(require_admin_client)):
     worker = session.get(Worker, worker_id)
     if not worker:
         raise HTTPException(404, "Worker not found")
@@ -221,7 +226,7 @@ async def upload_worker_photo(worker_id: str, file: UploadFile, session: Session
 
 
 @router.delete("/workers/{worker_id}")
-def deactivate_worker(worker_id: str, session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def deactivate_worker(worker_id: str, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     obj = session.get(Worker, worker_id)
     if obj:
         obj.active = False
@@ -232,7 +237,7 @@ def deactivate_worker(worker_id: str, session: Session = Depends(get_session), a
 
 @router.get("/workers/export")
 def export_workers(fmt: str = Query("xlsx", pattern="^(csv|xlsx)$"), session: Session = Depends(get_session),
-                    admin=Depends(get_current_admin)):
+                    _admin=Depends(require_admin_client)):
     workers = session.exec(select(Worker)).all()
     supplier_names = {s.id: s.name for s in session.exec(select(Supplier)).all()}
     headers = ["emp_nr", "first_name", "last_name", "id_number", "bank", "account", "whatsapp_number",
@@ -245,7 +250,7 @@ def export_workers(fmt: str = Query("xlsx", pattern="^(csv|xlsx)$"), session: Se
 
 @router.post("/workers/import")
 async def import_workers(file: UploadFile, session: Session = Depends(get_session),
-                          admin=Depends(get_current_admin)):
+                          _admin=Depends(require_admin_client)):
     records = await parse_uploaded_table(file)
     count = 0
     for r in records:
@@ -304,7 +309,7 @@ def current_rate_setting(session: Session = Depends(get_session)):
 
 @router.post("/rate-settings")
 def create_rate_setting(setting_in: RateSettingIn, session: Session = Depends(get_session),
-                         admin=Depends(get_current_admin)):
+                         _admin=Depends(require_admin_client)):
     setting = RateSetting(**setting_in.model_dump())
     session.add(setting)
     session.commit()
@@ -321,7 +326,7 @@ def get_system_settings(session: Session = Depends(get_session)):
 
 @router.put("/system-settings")
 def update_system_settings(setting: SystemSetting, session: Session = Depends(get_session),
-                            admin=Depends(get_current_admin)):
+                            _admin=Depends(require_admin_client)):
     existing = session.exec(select(SystemSetting)).first()
     setting.id = existing.id if existing else None
     session.merge(setting)

@@ -4,17 +4,26 @@ For farm office staff managing workers, wages, reports, and settings.
 
 ---
 
-## Signing in
+## Opening the Admin app
 
-Open the Admin app, enter your username and password, and tap **Sign
-in**. On a brand-new setup the username is `admin` and the password is
-the random one the installer printed when it set the server up — there
-is no shared default. Boord then asks you to choose your own password
-before it will open; nothing else works until you have. After that you
-can change it whenever you like under **Settings → Change admin
-password**.
+There is no sign-in. Boord has one admin — you — so there is no username,
+no password, and nothing to forget. Open the Admin app and it is simply
+there.
 
-Once signed in, the top bar shows the farm name, today's date/time, and
+What takes the place of a password is **where you open it from**. The
+Admin screens answer two places only: the office PC the server runs on
+(`http://localhost:8000/`), and any device connected to your Tailscale
+network (the `https://...ts.net/` address). Open it on the farm Wi-Fi
+instead and you get *"The Admin app is only reachable from the server
+itself or over Tailscale"* — reconnect Tailscale, or use the office PC.
+
+That restriction is the point rather than an inconvenience: the pickers'
+and receiving tablets are on the farm Wi-Fi, and everything sensitive —
+worker ID numbers, bank details, the whole payroll — lives behind these
+screens. Their own Field and Pack House apps are unaffected and keep
+working on the Wi-Fi exactly as before.
+
+The top bar shows the farm name, today's date/time, and
 current weather. Five tabs run across the top: **Dashboard**,
 **Master Data**, **Payments**, **Reports**, **Settings**.
 
@@ -203,8 +212,6 @@ joins.
   the green→yellow and yellow→red timing thresholds used for the
   color-coded queues, and GPS coordinates (enables the weather widget).
 - **Harvest rate** — the current rate per kg used for wage calculations.
-- **Change admin password** — do this immediately after first login if
-  you haven't already.
 
 ---
 

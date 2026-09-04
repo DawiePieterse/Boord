@@ -1,12 +1,10 @@
 import os
-import secrets
 from typing import Optional
 
-from passlib.context import CryptContext
 from sqlalchemy import inspect, text
 from sqlmodel import SQLModel, Session, create_engine, select
 
-from models import AdminUser, Device, DeviceRole, Supplier, SystemSetting, Team
+from models import Device, DeviceRole, Supplier, SystemSetting, Team
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -16,66 +14,6 @@ DB_PATH = os.path.join(DATA_DIR, "boord.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-DEFAULT_ADMIN_USERNAME = "admin"
-
-# Where the password generated for this install is left for whoever is
-# standing at the machine. install.ps1 reads it back and prints it; it is
-# deleted the moment the password is changed (routers/auth.change_password).
-# backup.py only ever archives boord.db and photos/, and .gitignore names
-# this file explicitly, so it never leaves the server. The gitignore entry
-# is not incidental: only named paths under data/ are ignored, never data/
-# itself, so this file was untracked-but-committable until it was listed.
-INITIAL_PASSWORD_FILE = os.path.join(DATA_DIR, "initial_admin_password.txt")
-
-# No I, O, 0 or 1: this password gets read off one screen and typed into
-# another, often a tablet, by someone who did not choose it.
-_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-
-
-def generate_initial_password() -> str:
-    """A random password for this install - three groups of four, ~60 bits.
-
-    There used to be one shared password, `ChangeMe123!`, seeded into every
-    database and printed in both the manual and the installer's output. On a
-    single farm that is a note to self. Across twenty installs reachable over
-    Tailscale it is a published password on every one of them, and it made
-    the front door by far the softest part of a system whose update path is
-    GPG-signed and fingerprint-pinned.
-    """
-    groups = ("".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(4)) for _ in range(3))
-    return "-".join(groups)
-
-
-def _write_initial_password(password: str) -> None:
-    """Announce the generated password on the console and leave a copy on
-    disk. Both, because the console here is usually a Scheduled Task's, which
-    nobody ever sees, and because the installer needs somewhere to read it
-    from after the server has started."""
-    rule = "=" * 60
-    print(f"\n{rule}\n"
-          f" Boord created an admin account for this install:\n"
-          f"     username: {DEFAULT_ADMIN_USERNAME}\n"
-          f"     password: {password}\n"
-          f" You will be asked to replace this password at first sign-in.\n"
-          f"{rule}\n", flush=True)
-    try:
-        fd = os.open(INITIAL_PASSWORD_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(password + "\n")
-    except OSError as e:
-        print(f"[boord] could not write {INITIAL_PASSWORD_FILE} ({e!r}) - the password "
-              f"printed above is now the only copy of it", flush=True)
-
-
-def clear_initial_password_file() -> None:
-    """Called once the admin has set their own password. Keeping the file
-    after that point gains nothing and costs a plaintext password on disk."""
-    try:
-        os.remove(INITIAL_PASSWORD_FILE)
-    except OSError:
-        pass  # already gone, or never written - either way there is nothing to do
 
 
 def _model_default_literal(table: str, column: str):
@@ -83,11 +21,11 @@ def _model_default_literal(table: str, column: str):
     or None if it does not declare a usable one.
 
     The source database cannot supply this. A SQLModel default lives in
-    Python - `must_change_password: bool = False` reaches SQLite as a plain
-    NOT NULL column with no DEFAULT clause - so a column copied from there
-    into an existing table would have to be added nullable, and the farm
-    would sit one nullable column away from models.py with _report_drift()
-    saying so on every boot for the rest of its life.
+    Python - `is_own_farm: bool = False` reaches SQLite as a plain NOT NULL
+    column with no DEFAULT clause - so a column copied from there into an
+    existing table would have to be added nullable, and the farm would sit
+    one nullable column away from models.py with _report_drift() saying so on
+    every boot for the rest of its life.
 
     This decides HOW to add a column, never WHETHER to: it is only ever
     consulted for a column the source database already has.
@@ -256,13 +194,11 @@ def seed_defaults() -> None:
         if not session.exec(select(Supplier).where(Supplier.is_own_farm == True)).first():  # noqa: E712
             session.add(Supplier(name="Own fruit", is_own_farm=True))
 
-        if not session.exec(select(AdminUser)).first():
-            initial_password = generate_initial_password()
-            session.add(AdminUser(
-                username=DEFAULT_ADMIN_USERNAME,
-                password_hash=pwd_context.hash(initial_password),
-                must_change_password=True,
-            ))
-            _write_initial_password(initial_password)
+        # No admin account is seeded, because there is no longer one to seed.
+        # A fresh install used to generate a password, print it, and leave a
+        # copy in data/ for install.ps1 to read back; the Admin app is now
+        # gated on the network a request arrives from instead - see
+        # backend/security.py. Farms upgrading past this point get the
+        # adminuser table dropped by migration 4c81f2a90d17.
 
         session.commit()

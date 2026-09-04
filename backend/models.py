@@ -98,23 +98,9 @@ class Supplier(SQLModel, table=True):
     active: bool = True
 
 
-class AdminUser(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    username: str = Field(unique=True)
-    password_hash: str
-    # True while the account still holds the password db.seed_defaults
-    # generated for this install. Every admin endpoint refuses the token of a
-    # user in that state - see security.get_current_admin - so the change is
-    # forced rather than merely advised. Existing databases get the column
-    # added as False by db._add_missing_columns, which is the right default:
-    # those farms were told to replace ChangeMe123! long ago, and locking
-    # them out of their own data on an upgrade would be the worse failure.
-    must_change_password: bool = False
-
-
 class SystemSetting(SQLModel, table=True):
     """Single-row table of pack-house-wide settings. Served to every device
-    (including unauthenticated Field/Receiving ones) via a public
+    on the farm Wi-Fi (Field and Receiving tablets included) via a public
     GET /api/system-settings - never put anything secret on this model."""
     id: Optional[int] = Field(default=None, primary_key=True)
     packhouse_name: str = ""
@@ -139,7 +125,8 @@ class SetupState(SQLModel, table=True):
     routers/setup.py.
 
     Deliberately its own table rather than two more columns on SystemSetting:
-    SystemSetting is served publicly to every unauthenticated device. It also gets round-tripped whole by
+    SystemSetting is served publicly to every device on the farm Wi-Fi. It
+    also gets round-tripped whole by
     PUT /api/system-settings, which builds a fresh row from the request body
     and merges it - so a field the Settings form does not know about is
     silently blanked every time somebody presses Save. A completion marker
@@ -218,7 +205,7 @@ class HarvestRecord(SQLModel, table=True):
     # whatever the device still has queued - see the preservation logic in
     # routers/sync.py's upsert branch.
     edited_at: Optional[datetime] = None
-    edited_by: Optional[str] = None  # AdminUser.username
+    edited_by: Optional[str] = None  # always "admin" - see routers/harvest_records
 
 
 class ReceivingRecord(SQLModel, table=True):

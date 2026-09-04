@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 
 from db import get_session
 from models import Lot, Supplier
-from security import get_current_admin
+from security import require_admin_client
 from timeutil import day_bounds
 
 router = APIRouter(prefix="/api/suppliers", tags=["suppliers"])
@@ -19,7 +19,7 @@ def list_suppliers(session: Session = Depends(get_session)):
 
 
 @router.post("")
-def upsert_supplier(supplier: Supplier, session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def upsert_supplier(supplier: Supplier, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     session.merge(supplier)
     session.commit()
     return {"ok": True}
@@ -27,7 +27,7 @@ def upsert_supplier(supplier: Supplier, session: Session = Depends(get_session),
 
 @router.delete("/{supplier_id}")
 def deactivate_supplier(supplier_id: int, session: Session = Depends(get_session),
-                         admin=Depends(get_current_admin)):
+                         _admin=Depends(require_admin_client)):
     obj = session.get(Supplier, supplier_id)
     if obj:
         obj.active = False
@@ -75,7 +75,7 @@ def compute_supplier_billing(session: Session, supplier_id: int, period_start: d
 
 @router.get("/{supplier_id}/billing")
 def supplier_billing(supplier_id: int, period_start: date, period_end: date,
-                      session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                      session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     data = compute_supplier_billing(session, supplier_id, period_start, period_end)
     return {
         "supplier": data["supplier"],

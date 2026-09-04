@@ -1,16 +1,18 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from backup import start_backup_scheduler
 from db import PHOTOS_DIR, seed_defaults
 from migrate import run_migrations
 from version import prime as prime_version
-from routers import (auth, backups, dashboard, devices, harvest_records, master_data, lots,
+from routers import (backups, dashboard, devices, harvest_records, master_data, lots,
                       payments, processing, receiving, reports, setup, suppliers, sync, version,
                       weather)
+from security import ADMIN_ONLY_MESSAGE, is_admin_client
 
 app = FastAPI(title="Boord Harvest & Receiving")
 
@@ -21,7 +23,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
 app.include_router(devices.router)
 app.include_router(master_data.router)
 app.include_router(lots.router)
@@ -37,6 +38,27 @@ app.include_router(weather.router)
 app.include_router(backups.router)
 app.include_router(setup.router)
 app.include_router(version.router)
+
+
+@app.middleware("http")
+async def admin_app_is_not_on_the_farm_wifi(request: Request, call_next):
+    """The Admin screens themselves, guarded the same way their API is.
+
+    Every /api endpoint the admin uses depends on require_admin_client, so the
+    data was already safe without this - but a phone on the farm wifi could
+    still load the whole Admin app and sit there failing every request, which
+    looks like a broken app rather than a closed door. Blocking the static
+    files says what is actually true, once, at the address bar.
+
+    Matched on the path prefix rather than on the mounted app, because
+    /admin/ is served by the catch-all StaticFiles mount at "/" - there is no
+    separate mount to hang a dependency on. "/admin" itself is included: html=True
+    redirects it to "/admin/", and a redirect is a perfectly good way in.
+    """
+    path = request.url.path
+    if (path == "/admin" or path.startswith("/admin/")) and not is_admin_client(request):
+        return PlainTextResponse(ADMIN_ONLY_MESSAGE, status_code=403)
+    return await call_next(request)
 
 
 @app.on_event("startup")

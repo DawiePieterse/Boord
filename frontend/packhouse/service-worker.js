@@ -2,7 +2,7 @@
 // still loads if the connection briefly drops. Data (queue, receiving)
 // always goes over the network when available.
 const CACHE_PREFIX = "boord-packhouse-";
-const CACHE = "boord-packhouse-v14";
+const CACHE = "boord-packhouse-v15";
 const REVALIDATE_TIMEOUT_MS = 10000;
 const SHELL = [
   "./",

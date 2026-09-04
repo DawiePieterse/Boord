@@ -26,10 +26,6 @@ const Boord = {
   },
   clearDeviceId() { localStorage.removeItem("boord_device_id"); },
 
-  getToken() { return localStorage.getItem("boord_admin_token"); },
-  setToken(t) { localStorage.setItem("boord_admin_token", t); },
-  clearToken() { localStorage.removeItem("boord_admin_token"); },
-
   getLastReceivedBy() { return localStorage.getItem("boord_last_received_by") || ""; },
   setLastReceivedBy(name) { localStorage.setItem("boord_last_received_by", name); },
 
@@ -79,8 +75,11 @@ const Boord = {
     return body.trim() || fallback;
   },
 
-  // True when the server actively rejected the caller's credentials. api()
-  // puts the status code at the front of the error message.
+  // True when the server actively refused this request rather than failing to
+  // answer it. There are no credentials to refuse any more - a 403 from the
+  // Admin app means it was reached from an address that is not the server
+  // console or the tailnet (backend/security.py). api() puts the status code
+  // at the front of the error message.
   isAuthError(e) {
     const status = parseInt(String(e && e.message).slice(0, 3), 10);
     return status === 401 || status === 403;
@@ -113,21 +112,11 @@ const Boord = {
     return config && config.id === deviceId ? config : null;
   },
 
-  async login(username, password) {
-    const body = new URLSearchParams({ username, password });
-    const res = await Boord._fetchWithTimeout(`${API_BASE}/api/auth/login`, { method: "POST", body });
-    if (!res.ok) throw new Error("Invalid username or password");
-    const data = await res.json();
-    Boord.setToken(data.access_token);
-    return data;
-  },
-
-  async api(path, { method = "GET", body, auth = false, isForm = false, timeoutMs } = {}) {
+  // No auth option: Boord has no accounts. Whether a caller may see admin
+  // data is decided by the network its request arrives on, server-side, and
+  // there is nothing for the browser to attach.
+  async api(path, { method = "GET", body, isForm = false, timeoutMs } = {}) {
     const headers = {};
-    if (auth) {
-      const token = Boord.getToken();
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-    }
     let payload = body;
     if (body && !isForm) {
       headers["Content-Type"] = "application/json";

@@ -6,7 +6,7 @@ from sqlmodel import Session, SQLModel, select
 
 from db import get_session
 from models import Device, DeviceRole
-from security import get_current_admin
+from security import require_admin_client
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
@@ -54,12 +54,12 @@ def get_device(device_id: str, session: Session = Depends(get_session)):
 
 
 @router.get("")
-def list_devices(session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def list_devices(session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     return session.exec(select(Device)).all()
 
 
 @router.post("")
-def upsert_device(device_in: DeviceIn, session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def upsert_device(device_in: DeviceIn, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     existing = session.get(Device, device_in.id)
     device = Device(**device_in.model_dump(), last_seen=existing.last_seen if existing else None)
     session.merge(device)
@@ -68,7 +68,7 @@ def upsert_device(device_in: DeviceIn, session: Session = Depends(get_session), 
 
 
 @router.delete("/{device_id}")
-def delete_device(device_id: str, session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+def delete_device(device_id: str, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     device = session.get(Device, device_id)
     if device:
         session.delete(device)

@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 from db import get_own_supplier_id, get_session
 from excel_io import rows_to_xlsx_bytes
 from models import HarvestRecord, Payment, RateSetting, RateType, Supplier, Worker
-from security import get_current_admin
+from security import require_admin_client
 from timeutil import day_bounds
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
@@ -90,7 +90,7 @@ def _worker_totals(session: Session, period_start: date, period_end: date, suppl
 
 @router.post("/calculate")
 def calculate_payments(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                        session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                        session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     totals, setting = _worker_totals(session, period_start, period_end, supplier_id)
     if setting is None:
         # No wage rate has ever been set on this install. Refuse rather than
@@ -125,13 +125,14 @@ def calculate_payments(period_start: date, period_end: date, supplier_id: Option
 
 @router.get("")
 def list_payments(period_start: Optional[date] = None, period_end: Optional[date] = None,
-                   session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                   session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     """Admin-only, like every other endpoint in this router. It was the one
     that lacked the dependency, so anyone who could reach the server could
-    read every worker's amount_due without credentials - the farm's whole
-    payroll, to anyone who found the port. No frontend code
-    calls this (the admin screen uses /calculate and /export), so requiring
-    a token here changes nothing for the app."""
+    read every worker's amount_due - the farm's whole payroll, to anyone who
+    found the port. That port is still open to the farm Wi-Fi for the Field
+    and Pack House screens, so the dependency is what stands between the two.
+    No frontend code calls this (the admin screen uses /calculate and
+    /export), so guarding it changes nothing for the app."""
     query = select(Payment)
     if period_start:
         query = query.where(Payment.period_start == period_start)
@@ -143,7 +144,7 @@ def list_payments(period_start: Optional[date] = None, period_end: Optional[date
 @router.get("/export")
 def export_payments(period_start: date, period_end: date, supplier_id: Optional[int] = None,
                      fmt: str = Query("xlsx", pattern="^(csv|xlsx)$"),
-                     session: Session = Depends(get_session), admin=Depends(get_current_admin)):
+                     session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
     payments = session.exec(
         select(Payment).where(Payment.period_start == period_start, Payment.period_end == period_end)
     ).all()
