@@ -6,10 +6,11 @@ the mark or the brand colours:
 
     python3 scripts/render_icons.py
 
-The Owner app lives in its own repo (BoordOwner), so its icon is only
-rendered when you say where to put it:
+The Owner and Notes apps live in their own repos (BoordOwner, BoordNotes),
+so their icons are only rendered when you say where to put them:
 
     python3 scripts/render_icons.py --owner ../BoordOwner/frontend/icons
+    python3 scripts/render_icons.py --notes ../BoordNotes/frontend/app/icons
 
 Needs Pillow. The mark is drawn at 4x and downsampled, so no vector tooling
 is required on the machine that builds it.
@@ -26,19 +27,24 @@ BLUE = (10, 47, 107, 255)     # --boord-blue   #0A2F6B
 RED = (200, 16, 46, 255)      # --boord-red    #C8102E
 GREEN = (22, 163, 74, 255)    # --boord-green  #16a34a
 YELLOW = (234, 179, 8, 255)   # --boord-yellow #eab308
+SKY = (56, 189, 248, 255)     # --boord-sky    #38bdf8
 WHITE = (255, 255, 255, 255)
 
 # Same crate for every app; the leaf colour tells them apart on a home
-# screen, the way the old "LW"/"PH"/"AD" initials used to. The palette has
-# exactly three accents, so Owner - which ships from its own repo anyway -
-# takes the monochrome leaf instead of a fourth colour we would have to
-# invent. See KEYLINE for what that costs.
+# screen, the way the old "LW"/"PH"/"AD" initials used to. The three in-repo
+# apps take the three palette accents; Owner - which ships from its own repo
+# anyway - takes the monochrome leaf rather than a fourth colour invented for
+# it. See KEYLINE for what that costs.
 APPS = {
     "field": GREEN,
     "packhouse": RED,
     "admin": YELLOW,
 }
 OWNER_LEAF = WHITE
+# Notes came later, by which point white was spoken for, so it does get a new
+# accent. Sky reads as clearly distinct from green/red/yellow at the 48px a
+# home screen actually draws these at, which two warm colours would not.
+NOTES_LEAF = SKY
 
 SIZES = (512, 192, 180)
 SS = 4          # supersampling factor
@@ -203,6 +209,9 @@ def main():
     ap.add_argument("--owner", metavar="DIR",
                     help="also render the Owner icon into DIR "
                          "(BoordOwner's frontend/icons)")
+    ap.add_argument("--notes", metavar="DIR",
+                    help="also render the Notes icon into DIR "
+                         "(BoordNotes' frontend/app/icons)")
     args = ap.parse_args()
 
     for app, leaf_colour in APPS.items():
@@ -210,6 +219,9 @@ def main():
 
     if args.owner:
         write(render(OWNER_LEAF, keyline=True), args.owner)
+
+    if args.notes:
+        write(render(NOTES_LEAF), args.notes)
 
 
 if __name__ == "__main__":
