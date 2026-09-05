@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, SQLModel, select
 
 from db import get_session
-from models import Device, DeviceRole
+from models import Device, DeviceRole, Team
 from security import require_admin_client
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
@@ -50,7 +50,17 @@ def get_device(device_id: str, session: Session = Depends(get_session)):
     session.add(device)
     session.commit()
     session.refresh(device)
-    return device
+    # Induna is normally maintained on the Team (Settings > Master Data > Teams) -
+    # that is what the reports and the seed read. The Device carries its own
+    # induna column too (an optional per-device override), so prefer that when
+    # set and otherwise fall back to the assigned team's induna for the field-app
+    # station header.
+    payload = device.model_dump()
+    if not payload.get("induna") and device.team_id:
+        team = session.get(Team, device.team_id)
+        if team and team.induna:
+            payload["induna"] = team.induna
+    return payload
 
 
 @router.get("")
