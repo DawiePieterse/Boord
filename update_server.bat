@@ -223,8 +223,20 @@ if "!CURTAG!"=="!NEWTAG!" (
 :: repository git refuses to read because it is owned by another user. Written
 :: on both branches above, including the "already newest" one, so a server
 :: that never needed an update still ends up with a correct note.
-:: No space before the > - echo would write one into the file.
-echo !NEWTAG!> "%~dp0data\installed_version.txt"
+:: The redirect is written FIRST, which looks odd and is load-bearing. cmd
+:: reads a digit sitting immediately before a redirection arrow as a file
+:: handle number, so putting the tag first and the arrow after it eats the
+:: tag's last character whenever that character is a digit - which, for a
+:: version number, is almost always. v3.1 stored "v3." because the trailing
+:: 1 was taken as handle 1; v3.0 stored nothing at all, because the trailing
+:: 0 was taken as handle 0 and the file was opened as stdin and left empty.
+:: Leading with the redirect leaves no digit beside the arrow, and also
+:: removes the old trailing-space hazard this line used to warn about.
+::
+:: (The arrow is spelled out in words rather than typed in these comment
+:: lines because a redirection character inside a :: line is only reliably
+:: ignored at the top level of a script.)
+>"%~dp0data\installed_version.txt" echo !NEWTAG!
 
 echo.
 echo ==^> Installing any new dependencies...

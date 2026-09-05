@@ -416,11 +416,15 @@ cd /d "$BackendDir"
         Write-Host " update_server.bat will refuse to install anything until this"
         Write-Host " server knows which signing key to trust. In this folder, run:"
         Write-Host ""
-        Write-Host "     echo <FINGERPRINT>> data\release_key.fpr" -ForegroundColor Cyan
+        Write-Host "     >data\release_key.fpr echo <FINGERPRINT>" -ForegroundColor Cyan
         Write-Host ""
         Write-Host " ...with the 40-character fingerprint from whoever maintains"
-        Write-Host " this install. Note there is NO space before the > - echo would"
-        Write-Host " write one into the file and the fingerprint would not match."
+        Write-Host " this install. Type it with the redirect first, exactly as shown:"
+        Write-Host " cmd reads a digit written immediately before a > as a file handle"
+        Write-Host " number, so the more natural 'echo <FINGERPRINT>> file' would drop"
+        Write-Host " the fingerprint's last character whenever it is a digit - and the"
+        Write-Host " next update would then fail its signature check, which reads as"
+        Write-Host " tampering rather than as a typo."
         Write-Host " See MANUAL.md chapter 2, 'Trusting the release key'."
     } else {
         $fpr = (Get-Content $FprFile -TotalCount 1).Trim()

@@ -254,11 +254,16 @@ to trust - that is the one step a person has to perform.
 
 **The only manual step: record the fingerprint.** In the project folder:
 ```bat
-echo 67C64CFDD584DD140E58AF6E329C9B9DD0562A9D> data\release_key.fpr
+>data\release_key.fpr echo 67C64CFDD584DD140E58AF6E329C9B9DD0562A9D
 ```
 Substitute the fingerprint you were given by whoever maintains this
-install. **There is no space before the `>`** - `echo foo > file` writes a
-trailing space into the file and the fingerprint will not match. Check it:
+install. Type it with the **redirect first**, exactly as shown. `cmd` reads a
+digit written immediately before a `>` as a file handle number, so the more
+natural `echo <FINGERPRINT>> file` drops the fingerprint's last character
+whenever it happens to be a digit - and the next update then fails its
+signature check, which reads as tampering rather than as a typo. Leading with
+the redirect also avoids the trailing space that `echo foo > file` would
+write. Check it:
 ```bat
 type data\release_key.fpr
 ```
