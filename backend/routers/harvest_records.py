@@ -26,9 +26,9 @@ def harvest_record_counts(session: Session = Depends(get_session), _admin=Depend
 
     seed_demo.py calls this before it writes anything: a database holding
     crates it did not create belongs to a real farm, and seeding it would
-    overwrite the farm's GPS and blocks and file fake workers with invented
-    ID numbers and bank details alongside real people. The split is what lets
-    the seeder stay safe to re-run against its own demo database."""
+    overwrite the farm's GPS and blocks and file fake workers alongside real
+    people. The split is what lets the seeder stay safe to re-run against its
+    own demo database."""
     total = session.exec(select(func.count()).select_from(HarvestRecord)).one()
     demo = session.exec(
         select(func.count()).select_from(HarvestRecord)

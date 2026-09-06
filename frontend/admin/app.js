@@ -632,8 +632,8 @@ async function loadAllMasterData() {
 
 // Workers
 async function loadWorkers() {
-  // Full records, because the Edit modal needs id_number/bank/account.
-  // /api/workers hands those back only to the admin - decided from the
+  // Full records, because the Edit modal needs whatsapp_number.
+  // /api/workers hands that back only to the admin - decided from the
   // address this request arrives on, so there is nothing to ask for here.
   // A Field tablet calling the same endpoint gets a reduced projection.
   const workers = await Boord.api("/api/workers");
@@ -716,9 +716,6 @@ function editWorker(worker) {
     { key: "id", label: "Employee Number (e.g. 001)", disabled: !!worker },
     { key: "first_name", label: "First Name" },
     { key: "last_name", label: "Last Name" },
-    { key: "id_number", label: "SA ID Number" },
-    { key: "bank", label: "Bank" },
-    { key: "account", label: "Account Number" },
     { key: "whatsapp_number", label: "WhatsApp Number" },
     { key: "supplier_id", label: "Supplier", type: "select",
       options: [{ value: "", label: "(none)" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))] },
@@ -1353,7 +1350,7 @@ async function loadOffsiteStatus() {
   if (s.looks_like_cloud && warn) {
     warn.classList.remove("hidden");
     warn.className = "text-sm rounded-lg p-3 bg-amber-50 text-amber-800 border border-amber-200";
-    warn.innerHTML = "<b>This destination looks like a synced cloud folder.</b> Backups are not encrypted and contain every worker's ID number, banking details and photograph. Until backup encryption is added, use a drive that stays on the farm - a plugged-in USB or external disk, a second disk in this PC, or another machine on the farm's own network.";
+    warn.innerHTML = "<b>This destination looks like a synced cloud folder.</b> Backups are not encrypted and contain every worker's name, WhatsApp number and photograph. Until backup encryption is added, use a drive that stays on the farm - a plugged-in USB or external disk, a second disk in this PC, or another machine on the farm's own network.";
   }
 }
 

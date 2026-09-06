@@ -163,7 +163,7 @@ def export_payments(period_start: date, period_end: date, supplier_id: Optional[
         groups.setdefault(name, []).append(p)
     group_names = sorted(groups.keys(), key=lambda n: (n != own_name, n))
 
-    headers = ["Supplier", "Emp Nr", "Naam & Van", "Total Kg", "Rate", "Amount Due", "Bank", "Account"]
+    headers = ["Supplier", "Emp Nr", "Naam & Van", "Total Kg", "Rate", "Amount Due"]
     rows = []
     for name in group_names:
         group_payments = groups[name]
@@ -172,12 +172,11 @@ def export_payments(period_start: date, period_end: date, supplier_id: Optional[
         total_wages = round(sum(p.amount_due for p in group_payments), 2)
         summary = (f"{name} - {worker_count} worker{'s' if worker_count != 1 else ''} - "
                    f"{total_kg} kg - R{total_wages:.2f} total wages")
-        rows.append([summary, "", "", "", "", "", "", ""])
+        rows.append([summary, "", "", "", "", ""])
         for p in group_payments:
             w = workers.get(p.worker_id)
             rows.append([
                 name, p.worker_id, w.name if w else "", p.total_kg, p.rate_applied, p.amount_due,
-                w.bank if w else "", w.account if w else "",
             ])
 
     if fmt == "xlsx":

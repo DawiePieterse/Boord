@@ -481,21 +481,21 @@ def litchi_wages_report(period_start: date, period_end: date, supplier_id: Optio
         days_for_worker[day] = days_for_worker.get(day, 0) + 1
 
     days = sorted({d for wd in worker_days.values() for d in wd})
-    headers = ["Emp Nr", "Name & Surname", "ID Number"]
+    headers = ["Emp Nr", "Name & Surname"]
     headers += [d.isoformat() for d in days]
-    headers += ["Total Crates Harvested", "Bank", "Account"]
+    headers += ["Total Crates Harvested"]
 
     rows = []
     for worker_id in sorted(worker_days.keys()):
         w = workers.get(worker_id)
         wd = worker_days[worker_id]
-        row = [worker_id, w.name if w else "", w.id_number if w else ""]
+        row = [worker_id, w.name if w else ""]
         tot_harvested = 0
         for d in days:
             harvested = wd.get(d, 0)
             row.append(harvested)
             tot_harvested += harvested
-        row += [tot_harvested, w.bank if w else "", w.account if w else ""]
+        row += [tot_harvested]
         rows.append(row)
 
     return _xlsx_response(headers, rows, "Litchi Wages", f"Litchi_Wages_{period_start}_{period_end}.xlsx")

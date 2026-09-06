@@ -17,8 +17,7 @@ Safe to re-run: workers/suppliers upsert by id/name, crates upsert by uuid.
 DANGEROUS against a real farm, which is why it now asks twice. Nothing used
 to stop this being pointed at a live database, where it overwrites the farm's
 GPS location, its two teams and five of its blocks, and files eight invented
-people - complete with fabricated SA ID numbers and bank account numbers -
-into the same worker list that the payroll run reads. Hence:
+people into the same worker list that the payroll run reads. Hence:
 
   * ALLOW_DEMO_SEED=1 must be set, so it can never be an accidental
     up-arrow-and-enter against the wrong window; and
@@ -62,8 +61,6 @@ WORKERS = [
     ("007", "Pieter", "Steyn"), ("008", "Nomsa", "Zulu"),
 ]
 
-BANKS = ["FNB", "Capitec", "Standard Bank", "ABSA", "Nedbank"]
-
 BLOCK_DETAILS = {  # block id -> (variety, trees, hectares)
     "7": ("Mauritius", 420, 3.5), "8a": ("Mauritius", 380, 3.1), "8b": ("McLean's Red", 350, 2.9),
     "9": ("Mauritius", 460, 3.8), "10": ("McLean's Red", 300, 2.5),
@@ -90,8 +87,8 @@ def refuse_unless_safe():
     ignores what it put there itself, so re-running against a demo database
     stays fine. It is deliberately more suspicious than "are there crates?":
     a farm that has imported its workers and blocks but not yet picked
-    anything is the case where fabricated ID numbers would land quietly in
-    among real ones."""
+    anything is the case where invented people would land quietly in among
+    real ones."""
     reasons = []
 
     counts = api("/api/harvest-records/counts")
@@ -130,9 +127,9 @@ def refuse_unless_safe():
 def main():
     if os.environ.get("ALLOW_DEMO_SEED") != "1":
         sys.exit("Refusing to run without ALLOW_DEMO_SEED=1.\n\n"
-                 "This writes invented people, ID numbers and bank details into the target\n"
-                 "database and overwrites its farm location, teams and blocks. Confirm the\n"
-                 f"target is a throwaway database ({BASE}) with:\n\n"
+                 "This writes invented people into the target database and overwrites its\n"
+                 "farm location, teams and blocks. Confirm the target is a throwaway\n"
+                 f"database ({BASE}) with:\n\n"
                  "    ALLOW_DEMO_SEED=1 python3 seed_demo.py [base_url]")
 
     refuse_unless_safe()
@@ -175,9 +172,6 @@ def main():
     for emp, first, last in WORKERS:
         api("/api/workers", {
             "id": emp, "first_name": first, "last_name": last,
-            "id_number": f"850{random.randint(100, 999)}{random.randint(1000000, 9999999)}",
-            "bank": random.choice(BANKS),
-            "account": str(random.randint(10**9, 10**10 - 1)),
             "whatsapp_number": f"08{random.randint(2, 4)}{random.randint(1000000, 9999999)}",
             "supplier_id": supplier_by_emp.get(emp),
             "active": True,

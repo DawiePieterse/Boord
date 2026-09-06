@@ -55,9 +55,10 @@ class Worker(SQLModel, table=True):
     first_name: str = ""
     last_name: str = ""
     name: str = ""  # display name = first_name + " " + last_name, kept for reports compat
-    id_number: str = ""
-    bank: str = ""
-    account: str = ""
+    # SA ID number and bank details used to live here. They were dropped to
+    # comply with POPIA - Boord never needed them to run a harvest, and holding
+    # them made every backup and export a data-protection liability. See
+    # migration 20260906 (drop worker id/bank columns).
     team_id: Optional[str] = Field(default=None, foreign_key="team.id")  # kept for compat; not used in UI
     whatsapp_number: str = ""
     supplier_id: Optional[int] = Field(default=None, foreign_key="supplier.id")  # which farm/supplier this worker belongs to

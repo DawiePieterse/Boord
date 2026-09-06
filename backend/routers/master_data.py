@@ -168,21 +168,20 @@ async def import_blocks(file: UploadFile, replace: bool = Query(False),
 
 # What a caller off the farm wifi gets back for each worker. The Field app
 # (renderWorkerOptions) and the badge printer both read this endpoint from
-# tablets that have no admin access and need only these; everything else on
-# Worker - id_number (SA ID), bank, account, whatsapp_number - is personal
-# data that used to go out to anyone who could reach the server.
+# tablets that have no admin access and need only these; whatsapp_number is
+# the remaining personal field on Worker (SA ID and bank details were dropped
+# for POPIA) and it still only goes out to the admin.
 #
 # This split is why deleting the login could not simply delete the check. The
 # Field and Pack House screens are still served to the whole LAN, so without
-# it every phone in the orchard would be one request away from a full list of
-# ID and bank numbers.
+# it every phone in the orchard could pull every worker's WhatsApp number.
 _PUBLIC_WORKER_FIELDS = ("id", "first_name", "last_name", "name", "supplier_id", "photo_filename", "active")
 
 
 @router.get("/workers")
 def list_workers(session: Session = Depends(get_session), is_admin=Depends(is_admin_client)):
-    """Full records for the admin (the Master Data edit modal needs the
-    bank/ID fields); a reduced projection for everyone else."""
+    """Full records for the admin; a reduced projection (no whatsapp_number)
+    for everyone else."""
     workers = session.exec(select(Worker)).all()
     if is_admin:
         return workers
@@ -240,9 +239,9 @@ def export_workers(fmt: str = Query("xlsx", pattern="^(csv|xlsx)$"), session: Se
                     _admin=Depends(require_admin_client)):
     workers = session.exec(select(Worker)).all()
     supplier_names = {s.id: s.name for s in session.exec(select(Supplier)).all()}
-    headers = ["emp_nr", "first_name", "last_name", "id_number", "bank", "account", "whatsapp_number",
+    headers = ["emp_nr", "first_name", "last_name", "whatsapp_number",
                "supplier_id", "supplier_name", "active"]
-    rows = [[w.id, w.first_name, w.last_name, w.id_number, w.bank, w.account, w.whatsapp_number,
+    rows = [[w.id, w.first_name, w.last_name, w.whatsapp_number,
              w.supplier_id, supplier_names.get(w.supplier_id, ""), w.active]
             for w in workers]
     return _export(headers, rows, fmt, "Workers")
@@ -276,9 +275,6 @@ async def import_workers(file: UploadFile, session: Session = Depends(get_sessio
             first_name=str(first_name).strip(),
             last_name=str(last_name).strip(),
             name=display_name,
-            id_number=str(r.get("id_number") or "").strip(),
-            bank=r.get("bank") or "",
-            account=str(r.get("account") or ""),
             whatsapp_number=str(r.get("whatsapp_number") or ""),
             supplier_id=int(r["supplier_id"]) if r.get("supplier_id") else None,
             photo_filename=existing.photo_filename if existing else "",

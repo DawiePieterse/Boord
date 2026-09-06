@@ -444,7 +444,7 @@ the generated `start_server.bat`, and removes the Python virtual
 environment. It then prints what is still on the machine.
 
 **It does not delete `data\`, and it does not delete the project folder.**
-That folder holds the harvest database, worker photos and ID numbers, the
+That folder holds the harvest database, worker photos, the
 wage history, every backup, and the release-key fingerprint - a season of
 records that reinstalling does not bring back. Deleting it stays a
 deliberate act, so the uninstaller prints the commands rather than running
@@ -549,8 +549,8 @@ what's already in place first.
    printed, and `http://localhost:8000/` on this PC still loads the device
    setup screen. Only `/admin/` is restricted, and anything else asking
    for it gets *"The Admin app is only reachable over Tailscale"*. That is
-   what keeps worker ID numbers, bank details and the payroll off the
-   devices in the orchard now that there is no password in front of them.
+   what keeps worker contact details and the payroll off the devices in
+   the orchard now that there is no password in front of them.
 
 If the installer fails partway, or you'd rather understand/do each part
 by hand, use the manual steps below instead - they're exactly what the
@@ -576,7 +576,7 @@ likely to get tidied up or deleted by accident.
 > file handles open, which blocks updates and folder deletion (this is a
 > real one: it took a reboot to work out why a folder refused to delete).
 > More seriously, `data\` holds a live SQLite database plus every worker's
-> ID number, bank details and photograph - syncing a database file while
+> name, WhatsApp number and photograph - syncing a database file while
 > it is being written is a known way to corrupt it, and uploading worker
 > records to a personal cloud account is a data-protection problem you do
 > not want. Back up *to* a cloud drive by all means (chapter 14) - a
@@ -1016,8 +1016,8 @@ of phoning someone and asking them to read a screen. It contains exactly:
   is actually at - so a farm that never ran its migrations is visible
 - the date of the last backup, and how many are kept
 
-**It contains nothing about any person** - no worker names, ID numbers,
-banking details, photographs or counts, no supplier or block names, no
+**It contains nothing about any person** - no worker names, WhatsApp
+numbers, photographs or counts, no supplier or block names, no
 crate or lot figures, no coordinates, no file paths and no usernames. The
 pack house's own name is deliberately left out too: the check already
 carries whatever name you gave it in your own account.
@@ -1615,7 +1615,7 @@ pack house's reference data.
 
 ### Workers
 
-Employee number, name, ID number, bank/account, WhatsApp number, which
+Employee number, name, WhatsApp number, which
 supplier they belong to, a photo (captured via the device's camera
 right in the edit form, or uploaded), and active/inactive. Supports
 CSV/xlsx **Export** and **Import** for bulk edits, and the
@@ -1795,7 +1795,7 @@ worth writing down what the folder is:
 ```
 # Off-site backup copies. See MANUAL.md chapter 11.
 # NOT a synced cloud folder - these files are not encrypted and contain
-# every worker's ID number, banking details and photograph.
+# every worker's name, WhatsApp number and photograph.
 E:\BoordBackups
 ```
 
@@ -1809,9 +1809,9 @@ error message.
 
 > **⚠️ Do not point this at a synced cloud folder - Google Drive, OneDrive,
 > Dropbox, iCloud.** A backup archive contains `boord.db`, which holds
-> **every worker's SA ID number, bank and account number, WhatsApp number
-> and photograph**, plus every photo file. The archives are not encrypted
-> yet, so copying them into a personal cloud account puts the pack house's
+> **every worker's name, WhatsApp number and photograph**, plus every photo
+> file. The archives are not encrypted yet, so copying them into a personal
+> cloud account puts the pack house's
 > worker records on someone else's servers, under a personal login, outside
 > the farm's control. The app warns if the destination looks like one of
 > those folders, but it cannot tell for certain - any folder can be added
@@ -2055,9 +2055,6 @@ keys below match `backend/models.py` exactly.
 | `id` | text | `"001"` | Primary key - the employee number. Must be unique and must match the number printed on the worker's badge. |
 | `first_name` | text | `"Sipho"` | |
 | `last_name` | text | `"Dlamini"` | |
-| `id_number` | text | `"8501015800083"` | Free text, not validated. |
-| `bank` | text | `"Nedbank"` | |
-| `account` | text | `"9963334018"` | |
 | `whatsapp_number` | text | `"+27821234567"` | Optional, not currently used to send anything automatically. |
 | `supplier_id` | number (optional) | `2` | Which farm this worker belongs to. Left blank for the farm's own workers. |
 | `photo_filename` | text | `"001.jpg"` | Set automatically when a photo is captured/uploaded - not hand-edited. |

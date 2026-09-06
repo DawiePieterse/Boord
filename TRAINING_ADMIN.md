@@ -22,7 +22,7 @@ no fallback, on purpose.
 
 That restriction is the point rather than an inconvenience: the pickers'
 and receiving tablets are on the farm Wi-Fi, and everything sensitive —
-worker ID numbers, bank details, the whole payroll — lives behind these
+worker contact details, the whole payroll — lives behind these
 screens. Their own Field and Pack House apps are unaffected and keep
 working on the Wi-Fi exactly as before.
 
@@ -123,9 +123,9 @@ Five subtabs: **Workers**, **Teams**, **Blocks**, **Devices**,
 ### Adding a worker
 
 1. Master Data → Workers → **+ Add Worker**.
-2. Fill in Employee Number, First Name, Last Name, SA ID Number, Bank,
-   Account Number, WhatsApp Number, and which Farm/Supplier they belong
-   to (leave as "(none)" for your own farm's workers).
+2. Fill in Employee Number, First Name, Last Name, WhatsApp Number, and
+   which Farm/Supplier they belong to (leave as "(none)" for your own
+   farm's workers).
 3. Optionally take or upload a **Photo** right there.
 4. Make sure **Active** is ticked, then **Save**.
 

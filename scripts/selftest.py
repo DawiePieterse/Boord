@@ -749,7 +749,7 @@ def test_a_destination_inside_the_repo_is_refused():
 # Admin access
 #
 # Boord has no login. What decides who sees Settings, payments, exports and
-# every worker's ID and bank number is the network a request arrives on: only
+# every worker's contact details is the network a request arrives on: only
 # Tailscale gets in - not the farm wifi, and as of this release not the
 # server's own console either (backend/security.py).
 #

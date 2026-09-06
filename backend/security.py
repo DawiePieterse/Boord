@@ -33,7 +33,7 @@ The Field and Pack House screens are NOT behind any of this. They are phones
 and tablets in an orchard and on a receiving bay, they have never had
 credentials, and uvicorn still binds 0.0.0.0 for them - see install.ps1.
 Removing the login without this file would have handed those same devices
-Settings, payments, exports and every worker's ID number and bank details.
+Settings, payments, exports and every worker's contact details.
 """
 import ipaddress
 import os
