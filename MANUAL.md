@@ -966,7 +966,7 @@ this server's access code, and provide the password when prompted.
 
 ### Uptime alerting (email if the server goes down)
 
-Gets you an email if the server is unreachable for more than an hour.
+Gets you an email if a server is unreachable for more than an hour.
 This can't be done by anything running only on the server PC itself - if
 that PC loses power or its internet entirely, nothing on it can send you
 anything. Instead it uses a **"dead man's switch"**: the server pings an
@@ -975,39 +975,93 @@ that outside service is the one that notices when the pings stop and
 emails you - it's watching for silence, not waiting to be told about a
 problem.
 
-**Step 1 - Create a healthchecks.io check.**
+**Step 1 - Create a healthchecks.io check for each application.**
 1. Sign up free at [healthchecks.io](https://healthchecks.io).
-2. Create a check (e.g. named "Boord Server").
-3. Click **Edit** and set **Period** to **10 minutes** and **Grace Time**
-   to **1 hour** - this means an isolated missed ping (a brief network
-   blip) is tolerated, but if pings stop entirely for over an hour, it
-   emails the account's address.
-4. Copy the ping URL shown on the check's page (starts with
-   `https://hc-ping.com/...`).
+2. Create **one check per application you want watched** - Boord, Boord
+   Owner, Boord Notes and Kudde can each have their own. Name them so you
+   can tell them apart in an email at six in the morning ("Boord",
+   "Kudde", and so on). Watching only Boord is a perfectly reasonable
+   choice; the others are then simply not reported on.
+3. On each check, click **Edit** and set **Period** to **10 minutes** and
+   **Grace Time** to **1 hour** - an isolated missed ping (a brief
+   network blip) is tolerated, but if pings stop entirely for over an
+   hour, it emails the account's address.
+4. Copy the ping URL from each check's page (each starts with
+   `https://hc-ping.com/...`). They are different URLs; keep track of
+   which belongs to which.
 
-**Step 2 - Save the ping URL on the server.**
-Create a new text file at `heartbeat_url.txt`, in the same folder as
-`heartbeat.ps1` (the top of the project folder), containing just that one
-URL and nothing else. This file is deliberately **not** committed to
-git - like a password, it's account-specific and shouldn't live in
-version control (`.gitignore` already excludes it).
+**Step 2 - Save the ping URLs on the server.**
+Create a text file at `heartbeat_url.txt`, in the same folder as
+`heartbeat.ps1` (the top of the project folder), naming one application
+per line:
+
+```
+boord = https://hc-ping.com/aaaaaaaa-...
+owner = https://hc-ping.com/bbbbbbbb-...
+notes = https://hc-ping.com/cccccccc-...
+kudde = https://hc-ping.com/dddddddd-...
+```
+
+The names on the left are `boord`, `owner`, `notes` and `kudde`. Case
+doesn't matter and neither do spaces or hyphens, so `Boord Owner` and
+`boord-owner` both work. Blank lines are ignored, and a line starting
+with `#` is a comment. Leave out any application you don't want watched.
+
+If your file already contains a single URL on its own with no name in
+front of it - which is what installs before v3.8 were told to create -
+**leave it exactly as it is.** A bare URL means Boord, so that file keeps
+working untouched, and you can add the other three as named lines beneath
+it.
+
+> **One line may be bare, and it means Boord.** Adding a second
+> application by pasting its URL on a line of its own does not work, and
+> the setup script says so rather than letting it silently take over
+> Boord's alerting. Give every URL after the first a name.
+
+This file is deliberately **not** committed to git - like a password,
+each URL is account-specific and shouldn't live in version control
+(`.gitignore` already excludes it). Anyone holding one of these URLs can
+post to your check.
 
 **Step 3 - Register the heartbeat task.**
 Double-click **`setup_heartbeat.bat`**. It registers a Scheduled Task
-("Boord Heartbeat") that runs `heartbeat.ps1` every 10 minutes,
-which only pings healthchecks.io when `http://localhost:8000/` actually
-responds - so a crashed/hung server (not just a powered-off PC) also
-triggers the alert, since the heartbeat is contingent on the app itself
-working, not just the PC being on.
+("Boord Heartbeat") that runs `heartbeat.ps1` every 10 minutes. For each
+application you listed, it pings that application's check only when the
+app itself actually answers on its own port - so a crashed or hung
+server (not just a powered-off PC) also triggers the alert, since the
+ping is contingent on the app working, not just the PC being on.
 
-That's it - as long as the check on healthchecks.io keeps receiving
-pings, nothing happens. If the server goes down and stays down past the
-1-hour grace period, healthchecks.io emails the account used to sign up.
+The script finishes by reading `heartbeat_url.txt` back and printing
+which applications it will report on. **Read that list.** A mistyped name
+is otherwise completely silent: the line does nothing, that application
+is never reported on, and the absence of alerts looks exactly like an
+application that has been fine all along. To see the same list again at
+any time:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File heartbeat.ps1 -DryRun
+```
+
+That reads the file and pings nothing.
+
+That's it - as long as a check on healthchecks.io keeps receiving pings,
+nothing happens. If that application goes down and stays down past the
+1-hour grace period, healthchecks.io emails the account used to sign up,
+naming the check - which is why it is worth naming them properly in step
+1. The applications are independent: Boord going down does not silence
+Kudde's check or vice versa.
+
+Note that an application listed in `heartbeat_url.txt` but **not
+installed** on this PC will be reported as down, because it genuinely
+isn't answering. If you remove an application from the PC, remove its
+line from the file too.
 
 **What the ping carries.** Each successful ping sends a short line of text
 with it, visible in the check's log on healthchecks.io. It is there so the
 release a site is running can be read from the monitoring account instead
-of phoning someone and asking them to read a screen. It contains exactly:
+of phoning someone and asking them to read a screen. Boord and Kudde send
+it; Boord Owner and Boord Notes have no version endpoint and simply ping
+with nothing attached. It contains exactly:
 
 - the release tag and whether it is a release, a checkout between releases,
   or unknown

@@ -4,6 +4,14 @@
 :: See MANUAL.md chapter 2, "Uptime alerting", for the healthchecks.io
 :: account setup this depends on - do that first (including creating
 :: heartbeat_url.txt next to this script), then run this once.
+::
+:: One check per application: Boord, Boord Owner, Boord Notes and Kudde can
+:: each have their own ping URL in heartbeat_url.txt. Apps with no URL are
+:: simply not reported on.
+::
+:: This alerts. It does not fix. setup_watchdog.bat is the other half - it
+:: restarts a server that has stopped, which this cannot do, while this
+:: reaches you when the PC itself is off, which the watchdog cannot do.
 
 net session >nul 2>&1
 if %errorLevel% neq 0 (
@@ -36,8 +44,16 @@ if %errorLevel% neq 0 (
 )
 
 echo.
+echo ==^> Reading heartbeat_url.txt back, so a typo shows up now...
+echo     ^(nothing is pinged by this - it only reports what it read^)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0heartbeat.ps1" -DryRun
+
+echo.
 echo Done - "Boord Heartbeat" is registered and will run every
-echo 10 minutes from now on, checking in with healthchecks.io as long as
-echo the server responds.
+echo 10 minutes from now on, checking in with healthchecks.io for each
+echo application listed above that has a ping URL.
+echo.
+echo If an application says "no check configured" and you wanted it
+echo watched, add a line for it to heartbeat_url.txt and run this again.
 echo.
 pause
