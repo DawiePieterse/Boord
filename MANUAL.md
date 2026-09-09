@@ -1036,6 +1036,78 @@ be running at 02:00 - see that chapter's note on this limitation.
 Separately, a night on which nothing changed is skipped on purpose and
 adds no backup - that's normal, not a fault.)
 
+**But "leave it running" is not a plan on its own.** Each server on this
+PC is registered to start when Windows starts, and after that nothing
+looks at it again. If the app stops at eleven in the morning - an
+unhandled error, a bad update, Windows reclaiming memory under pressure -
+the scheduled task simply ends, and nothing brings it back until somebody
+reboots the PC. On a pack house floor that is a morning of paper.
+
+**The watchdog fixes that.** Double-click **`setup_watchdog.bat`** once.
+It registers a Scheduled Task ("Boord Watchdog") that runs every 5
+minutes and, for each of the servers installed on this PC, checks that
+the port actually answers. Anything that has stopped answering is
+stopped properly and started again. It covers all four applications that
+can share this machine, not only Boord:
+
+| Application | Port | Scheduled task |
+| --- | --- | --- |
+| Boord | 8000 | Boord Server |
+| Boord Owner | 8010 | Boord Owner Server |
+| Boord Notes | 8020 | Boord Notes Server |
+| Kudde | 8030 | Kudde Server |
+
+An application that isn't installed here is skipped, not reported as
+down, so the same file suits a PC running two of them and a PC running
+all four. What it found and what it did is written to
+`data\watchdog.log`.
+
+**Register the watchdog *and* the heartbeat above - they do opposite
+halves of the job.** The watchdog runs on the server PC, so it can fix
+things but can tell you nothing when that PC is off, asleep or off the
+internet. The heartbeat can't fix anything, but it is the only one of the
+two that reaches you when the PC itself is the problem. Neither replaces
+the other.
+
+**What it deliberately won't do.**
+
+- **It won't restart a server over a slow moment.** A single missed check
+  is not an outage - a virus scan can stall a request past ten seconds.
+  It probes three times, fifteen seconds apart, and only acts if all
+  three fail.
+- **It won't restart anything for the first five minutes after a
+  reboot**, while the servers are still starting.
+- **It won't restart anything while an update or an install is
+  running.** `update_server.bat` stops the server *on purpose* so the
+  database migration runs with nothing writing to it; a watchdog that
+  helpfully started it again would put a live server on top of a
+  half-migrated database. It notices those scripts running and stands
+  down.
+- **It won't kill a process it can't prove is ours.** If something else
+  on the PC has taken one of these ports, it refuses to restart and says
+  so in the log, rather than killing an unrelated program with system
+  rights.
+- **It won't restart a server that is merely erroring.** Any HTTP
+  answer - including a 500 - counts as up. Only a refused connection or
+  a timeout counts as down, because a restart cannot fix a bug and taking
+  a working pack house offline to try is the worse trade.
+
+**Pausing it.** If you're working on a server by hand and want it to stay
+down, create an empty file at `data\watchdog.pause` in the Boord folder.
+The watchdog leaves everything alone while that file exists. Delete it
+when you're done - and if you forget, it's ignored after 12 hours and
+normal restarts resume, so a forgotten pause file can't quietly disable
+the thing for a season.
+
+**Checking on it.** To see the current state of all four without waiting
+for the next run, open a terminal in the Boord folder and run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File watchdog.ps1 -CheckOnly
+```
+
+That reports what is up and what is down and changes nothing.
+
 ### What happens on first startup
 
 The very first time the server runs, it automatically creates the

@@ -20,12 +20,18 @@
 param(
     [int]$Port = 8000,
     [string]$TaskName = "Boord Server",
-    [int]$TimeoutSeconds = 20
+    [int]$TimeoutSeconds = 20,
+    # Which project's server this is stopping. Defaults to this repo, which is
+    # every caller that lives beside this file - update_server.bat and
+    # uninstall.ps1. watchdog.ps1 passes another project's folder, because the
+    # "is this process ours?" check below is only as good as the virtual
+    # environment it compares against: given Boord's venv and Boord Owner's
+    # uvicorn, the check correctly refuses, and the Owner app never restarts.
+    [string]$RepoRoot = $PSScriptRoot
 )
 
 $ErrorActionPreference = "Stop"
 
-$RepoRoot = $PSScriptRoot
 $VenvDir = Join-Path (Join-Path $RepoRoot "backend") ".venv"
 
 function Write-Step($msg) {
@@ -104,7 +110,7 @@ foreach ($conn in Get-PortListeners $Port) {
         }
     } else {
         $shown = if ($path) { $path } else { "$($proc.ProcessName) (path not readable)" }
-        Write-Err "PID $ownerPid is not a Boord process: $shown"
+        Write-Err "PID $ownerPid does not run from $VenvDir - not ours: $shown"
         $refused += "PID $ownerPid ($shown)"
     }
 }
