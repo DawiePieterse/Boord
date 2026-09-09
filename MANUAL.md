@@ -907,27 +907,44 @@ requires no changes to the app itself:
 4. Find the exact address to use with `tailscale status` - it looks like
    `https://<server-name>.<tailnet-name>.ts.net/`.
 
-#### If the Boord Owner app is on this machine too
+#### If other apps are on this machine too
 
-`:443` is one slot per machine, and both apps' instructions tell you to claim
-it - Boord for port 8000, Boord Owner for port 8010. Whichever command was run
-last silently wins, and the other app becomes unreachable over Tailscale
-without anything reporting an error.
+`:443` is one slot per machine, and every one of these apps' instructions
+tells you to claim it. Whichever command was run last silently wins, and the
+others become unreachable over Tailscale without anything reporting an error.
 
 **Boord takes 443.** It is the app people use all day, and the Field QR
 scanner only works on an HTTPS origin, so a Field device pointed at the root
-address has to land here. Boord Owner moves to `:8443`:
+address has to land here. Everything else gets its own port:
+
+| App | Tailscale port | Proxies to | Address |
+| --- | --- | --- | --- |
+| Boord | 443 | `localhost:8000` | `https://<server>.<tailnet>.ts.net/` |
+| Boord Owner | 8443 | `localhost:8010` | `...ts.net:8443/` |
+| Boord Notes | 9443 | `localhost:8020` | `...ts.net:9443/app/` |
+| Kudde | 8030 | `localhost:8030` | `...ts.net:8030/` |
+
+Set every app this PC runs in one go. `tailscale serve status` should then
+list exactly those:
 
 ```
 tailscale serve reset
-tailscale serve --bg --https=443 http://localhost:8000
+tailscale serve --bg --https=443  http://localhost:8000
 tailscale serve --bg --https=8443 http://localhost:8010
+tailscale serve --bg --https=9443 http://localhost:8020
+tailscale serve --bg --https=8030 http://localhost:8030
 ```
 
-The first is Boord, the second Boord Owner. `tailscale serve status` should
-then list both. The Owner app's address gains the port:
-`https://<server-name>.<tailnet-name>.ts.net:8443/`. Same certificate, so
-nothing else changes.
+> **`tailscale serve reset` clears every mapping on the machine, including
+> the ones it is not about to set.** Run the whole block, and leave out only
+> the lines for apps this PC genuinely does not have. Running a shorter
+> version of this block that was written when the machine had fewer apps on
+> it is the easiest way to unpublish the ones it forgets - and, as below,
+> that failure does not look like a port problem.
+
+Same certificate for all of them, so nothing else changes. Kudde's port
+matches its app port, which is only a convenience; it is a separate setting
+and nothing breaks if they differ.
 
 **The symptom of getting this wrong is the giveaway**, because it looks like
 nothing to do with ports: the address loads, but answers
