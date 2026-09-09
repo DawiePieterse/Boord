@@ -32,11 +32,19 @@ $urlFile = Join-Path $here "heartbeat_url.txt"
 # left of the "=" in heartbeat_url.txt; they are matched with spaces, hyphens
 # and underscores stripped and case ignored, so "Boord Owner", "boord-owner"
 # and "owner" are all the same key.
+#
+# Health is the path that proves the app is up. It is "/" for most, but Kudde
+# refuses every request that did not arrive over Tailscale - including from
+# this PC's own console - and answers only /healthz, which exists precisely
+# to prove the process is up without saying anything about the herd. Probing
+# "/" there gets a 403 from a perfectly healthy server, and since only a 200
+# counts as alive below, that would have reported Kudde down every ten
+# minutes forever: an alert that is always firing is one nobody reads.
 $Apps = @(
-    @{ Name = "Boord";       Port = 8000; Aliases = @("boord") },
-    @{ Name = "Boord Owner"; Port = 8010; Aliases = @("owner", "boordowner") },
-    @{ Name = "Boord Notes"; Port = 8020; Aliases = @("notes", "boordnotes") },
-    @{ Name = "Kudde";       Port = 8030; Aliases = @("kudde") }
+    @{ Name = "Boord";       Port = 8000; Aliases = @("boord");             Health = "/" },
+    @{ Name = "Boord Owner"; Port = 8010; Aliases = @("owner","boordowner"); Health = "/" },
+    @{ Name = "Boord Notes"; Port = 8020; Aliases = @("notes","boordnotes"); Health = "/" },
+    @{ Name = "Kudde";       Port = 8030; Aliases = @("kudde");             Health = "/healthz" }
 )
 
 if (-not (Test-Path $urlFile)) {
@@ -189,7 +197,7 @@ foreach ($app in $Apps) {
     if (-not $urls.ContainsKey($app.Name)) { continue }
     $pingUrl = $urls[$app.Name]
     try {
-        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$($app.Port)/" -UseBasicParsing -TimeoutSec 10
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$($app.Port)$($app.Health)" -UseBasicParsing -TimeoutSec 10
         if ($response.StatusCode -eq 200) {
             Send-Ping $pingUrl (Get-VersionBody $app.Port)
         } else {

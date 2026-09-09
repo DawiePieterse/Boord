@@ -41,11 +41,16 @@ $ErrorActionPreference = "Stop"
 # An app whose task is not registered on this PC is skipped, not reported as
 # down - that is how one file covers a machine running two of these and a
 # machine running all four.
+# Health is the path to probe. It is "/" for most, but Kudde refuses every
+# request that did not arrive over Tailscale - including from this PC's own
+# console - and answers only /healthz, which exists precisely to prove the
+# process is up without saying anything about the herd. Probing "/" there
+# gets a 403 from a perfectly healthy server.
 $Apps = @(
-    @{ Name = "Boord";       Port = 8000; Task = "Boord Server" },
-    @{ Name = "Boord Owner"; Port = 8010; Task = "Boord Owner Server" },
-    @{ Name = "Boord Notes"; Port = 8020; Task = "Boord Notes Server" },
-    @{ Name = "Kudde";       Port = 8030; Task = "Kudde Server" }
+    @{ Name = "Boord";       Port = 8000; Task = "Boord Server";       Health = "/" },
+    @{ Name = "Boord Owner"; Port = 8010; Task = "Boord Owner Server"; Health = "/" },
+    @{ Name = "Boord Notes"; Port = 8020; Task = "Boord Notes Server"; Health = "/" },
+    @{ Name = "Kudde";       Port = 8030; Task = "Kudde Server";       Health = "/healthz" }
 )
 
 $LogFile   = Join-Path (Join-Path $PSScriptRoot "data") "watchdog.log"
@@ -85,9 +90,9 @@ function Write-Log($msg) {
     } catch { }
 }
 
-function Test-AppUp($port, $timeoutSeconds) {
+function Test-AppUp($port, $path, $timeoutSeconds) {
     try {
-        Invoke-WebRequest -Uri "http://127.0.0.1:$port/" -UseBasicParsing `
+        Invoke-WebRequest -Uri "http://127.0.0.1:$port$path" -UseBasicParsing `
             -TimeoutSec $timeoutSeconds | Out-Null
         return $true
     } catch {
@@ -229,7 +234,7 @@ function Restart-App($app) {
     # iterations, because each probe can itself sit on a timeout.
     $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $deadline) {
-        if (Test-AppUp $app.Port 3) {
+        if (Test-AppUp $app.Port $app.Health 3) {
             Write-Log "  RECOVERED: $name is answering on port $($app.Port) again."
             return $true
         }
@@ -260,7 +265,7 @@ foreach ($app in $Apps) {
         continue
     }
     $checked++
-    if (Test-AppUp $app.Port $ProbeTimeoutSeconds) {
+    if (Test-AppUp $app.Port $app.Health $ProbeTimeoutSeconds) {
         if ($CheckOnly) { Write-Log "$($app.Name): UP on port $($app.Port)." }
         continue
     }
@@ -269,7 +274,7 @@ foreach ($app in $Apps) {
     $up = $false
     for ($attempt = 2; $attempt -le $Probes; $attempt++) {
         Start-Sleep -Seconds $ProbeGapSeconds
-        if (Test-AppUp $app.Port $ProbeTimeoutSeconds) { $up = $true; break }
+        if (Test-AppUp $app.Port $app.Health $ProbeTimeoutSeconds) { $up = $true; break }
     }
     if ($up) {
         Write-Log "$($app.Name): missed a probe on port $($app.Port) but answered on retry - left alone."
