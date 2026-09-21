@@ -16,6 +16,7 @@ Usage: python3 render_manual_pdf.py <repo_dir> [stem]
   <repo_dir> - path containing <stem>.md, output written next to it
   [stem]     - filename without extension, defaults to "MANUAL"
 """
+import os
 import re
 import sys
 import subprocess
@@ -97,6 +98,37 @@ strong { font-weight: 600; }
 """
 
 
+# stem -> (app icon dir, accent colour = that app's leaf, tagline)
+COVERS = {
+    "MANUAL": ("admin", "#eab308", "User & Admin Manual"),
+    "TRAINING_ADMIN": ("admin", "#eab308", "Training Guide"),
+    "TRAINING_FIELD": ("field", "#16a34a", "Training Guide"),
+    "TRAINING_PACKHOUSE": ("packhouse", "#C8102E", "Training Guide"),
+}
+
+COVER_CSS = """
+@page cover { margin: 0; }
+.cover { page: cover; page-break-after: always; height: 297mm; background: #0A2F6B; color: #fff;
+  text-align: center; position: relative; overflow: hidden; }
+.cover .ring { position: absolute; left: 50%; top: 88mm; width: 150mm; height: 150mm; margin-left: -75mm;
+  border-radius: 50%; border: 1.5pt solid __ACCENT__; opacity: .35; }
+.cover .ring2 { width: 190mm; height: 190mm; margin-left: -95mm; top: 68mm; opacity: .15; }
+.cover img { position: absolute; left: 50%; top: 108mm; width: 110mm; margin-left: -55mm; border-radius: 24mm; }
+.cover .brand { position: absolute; top: 28mm; width: 100%; font-size: 13pt; letter-spacing: 8pt; font-weight: 600; color: __ACCENT__; }
+.cover .title { position: absolute; top: 218mm; width: 100%; font-size: 34pt; font-weight: 600; line-height: 1.15; padding: 0 20mm; box-sizing: border-box; }
+.cover .bar { position: absolute; top: 250mm; left: 50%; width: 30mm; margin-left: -15mm; border-top: 3pt solid __ACCENT__; }
+.cover .tag { position: absolute; top: 257mm; width: 100%; font-size: 13pt; color: #cbd5e1; letter-spacing: 1pt; }
+"""
+
+
+def cover_html(stem, repo_dir, title):
+    app, accent, tag = COVERS[stem]
+    icon = f"file://{os.path.abspath(repo_dir)}/frontend/{app}/icons/icon-512.png"
+    css = COVER_CSS.replace("__ACCENT__", accent)
+    return f"""<style>{css}</style><div class="cover"><div class="ring"></div><div class="ring ring2"></div>
+<div class="brand">BOORD</div><img src="{icon}"><div class="title">{title}</div><div class="bar"></div><div class="tag">{tag}</div></div>"""
+
+
 def main():
     repo_dir = sys.argv[1] if len(sys.argv) > 1 else "."
     stem = sys.argv[2] if len(sys.argv) > 2 else "MANUAL"
@@ -111,6 +143,13 @@ def main():
     with open(md_path, "r", encoding="utf-8") as f:
         text = f.read()
     text = ensure_blank_before_lists(text)
+    cover = ""
+    if stem in COVERS:
+        # the cover carries the H1; drop it (and the rule after the intro) from the body
+        m = re.match(r'# (.+)\n', text)
+        title = re.split(r" [—-] ", m.group(1))[0] if stem != "MANUAL" else "Boord"
+        text = text[m.end():]
+        cover = cover_html(stem, repo_dir, title)
 
     body = markdown.markdown(
         text,
@@ -121,7 +160,7 @@ def main():
     css = CSS.replace("__H2_PAGE_BREAK__", "page-break-before: avoid;" if compact else "page-break-before: always;")
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{css}</style></head>
-<body>{body}</body></html>"""
+<body>{cover}{body}</body></html>"""
 
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
