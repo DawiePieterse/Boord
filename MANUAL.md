@@ -583,11 +583,11 @@ likely to get tidied up or deleted by accident.
 > backup zip is a finished file, which is exactly what sync is good at.
 > Just do not run the app from one.
 
-> **Set the farm's GPS location.** The weather shown in the header, and the
-> conditions stamped onto every crate and picking note, are looked up for
-> those coordinates. Until they are set the app fetches no weather at all -
-> the header reads "Set farm location in Settings" and crates save without
-> it. Nothing else is affected.
+> **Set the farm's GPS location (or its own weather station).** The weather
+> shown in the header, and the conditions stamped onto every crate and
+> picking note, are looked up for whichever is set. Until one is, the app
+> fetches no weather at all - the header reads "Set farm location in
+> Settings" and crates save without it. Nothing else is affected.
 
 **Step 2 - Install Python.**
 
@@ -2019,9 +2019,12 @@ season start date (a month and a day that repeats every year - drives what
 "Season" means throughout the app; the current season year is shown
 beside it), the green→yellow and yellow→red urgency thresholds in minutes
 (used everywhere the traffic-light coloring appears -
-[chapter 1](#1-overview--concepts)), and GPS coordinates
-(latitude/longitude, or pick a location on the map) - setting these
-enables automatic weather capture on every dispatched load.
+[chapter 1](#1-overview--concepts)), GPS coordinates
+(latitude/longitude, or pick a location on the map), and an **iWeathar
+station id** - setting either the GPS coordinates or the station id enables
+automatic weather capture on every dispatched load. A station id is a real
+on-farm weather station (from its `iweathar.co.za/display?s_id=...` link)
+and, when set, is used in preference to the GPS-based forecast.
 
 ### Harvest rate
 
@@ -2263,7 +2266,7 @@ keys below match `backend/models.py` exactly.
 | `weight_kg` | decimal | `12.4` | A single crate's weight - typically in the 8-20kg range for litchi crates. |
 | `deduction_kg` | decimal | `0.0` | "Aftrekkings" (waste/reject deduction), subtracted from the crate's weight everywhere a total is calculated. Always `0` at capture time - there's no field-app screen for it - but an admin can set a non-zero value when [correcting a crate](#correcting-a-captured-crate) after it's received. |
 | `lot_id` | number (optional) | `21` | Always set at capture time, pointing at a placeholder load that becomes a real dispatch once "Send Picking Slip" is used. |
-| `weather_temp` / `weather_humidity` / `weather_condition` | decimal / decimal / text | `24.1` / `55` / `"Clear"` | Conditions at the farm the moment the crate synced to the server, only if GPS coordinates are set in Settings - same source as the per-lot weather on Lot below, but stamped once per crate rather than once per dispatch. |
+| `weather_temp` / `weather_humidity` / `weather_condition` | decimal / decimal / text | `24.1` / `55` / `"Clear"` | Conditions at the farm the moment the crate synced to the server, only if a weather source (station id or GPS coordinates) is set in Settings - same source as the per-lot weather on Lot below, but stamped once per crate rather than once per dispatch. |
 | `edited_at` / `edited_by` | timestamp / text (both optional) | — / `"admin"` | Set only when an admin [corrects this crate](#correcting-a-captured-crate) after capture - never touched by the field app. Once set, a re-sync of the capturing device's original copy of this crate can no longer overwrite the correction. |
 
 ### Lot (a picking slip / load)
@@ -2277,7 +2280,7 @@ keys below match `backend/models.py` exactly.
 | `total_crates` / `total_kg` | number / decimal | `18` / `238.5` | |
 | `status` | enum | `"in_transit"` | One of `created` (still being picked), `in_transit` (dispatched), `received`, `processing_complete`. |
 | `received_at` | timestamp (optional) | — | Set the moment pack house staff confirm receipt. |
-| `weather_temp` / `weather_humidity` / `weather_condition` | decimal / decimal / text | `24.1` / `55` / `"Clear"` | Captured automatically at dispatch time (or when an external delivery is logged), only if GPS coordinates are set in Settings. |
+| `weather_temp` / `weather_humidity` / `weather_condition` | decimal / decimal / text | `24.1` / `55` / `"Clear"` | Captured automatically at dispatch time (or when an external delivery is logged), only if a weather source (station id or GPS coordinates) is set in Settings. |
 | `split_from_slip_number` | text (optional) | — | Only set on the "leftover" slip created by a split (chapter 4) - points back at the original slip it was carved out of. |
 
 ### ReceivingRecord
@@ -2319,4 +2322,5 @@ keys below match `backend/models.py` exactly.
 | `season_start_month` / `season_start_day` | number | `9` / `1` | The recurring season start (defaults to `1` / `1` = calendar year). Drives what "Season" means throughout the app (chapters 7, 9, 10). |
 | `current_harvest_year` | number | `2026` | Derived label for the current season - the year it starts in. Kept in sync from the season start date. |
 | `green_to_yellow_minutes` / `yellow_to_red_minutes` | number | `90` / `150` | The urgency color thresholds referenced throughout chapters 1, 4, 6, 7. |
-| `gps_lat` / `gps_lon` | decimal (optional) | `-25.572747` / `31.606722` | Setting both enables automatic weather capture on dispatch. |
+| `gps_lat` / `gps_lon` | decimal (optional) | `-25.572747` / `31.606722` | Setting both enables automatic weather capture on dispatch from a regional forecast (Open-Meteo). Ignored for weather if `weather_station_id` is also set. |
+| `weather_station_id` | text (optional) | `"2235"` | The `s_id` from an iWeathar (`iweathar.co.za`) station's display link. When set, takes priority over `gps_lat`/`gps_lon` for weather capture - a real on-farm station reading instead of a regional forecast. |

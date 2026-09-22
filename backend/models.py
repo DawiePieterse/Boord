@@ -119,6 +119,10 @@ class SystemSetting(SQLModel, table=True):
     current_harvest_year: int = datetime.now().year
     gps_lat: Optional[float] = None
     gps_lon: Optional[float] = None
+    # iWeathar (iweathar.co.za) station id - the s_id query param off the
+    # station's public display page. When set, this is real on-farm weather
+    # and takes priority over the GPS-based forecast above.
+    weather_station_id: Optional[str] = None
 
 
 class SetupState(SQLModel, table=True):

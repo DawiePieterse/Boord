@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
 from db import get_session
-from weather import farm_coords, fetch_weather
+from weather import current_farm_weather, farm_weather_configured
 
 router = APIRouter(prefix="/api/weather", tags=["weather"])
 
@@ -17,10 +17,10 @@ def current_weather(session: Session = Depends(get_session)):
     not as a fallback that a correctly configured install would grow out of,
     but always, even after Settings had been filled in properly.
 
-    It reads the configured location like everything else now, and says so
-    when there isn't one rather than showing somebody else's weather.
+    It reads the configured source (an on-farm station, or else GPS) like
+    everything else now, and says so when neither is set rather than
+    showing somebody else's weather.
     """
-    coords = farm_coords(session)
-    if coords is None:
+    if not farm_weather_configured(session):
         return {"no_location": True}
-    return fetch_weather(*coords)
+    return current_farm_weather(session)

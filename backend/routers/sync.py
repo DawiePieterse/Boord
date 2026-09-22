@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, SQLModel, select
 
 from db import get_session, supplier_id_for_device
-from models import HarvestRecord, Lot, LotStatus, SystemSetting
-from weather import fetch_weather_cached
+from models import HarvestRecord, Lot, LotStatus
+from weather import current_farm_weather
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
@@ -52,10 +52,7 @@ def _farm_weather(session: Session) -> dict:
     """Conditions at the farm right now, or {} if it can't be established.
     Same source and same silent-failure rule as the per-dispatch capture in
     routers/lots.py - weather is a nice-to-have and must never fail a sync."""
-    settings = session.exec(select(SystemSetting)).first()
-    if not settings or settings.gps_lat is None or settings.gps_lon is None:
-        return {}
-    return fetch_weather_cached(settings.gps_lat, settings.gps_lon)
+    return current_farm_weather(session)
 
 
 @router.post("/harvest")

@@ -1,4 +1,5 @@
 import json as _json
+import re as _re
 import threading
 import time as _time
 import urllib.error
@@ -8,6 +9,12 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from models import SystemSetting
+
+# iweathar.co.za's robots.txt disallows the default urllib User-Agent
+# ("python-urllib/x.y" - it names that exact string), and rightly so given
+# what a script with no UA at all usually is. Identify ourselves properly
+# instead of impersonating a browser.
+_IWEATHAR_USER_AGENT = "BoordFarmWeather/1.0 (+https://github.com/dawiepieterse/boord)"
 
 _WMO_CONDITION = {
     0: "Clear", 1: "Partly Cloudy", 2: "Partly Cloudy", 3: "Overcast",
@@ -69,6 +76,60 @@ def fetch_weather_cached(lat: float, lon: float) -> dict:
     return weather
 
 
+def _iweathar_number(html: str, label: str) -> Optional[float]:
+    """The first number in the numbers-styled cell following a field label
+    on an iWeathar station display page, e.g. label="Temperature:" pulls the
+    20 out of "...Temperature:...class='numbers'>20<font...". The page has
+    no machine-readable API (see the display page's own "contact us for API
+    access" notice) - this is screen-scraping a legacy HTML table, so it
+    only asks for the handful of fields Boord actually uses and tolerates
+    the rest of the markup changing around them."""
+    match = _re.search(
+        _re.escape(label) + r".*?class=['\"]numbers['\"][^>]*>\s*(-?[\d.]+)",
+        html, _re.S)
+    return float(match.group(1)) if match else None
+
+
+def fetch_iweathar(station_id: str) -> dict:
+    """Live conditions from an iWeathar (iweathar.co.za) station's public
+    display page - a farm's own station, not a regional forecast.
+
+    iWeathar doesn't publish a sky condition, only measurements, so
+    "condition" here is a rough stand-in derived from today's rainfall
+    rather than a real observation. Good enough for the header icon; not a
+    substitute for the WMO code fetch_weather() gets from actual forecast
+    data.
+    """
+    try:
+        url = f"https://iweathar.co.za/display?s_id={station_id}"
+        req = urllib.request.Request(url, headers={"User-Agent": _IWEATHAR_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            html = resp.read().decode("iso-8859-1", errors="replace")
+        temp = _iweathar_number(html, "Temperature:")
+        humidity = _iweathar_number(html, "Humidity:")
+        rain_today = _iweathar_number(html, "Rainfall Today:")
+        condition = "Rain" if rain_today and rain_today > 0 else "Clear"
+        return {"temp": temp, "humidity": humidity, "condition": condition}
+    except Exception:
+        return {}
+
+
+def fetch_iweathar_cached(station_id: str) -> dict:
+    key = ("iweathar", station_id)
+    now = _time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and now < hit[0]:
+            return hit[1]
+
+    weather = fetch_iweathar(station_id)
+
+    ttl = _CACHE_TTL_SECONDS if weather else _CACHE_TTL_ON_FAILURE_SECONDS
+    with _cache_lock:
+        _cache[key] = (now + ttl, weather)
+    return weather
+
+
 def farm_coords(session: Session) -> Optional[tuple]:
     """The farm's GPS position from Settings, or None if it isn't set yet.
 
@@ -89,3 +150,33 @@ def farm_coords(session: Session) -> Optional[tuple]:
     if settings and settings.gps_lat is not None and settings.gps_lon is not None:
         return settings.gps_lat, settings.gps_lon
     return None
+
+
+def weather_station_id(session: Session) -> Optional[str]:
+    """The farm's iWeathar station id from Settings, or None if it isn't
+    set. Blank/whitespace counts as unset, same as a station never having
+    been configured."""
+    settings = session.exec(select(SystemSetting)).first()
+    station_id = settings.weather_station_id if settings else None
+    return station_id.strip() if station_id and station_id.strip() else None
+
+
+def farm_weather_configured(session: Session) -> bool:
+    return weather_station_id(session) is not None or farm_coords(session) is not None
+
+
+def current_farm_weather(session: Session) -> dict:
+    """The farm's live weather from whichever source Settings configures.
+
+    A real on-farm station is what a farm actually gets when it goes to the
+    trouble of buying and registering one, so it wins over the GPS-based
+    regional forecast whenever both are set - the forecast only kicks in as
+    a fallback for a farm with no station of its own.
+    """
+    station_id = weather_station_id(session)
+    if station_id:
+        return fetch_iweathar_cached(station_id)
+    coords = farm_coords(session)
+    if coords:
+        return fetch_weather_cached(*coords)
+    return {}
