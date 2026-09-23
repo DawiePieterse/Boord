@@ -1378,6 +1378,7 @@ async function loadSettingsForm() {
     document.getElementById("setYellowRed").value = settings.yellow_to_red_minutes;
     document.getElementById("setGpsLat").value = settings.gps_lat ?? "";
     document.getElementById("setGpsLon").value = settings.gps_lon ?? "";
+    document.getElementById("setWeatherStationId").value = settings.weather_station_id || "";
     updateSeasonYearLabel();
   }
   const rate = await Boord.api("/api/rate-settings/current");
@@ -1415,6 +1416,7 @@ async function saveSystemSettings() {
     yellow_to_red_minutes: parseInt(document.getElementById("setYellowRed").value) || 150,
     gps_lat: lat,
     gps_lon: lon,
+    weather_station_id: document.getElementById("setWeatherStationId").value.trim() || null,
   };
   await Boord.api("/api/system-settings", { method: "PUT", body: newSettings });
   _systemSettings = { ..._systemSettings, ...newSettings };

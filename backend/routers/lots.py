@@ -10,7 +10,7 @@ from db import get_session, supplier_id_for_device
 from models import HarvestRecord, Lot, LotStatus, Supplier, SystemSetting
 from security import require_admin_client
 from timeutil import day_bounds
-from weather import fetch_weather_cached
+from weather import current_farm_weather, farm_weather_configured
 
 router = APIRouter(prefix="/api/lots", tags=["lots"])
 
@@ -277,9 +277,8 @@ def upsert_lot(lot_in: LotIn, session: Session = Depends(get_session)):
     dispatching = lot_in.status == LotStatus.in_transit and (
         not existing or existing.status != LotStatus.in_transit)
     if dispatching:
-        settings = session.exec(select(SystemSetting)).first()
-        if settings and settings.gps_lat is not None and settings.gps_lon is not None:
-            weather = fetch_weather_cached(settings.gps_lat, settings.gps_lon)
+        if farm_weather_configured(session):
+            weather = current_farm_weather(session)
             lot.weather_temp = weather.get("temp")
             lot.weather_humidity = weather.get("humidity")
             lot.weather_condition = weather.get("condition", "")
@@ -404,9 +403,8 @@ def create_external_lot(lot_in: ExternalLotIn, session: Session = Depends(get_se
     # there's no GPS for wherever the other farmer picked, so this is read as
     # "conditions at the pack house when the delivery was logged," not
     # "conditions where it was grown."
-    settings = session.exec(select(SystemSetting)).first()
-    if settings and settings.gps_lat is not None and settings.gps_lon is not None:
-        weather = fetch_weather_cached(settings.gps_lat, settings.gps_lon)
+    if farm_weather_configured(session):
+        weather = current_farm_weather(session)
         lot.weather_temp = weather.get("temp")
         lot.weather_humidity = weather.get("humidity")
         lot.weather_condition = weather.get("condition", "")
