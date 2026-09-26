@@ -48,35 +48,18 @@ async function init() {
   setInterval(updateLastUpdatedLabel, 10000);
 
   // Background from here; the screen is already usable.
-  const config = await resolveDeviceConfig(deviceId, cachedConfig);
+  const config = await Boord.resolveDeviceConfig(deviceId, cachedConfig, (fresh) => {
+    deviceConfig = fresh;
+    document.getElementById("stationLabel").textContent = deviceConfig.station;
+  });
   if (!config) return;
   await loadSuppliers();
   await refresh();
 }
 
-async function resolveDeviceConfig(deviceId, cachedConfig) {
-  try {
-    deviceConfig = await Boord.fetchDeviceConfig(deviceId);
-    document.getElementById("stationLabel").textContent = deviceConfig.station;
-    return deviceConfig;
-  } catch (e) {
-    if (Boord.isNetworkError(e)) {
-      Boord.setOffline(true);
-      if (cachedConfig) return cachedConfig;
-      Boord.toast("No connection - cannot set up this device yet");
-      return null;
-    }
-    if (cachedConfig) return cachedConfig;
-    location.href = "../";
-    return null;
-  }
-}
-
 async function loadSuppliers() {
-  try {
-    _suppliersCache = await Boord.api("/api/suppliers");
-    localStorage.setItem("boord_cached_suppliers", JSON.stringify(_suppliersCache));
-  } catch (e) { /* keep last known list if offline */ }
+  const { data, cached } = await Boord.cachedLoad("boord_cached_suppliers", () => Boord.api("/api/suppliers"));
+  if (!cached) _suppliersCache = data; // else keep the last known list
 }
 
 function renderPackhouseLabel() {
@@ -89,12 +72,8 @@ function renderPackhouseLabel() {
 }
 
 async function loadPackhouseLabel() {
-  try {
-    const settings = await Boord.api("/api/system-settings");
-    if (!settings) return;
-    localStorage.setItem("boord_cached_settings", JSON.stringify(settings));
-    renderPackhouseLabel();
-  } catch (e) { /* keep the cached name if offline */ }
+  const { data, cached } = await Boord.cachedLoad("boord_cached_settings", () => Boord.api("/api/system-settings"));
+  if (!cached && data) renderPackhouseLabel(); // else keep the cached name
 }
 
 const QUEUE_CACHE_KEY = "boord_cached_intransit";
@@ -104,10 +83,9 @@ async function refresh() {
   try {
     lots = await Boord.api("/api/lots/in-transit");
     localStorage.setItem(QUEUE_CACHE_KEY, JSON.stringify({ at: Date.now(), lots }));
-    Boord.setOffline(false);
   } catch (e) {
     if (!Boord.isNetworkError(e)) { Boord.toast("Could not reach server"); return; }
-    Boord.setOffline(true); // server unreachable
+    // Server unreachable (api() has already raised the offline banner).
     // Fall back to the last queue we saw, so the receiver still knows which
     // loads are on their way in. Only useful on a cold load - if lots are
     // already on screen, leave them alone.
@@ -147,9 +125,10 @@ function lotSubtitleParts(lot) {
 // The same line for the queue card, where the supplier leads in bold.
 function lotSubtitleHtml(lot) {
   const parts = lotSubtitleParts(lot);
-  const lead = lot.supplier_name ? `<span class="font-semibold">${lot.supplier_name}</span>` : "";
+  const lead = lot.supplier_name ? `<span class="font-semibold">${Boord.escapeHtml(lot.supplier_name)}</span>` : "";
+  const rest = Boord.escapeHtml(parts.join(" - "));
   if (!parts.length) return lead;
-  return lead ? `${lead} - ${parts.join(" - ")}` : parts.join(" - ");
+  return lead ? `${lead} - ${rest}` : rest;
 }
 
 function renderQueue(lots) {
@@ -158,10 +137,10 @@ function renderQueue(lots) {
   empty.classList.toggle("hidden", lots.length > 0);
 
   list.innerHTML = lots.map((lot) => `
-    <button class="w-full text-left rounded-xl p-4 shadow urgency-${lot.urgency} lot-item" data-id="${lot.id}">
+    <button class="w-full text-left rounded-xl p-4 shadow urgency-${Boord.escapeHtml(lot.urgency)} lot-item" data-id="${Boord.escapeHtml(lot.id)}">
       <div class="flex justify-between items-center">
         <div>
-          <div class="font-bold">${lot.slip_number}</div>
+          <div class="font-bold">${Boord.escapeHtml(lot.slip_number)}</div>
           <div class="text-sm text-slate-600">${lotSubtitleHtml(lot)}</div>
         </div>
         <div class="text-right shrink-0 pl-2">
@@ -217,7 +196,7 @@ function renderRelatedLots(lot) {
       <i class="fa-solid fa-triangle-exclamation"></i> Split load - part of this pickup was also sent separately:
     </div>
     ${related.map((r) => `
-      <div class="text-xs text-amber-700">Slip ${r.slip_number} - ${r.total_crates} crates / ${r.total_kg.toFixed(1)} kg - ${statusText(r)}</div>
+      <div class="text-xs text-amber-700">Slip ${Boord.escapeHtml(r.slip_number)} - ${r.total_crates} crates / ${r.total_kg.toFixed(1)} kg - ${statusText(r)}</div>
     `).join("")}
   `;
 }
@@ -284,7 +263,7 @@ function openExternalLotModal() {
   const select = document.getElementById("extSupplierSelect");
   const external = _suppliersCache.filter((s) => s.active && !s.is_own_farm);
   select.innerHTML = external.length
-    ? external.map((s) => `<option value="${s.id}">${s.name}</option>`).join("")
+    ? external.map((s) => `<option value="${Boord.escapeHtml(s.id)}">${Boord.escapeHtml(s.name)}</option>`).join("")
     : `<option value="">(no external suppliers set up yet)</option>`;
   document.getElementById("extCrates").value = "";
   document.getElementById("extKg").value = "";

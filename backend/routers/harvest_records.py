@@ -11,7 +11,8 @@ from routers.lots import recompute_lot_totals
 from security import require_admin_client
 from timeutil import to_local
 
-router = APIRouter(prefix="/api/harvest-records", tags=["harvest-records"])
+# Every endpoint here is admin-only.
+router = APIRouter(prefix="/api/harvest-records", tags=["harvest-records"], dependencies=[Depends(require_admin_client)])
 
 # Every crate seed_demo.py invents is given a uuid starting with this. Real
 # crates carry a uuid minted by the field device (Boord.uuid()), so the
@@ -20,7 +21,7 @@ DEMO_UUID_PREFIX = "demo-"
 
 
 @router.get("/counts")
-def harvest_record_counts(session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+def harvest_record_counts(session: Session = Depends(get_session)):
     """How many crates this database holds, and how many of those the demo
     seeder wrote.
 
@@ -80,7 +81,7 @@ def _wages_affected(session: Session, record: HarvestRecord, worker_ids: set) ->
 
 @router.patch("/{record_uuid}")
 def edit_harvest_record(record_uuid: str, body: HarvestRecordEdit,
-                         session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+                         session: Session = Depends(get_session)):
     """Admin correction of a field-captured crate - a wrong worker picked on
     the keypad or a fat-fingered weight is otherwise a wrong wage with no
     remedy short of editing the database by hand.

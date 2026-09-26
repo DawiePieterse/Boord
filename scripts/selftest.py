@@ -43,7 +43,6 @@ from alembic.script import ScriptDirectory  # noqa: E402
 from sqlalchemy import create_engine, inspect  # noqa: E402
 from sqlmodel import Session, SQLModel, func, select  # noqa: E402
 
-import asyncio  # noqa: E402
 from fastapi import HTTPException, UploadFile  # noqa: E402
 
 import backup  # noqa: E402
@@ -370,7 +369,7 @@ def test_replacing_all_blocks_with_an_empty_file_is_refused():
                                     file=io.BytesIO(b"id,name,variety,trees,hectares,active\n"))
         with Session(temp_engine) as s:
             try:
-                asyncio.run(import_blocks(file=headings_only, replace=True, session=s, _admin=None))
+                import_blocks(file=headings_only, replace=True, session=s, _admin=None)
             except HTTPException as e:
                 assert e.status_code == 400, e.status_code
                 assert "no data rows" in e.detail
@@ -411,7 +410,7 @@ def test_importing_blocks_without_a_supplier_column_keeps_the_supplier():
             filename="blocks.csv",
             file=io.BytesIO(b"id,name,variety,trees,hectares,active\n15,Blok 15,Mauritius,100,1.5,true\n"))
         with Session(temp_engine) as s:
-            asyncio.run(import_blocks(file=old_format, replace=False, session=s, _admin=None))
+            import_blocks(file=old_format, replace=False, session=s, _admin=None)
         with Session(temp_engine) as s:
             assert s.get(Block, "15").supplier_id == supplier_id, \
                 "a file with no supplier_id column unassigned the block's supplier"
@@ -421,7 +420,7 @@ def test_importing_blocks_without_a_supplier_column_keeps_the_supplier():
             filename="blocks.csv",
             file=io.BytesIO(b"id,name,variety,trees,hectares,supplier_id,active\n15,Blok 15,Mauritius,100,1.5,,true\n"))
         with Session(temp_engine) as s:
-            asyncio.run(import_blocks(file=with_blank, replace=False, session=s, _admin=None))
+            import_blocks(file=with_blank, replace=False, session=s, _admin=None)
         with Session(temp_engine) as s:
             assert s.get(Block, "15").supplier_id is None, \
                 "an explicitly blank supplier_id did not clear the block's supplier"
@@ -1026,11 +1025,18 @@ def test_every_shell_file_a_worker_lists_actually_exists():
 def test_the_shell_refreshes_all_or_nothing():
     """The property itself, asserted against the source: a shell file is never
     written back on its own. Restoring the per-file `cache.put` would bring
-    back the blank screen without failing anything else."""
+    back the blank screen without failing anything else. The caching logic
+    lives once in shared/sw-core.js; each screen's worker only declares its
+    cache name and shell list, then loads the core."""
+    core = "frontend/shared/sw-core.js"
+    source = open(_repo_file(core)).read()
+    assert "refreshShell" in source, f"{core} lost its atomic shell refresh"
+    assert "shellFileChanged" in source, f"{core} no longer checks whether the shell moved"
     for worker in SERVICE_WORKERS[:3]:
         source = open(_repo_file(worker)).read()
-        assert "refreshShell" in source, f"{worker} lost its atomic shell refresh"
-        assert "shellFileChanged" in source, f"{worker} no longer checks whether the shell moved"
+        assert 'importScripts("../shared/sw-core.js")' in source, f"{worker} does not load sw-core.js"
+        assert "../shared/sw-core.js" in _shell_entries(worker), (
+            f"{worker} does not cache sw-core.js, so it cannot start offline")
 
 
 def test_every_screen_starts_through_the_boot_guard():

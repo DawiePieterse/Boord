@@ -37,19 +37,6 @@ function wizFailure(e, fallback) {
                                   : Boord.errorDetail(e, fallback);
 }
 
-// Anything that reaches innerHTML from outside this file goes through here.
-// The import results quote the farm's own spreadsheet back at them - a
-// rejected row reports the cell it could not read, and the server's refusal
-// messages quote it too - so cell contents end up rendered as markup unless
-// they are escaped. Only an admin can upload, so this is self-inflicted at
-// worst, but a stray "<" silently eating the rest of a message is reason
-// enough on its own.
-function wizEscape(value) {
-  const el = document.createElement("div");
-  el.textContent = String(value ?? "");
-  return el.innerHTML;
-}
-
 async function showSetupWizard(state) {
   document.getElementById("app").classList.add("hidden");
   document.getElementById("setupWizardScreen").classList.remove("hidden");
@@ -283,7 +270,7 @@ async function wizImport(event, url, resultId, noun) {
   const file = event.target.files[0];
   if (!file) return;
   const resultEl = document.getElementById(resultId);
-  resultEl.innerHTML = `<span class="text-slate-500">Importing ${file.name}...</span>`;
+  resultEl.innerHTML = `<span class="text-slate-500">Importing ${Boord.escapeHtml(file.name)}...</span>`;
   const form = new FormData();
   form.append("file", file);
   try {
@@ -296,12 +283,12 @@ async function wizImport(event, url, resultId, noun) {
     // imported file that reports only its successes is how a farm ends up
     // missing a season without knowing it.
     const rejected = result.rejected
-      ? `<div class="text-amber-700 text-xs mt-1">${result.rejected} row(s) skipped: ${wizEscape((result.rejected_detail || []).join("; "))}</div>`
+      ? `<div class="text-amber-700 text-xs mt-1">${result.rejected} row(s) skipped: ${Boord.escapeHtml((result.rejected_detail || []).join("; "))}</div>`
       : "";
     resultEl.innerHTML =
       `<div class="text-green-700"><i class="fa-solid fa-check"></i> Imported ${result.imported} ${noun}${seasons}</div>${rejected}`;
   } catch (e) {
-    resultEl.innerHTML = `<span class="text-red-600">${wizEscape(wizFailure(e, "Import failed - check the columns against the template"))}</span>`;
+    resultEl.innerHTML = `<span class="text-red-600">${Boord.escapeHtml(wizFailure(e, "Import failed - check the columns against the template"))}</span>`;
   }
   event.target.value = "";
 }
@@ -314,19 +301,19 @@ async function renderWizardDevices() {
   try {
     devices = await Boord.api("/api/devices");
   } catch (e) {
-    list.innerHTML = `<div class="text-red-600">${wizEscape(wizFailure(e, "Could not load the device list"))}</div>`;
+    list.innerHTML = `<div class="text-red-600">${Boord.escapeHtml(wizFailure(e, "Could not load the device list"))}</div>`;
     return;
   }
   list.innerHTML = devices
     .slice()
     .sort((a, b) => a.id.localeCompare(b.id))
     .map((d) => `
-      <div class="flex items-center gap-2" data-device-id="${d.id}" data-device='${JSON.stringify(d).replace(/'/g, "&apos;")}'>
+      <div class="flex items-center gap-2" data-device-id="${Boord.escapeHtml(d.id)}" data-device="${Boord.escapeHtml(JSON.stringify(d))}">
         <div class="w-28 shrink-0 text-xs text-slate-500">
-          <div class="font-mono">${wizEscape(d.id)}</div>
-          <div>${wizEscape(_DEVICE_ROLE_LABELS[d.role] || d.role)}</div>
+          <div class="font-mono">${Boord.escapeHtml(d.id)}</div>
+          <div>${Boord.escapeHtml(_DEVICE_ROLE_LABELS[d.role] || d.role)}</div>
         </div>
-        <input value="${wizEscape(d.station || "")}" class="flex-1 border border-slate-300 rounded-lg p-2">
+        <input value="${Boord.escapeHtml(d.station || "")}" class="flex-1 border border-slate-300 rounded-lg p-2">
       </div>
     `).join("");
 }

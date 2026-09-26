@@ -2,7 +2,6 @@ import json as _json
 import re as _re
 import threading
 import time as _time
-import urllib.error
 import urllib.request
 from typing import Optional
 
@@ -60,20 +59,23 @@ _cache: dict = {}
 _cache_lock = threading.Lock()
 
 
-def fetch_weather_cached(lat: float, lon: float) -> dict:
-    key = (round(lat, 4), round(lon, 4))
+def _ttl_cached(key, fetch) -> dict:
     now = _time.monotonic()
     with _cache_lock:
         hit = _cache.get(key)
         if hit and now < hit[0]:
             return hit[1]
 
-    weather = fetch_weather(lat, lon)
+    weather = fetch()
 
     ttl = _CACHE_TTL_SECONDS if weather else _CACHE_TTL_ON_FAILURE_SECONDS
     with _cache_lock:
         _cache[key] = (now + ttl, weather)
     return weather
+
+
+def fetch_weather_cached(lat: float, lon: float) -> dict:
+    return _ttl_cached((round(lat, 4), round(lon, 4)), lambda: fetch_weather(lat, lon))
 
 
 def _iweathar_number(html: str, label: str) -> Optional[float]:
@@ -115,19 +117,7 @@ def fetch_iweathar(station_id: str) -> dict:
 
 
 def fetch_iweathar_cached(station_id: str) -> dict:
-    key = ("iweathar", station_id)
-    now = _time.monotonic()
-    with _cache_lock:
-        hit = _cache.get(key)
-        if hit and now < hit[0]:
-            return hit[1]
-
-    weather = fetch_iweathar(station_id)
-
-    ttl = _CACHE_TTL_SECONDS if weather else _CACHE_TTL_ON_FAILURE_SECONDS
-    with _cache_lock:
-        _cache[key] = (now + ttl, weather)
-    return weather
+    return _ttl_cached(("iweathar", station_id), lambda: fetch_iweathar(station_id))
 
 
 def farm_coords(session: Session) -> Optional[tuple]:
@@ -146,7 +136,10 @@ def farm_coords(session: Session) -> Optional[tuple]:
     Note the `is not None` checks: a plain truthiness test treats latitude 0
     (the equator) and longitude 0 (Greenwich) as "unset".
     """
-    settings = session.exec(select(SystemSetting)).first()
+    return _coords_of(session.exec(select(SystemSetting)).first())
+
+
+def _coords_of(settings: Optional[SystemSetting]) -> Optional[tuple]:
     if settings and settings.gps_lat is not None and settings.gps_lon is not None:
         return settings.gps_lat, settings.gps_lon
     return None
@@ -156,13 +149,17 @@ def weather_station_id(session: Session) -> Optional[str]:
     """The farm's iWeathar station id from Settings, or None if it isn't
     set. Blank/whitespace counts as unset, same as a station never having
     been configured."""
-    settings = session.exec(select(SystemSetting)).first()
+    return _station_of(session.exec(select(SystemSetting)).first())
+
+
+def _station_of(settings: Optional[SystemSetting]) -> Optional[str]:
     station_id = settings.weather_station_id if settings else None
     return station_id.strip() if station_id and station_id.strip() else None
 
 
 def farm_weather_configured(session: Session) -> bool:
-    return weather_station_id(session) is not None or farm_coords(session) is not None
+    settings = session.exec(select(SystemSetting)).first()
+    return _station_of(settings) is not None or _coords_of(settings) is not None
 
 
 def current_farm_weather(session: Session) -> dict:
@@ -173,10 +170,11 @@ def current_farm_weather(session: Session) -> dict:
     regional forecast whenever both are set - the forecast only kicks in as
     a fallback for a farm with no station of its own.
     """
-    station_id = weather_station_id(session)
+    settings = session.exec(select(SystemSetting)).first()
+    station_id = _station_of(settings)
     if station_id:
         return fetch_iweathar_cached(station_id)
-    coords = farm_coords(session)
+    coords = _coords_of(settings)
     if coords:
         return fetch_weather_cached(*coords)
     return {}

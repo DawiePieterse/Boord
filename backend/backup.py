@@ -114,13 +114,18 @@ def _reject_destination(dest: str) -> Optional[str]:
     return None
 
 
-def _read_offsite_state() -> Optional[dict]:
+def _read_json_dict(path: str) -> Optional[dict]:
+    """A JSON object from disk, or None if missing, unreadable or not an object."""
     try:
-        with open(OFFSITE_STATE_PATH, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:
             state = json.load(fh)
     except (OSError, ValueError):
         return None
     return state if isinstance(state, dict) else None
+
+
+def _read_offsite_state() -> Optional[dict]:
+    return _read_json_dict(OFFSITE_STATE_PATH)
 
 
 def _write_offsite_state(record: dict) -> None:
@@ -325,12 +330,7 @@ def _fingerprint(snapshot_path: Optional[str]) -> str:
 def _read_state() -> Optional[dict]:
     """What the last archive contained. Anything unreadable reads as "no
     previous backup" - erring towards taking one, never towards skipping."""
-    try:
-        with open(STATE_PATH, "r", encoding="utf-8") as fh:
-            state = json.load(fh)
-    except (OSError, ValueError):
-        return None
-    return state if isinstance(state, dict) else None
+    return _read_json_dict(STATE_PATH)
 
 
 def _write_state(fingerprint: str, filename: str) -> None:

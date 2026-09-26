@@ -72,43 +72,26 @@ async function init() {
   if (deviceConfig) await renderLot();
   // Screen is now live - the worker can capture crates from this point on.
 
-  setInterval(renderLot, 15000);
+  // Only the clock moves between saves - the crates themselves change on
+  // save/dispatch/sync, which redraw the whole card via renderLot.
+  setInterval(renderElapsed, 15000);
   setInterval(syncLoop, 10000);
   setInterval(refreshLists, 30000);
 
   // Background from here; none of the above waited on it.
   const hadConfig = !!deviceConfig;
-  const config = await resolveDeviceConfig(deviceId, cachedConfig);
-  if (!config) return; // brand new device, server says unknown - redirecting
-  if (!hadConfig) await renderLot();
-
-  refreshFromServer();
-}
-
-// A device this browser has already set up keeps working from its cached
-// config forever. Only a never-seen device needs the server, and only that
-// case may bounce the user to setup - an unreachable server must never be
-// mistaken for an unknown device.
-async function resolveDeviceConfig(deviceId, cachedConfig) {
-  try {
-    deviceConfig = await Boord.fetchDeviceConfig(deviceId);
+  const config = await Boord.resolveDeviceConfig(deviceId, cachedConfig, (fresh) => {
+    deviceConfig = fresh;
     renderStationLabel();
     // A re-allocated device gets its block list corrected on this load
     // rather than at the next 30s refresh - the crates in between would
     // otherwise be captured against the previous supplier's orchard.
     renderCachedBlocks();
-    return deviceConfig;
-  } catch (e) {
-    if (Boord.isNetworkError(e)) {
-      Boord.setOffline(true);
-      if (cachedConfig) return cachedConfig;
-      Boord.toast("No connection - cannot set up this device yet");
-      return null;
-    }
-    if (cachedConfig) return cachedConfig; // server says unknown, but we've run before
-    location.href = "../";
-    return null;
-  }
+  });
+  if (!config) return; // brand new device, server says unknown - redirecting
+  if (!hadConfig) await renderLot();
+
+  refreshFromServer();
 }
 
 function renderStationLabel() {
@@ -136,18 +119,14 @@ function renderSupplierLabel() {
 }
 
 async function loadSuppliers() {
-  try {
-    const suppliers = await Boord.api("/api/suppliers");
-    localStorage.setItem("boord_cached_suppliers", JSON.stringify(suppliers));
-    renderSupplierLabel();
-    // The block list is filtered by this device's supplier, so a supplier
-    // list that lands after the blocks did has to redraw them - these load
-    // concurrently, and whichever order they finish in must give the same
-    // dropdown.
-    renderCachedBlocks();
-  } catch (e) {
-    if (Boord.isNetworkError(e)) Boord.setOffline(true);
-  }
+  const { cached } = await Boord.cachedLoad("boord_cached_suppliers", () => Boord.api("/api/suppliers"));
+  if (cached) return;
+  renderSupplierLabel();
+  // The block list is filtered by this device's supplier, so a supplier
+  // list that lands after the blocks did has to redraw them - these load
+  // concurrently, and whichever order they finish in must give the same
+  // dropdown.
+  renderCachedBlocks();
 }
 
 async function refreshLists() {
@@ -155,12 +134,8 @@ async function refreshLists() {
 }
 
 async function loadSettings() {
-  try {
-    systemSettings = await Boord.api("/api/system-settings");
-    localStorage.setItem("boord_cached_settings", JSON.stringify(systemSettings));
-  } catch (e) {
-    if (Boord.isNetworkError(e)) Boord.setOffline(true);
-  }
+  const { data, cached } = await Boord.cachedLoad("boord_cached_settings", () => Boord.api("/api/system-settings"));
+  if (!cached) systemSettings = data;
 }
 
 // The one place that goes to the server for fresh data: the periodic refresh,
@@ -184,14 +159,9 @@ function renderCachedWorkers() {
 }
 
 async function loadWorkers() {
-  try {
-    const workers = await Boord.api("/api/workers");
-    localStorage.setItem("boord_cached_workers", JSON.stringify(workers));
-    renderWorkerOptions(workers);
-  } catch (e) {
-    if (Boord.isNetworkError(e)) Boord.setOffline(true);
-    renderCachedWorkers();
-  }
+  const { data } = await Boord.cachedLoad("boord_cached_workers", () => Boord.api("/api/workers"));
+  if (data) renderWorkerOptions(data);
+  else renderCachedWorkers(); // nothing fetched or saved - shows the placeholder
 }
 
 function renderWorkerOptions(workers) {
@@ -200,7 +170,7 @@ function renderWorkerOptions(workers) {
   const active = workers.filter((w) => w.active);
   select.innerHTML = `<option value="">— select —</option>` + active.map((w) => {
     const display = w.name || `${w.first_name || ""} ${w.last_name || ""}`.trim() || w.id;
-    return `<option value="${w.id}">${display} (${w.id})</option>`;
+    return `<option value="${Boord.escapeHtml(w.id)}">${Boord.escapeHtml(display)} (${Boord.escapeHtml(w.id)})</option>`;
   }).join("");
   if (current && Array.from(select.options).some((o) => o.value === current)) {
     select.value = current;
@@ -233,14 +203,9 @@ function renderCachedBlocks() {
 }
 
 async function loadBlocks() {
-  try {
-    const blocks = await Boord.api("/api/blocks");
-    localStorage.setItem("boord_cached_blocks", JSON.stringify(blocks));
-    renderBlockOptions(blocks);
-  } catch (e) {
-    if (Boord.isNetworkError(e)) Boord.setOffline(true);
-    renderCachedBlocks();
-  }
+  const { data } = await Boord.cachedLoad("boord_cached_blocks", () => Boord.api("/api/blocks"));
+  if (data) renderBlockOptions(data);
+  else renderCachedBlocks(); // nothing fetched or saved - shows the placeholder
 }
 
 // The supplier every crate from this device is filed against: the device's
@@ -291,7 +256,7 @@ function renderBlockOptions(blocks) {
     select.innerHTML = `<option value="">(no blocks set up yet - add them in Admin)</option>`;
     return;
   }
-  select.innerHTML = usable.map((b) => `<option value="${b.id}">${b.name || b.id}</option>`).join("");
+  select.innerHTML = usable.map((b) => `<option value="${Boord.escapeHtml(b.id)}">${Boord.escapeHtml(b.name || b.id)}</option>`).join("");
   if (current && Array.from(select.options).some((o) => o.value === current)) {
     select.value = current;
   }
@@ -351,6 +316,28 @@ async function saveCrate() {
   syncLoop();
 }
 
+// When the oldest crate on the current slip was captured, as of the last
+// renderLot - null for an empty slip. Lets the 15s tick move the clock and
+// urgency colour without going back to IndexedDB for crates that have not
+// changed.
+let _lotFirstCrateAt = null;
+
+function renderElapsed() {
+  const card = document.getElementById("lotCard");
+  card.classList.remove("urgency-green", "urgency-yellow", "urgency-red");
+  if (!_lotFirstCrateAt) {
+    document.getElementById("elapsed").textContent = "--:--";
+    card.classList.add("urgency-green");
+    return;
+  }
+  const minutes = (Date.now() - new Date(_lotFirstCrateAt).getTime()) / 60000;
+  const h = Math.floor(minutes / 60), m = Math.floor(minutes % 60);
+  document.getElementById("elapsed").textContent = `${h}:${String(m).padStart(2, "0")}`;
+  if (minutes >= systemSettings.yellow_to_red_minutes) card.classList.add("urgency-red");
+  else if (minutes >= systemSettings.green_to_yellow_minutes) card.classList.add("urgency-yellow");
+  else card.classList.add("urgency-green");
+}
+
 async function renderLot() {
   const slip = getCurrentSlip();
   let crates;
@@ -366,24 +353,14 @@ async function renderLot() {
     `${crateCount} ${crateCount === 1 ? "crate" : "crates"}`;
   document.getElementById("totalKg").textContent = `${totalKg.toFixed(1)} kg`;
 
-  const card = document.getElementById("lotCard");
-  card.classList.remove("urgency-green", "urgency-yellow", "urgency-red");
-  if (crateCount === 0) {
-    document.getElementById("elapsed").textContent = "--:--";
-    card.classList.add("urgency-green");
-  } else {
-    const first = crates.reduce((min, c) => (c.timestamp < min ? c.timestamp : min), crates[0].timestamp);
-    const minutes = (Date.now() - new Date(first).getTime()) / 60000;
-    const h = Math.floor(minutes / 60), m = Math.floor(minutes % 60);
-    document.getElementById("elapsed").textContent = `${h}:${String(m).padStart(2, "0")}`;
-    if (minutes >= systemSettings.yellow_to_red_minutes) card.classList.add("urgency-red");
-    else if (minutes >= systemSettings.green_to_yellow_minutes) card.classList.add("urgency-yellow");
-    else card.classList.add("urgency-green");
-  }
+  _lotFirstCrateAt = crateCount
+    ? crates.reduce((min, c) => (c.timestamp < min ? c.timestamp : min), crates[0].timestamp)
+    : null;
+  renderElapsed();
 
   const recentCrates = [...crates].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 5);
   document.getElementById("recentList").innerHTML = recentCrates
-    .map((r) => `<div class="flex justify-between border-b py-1"><span>${r.block_id}</span><span>${Number(r.weight_kg).toFixed(1)} kg</span><span>${r.synced ? "✓ synced" : "⏳ pending"}</span></div>`)
+    .map((r) => `<div class="flex justify-between border-b py-1"><span>${Boord.escapeHtml(r.block_id)}</span><span>${Number(r.weight_kg).toFixed(1)} kg</span><span>${r.synced ? "✓ synced" : "⏳ pending"}</span></div>`)
     .join("") || `<div class="text-slate-400">No crates yet</div>`;
 }
 
@@ -447,7 +424,7 @@ async function sendPickingSlip() {
       crates = crates.filter((c) => !movedUuids.has(c.uuid));
       didSplit = true;
     } catch (e) {
-      Boord.toast("Could not split the load - try again: " + (e.message || e));
+      Boord.toast("Could not split the load - try again: " + Boord.errorDetail(e));
       return;
     }
   }
@@ -582,6 +559,9 @@ async function syncLoop() {
       await Boord.api("/api/sync/harvest", { method: "POST", body: { records } });
       await IDB.markSynced(unsynced.map((r) => r.uuid));
       reachedServer = true;
+      // Flip the recent list's "pending" marks - the 15s tick only moves
+      // the clock, so nothing else would redraw them.
+      await renderLot();
       await pruneOldCrates();
     } else if (stillPending.length === 0 && Date.now() - _lastProbe >= PROBE_INTERVAL_MS) {
       // Nothing to push - but "nothing to push" must not be mistaken for
@@ -694,9 +674,9 @@ function renderDispatchedLots() {
   }
   listEl.innerHTML = dispatched.map((d) => `
     <div class="flex justify-between border-b py-1">
-      <span class="font-mono text-slate-600">${d.slip.split("-").slice(-1)[0]}</span>
+      <span class="font-mono text-slate-600">${Boord.escapeHtml(d.slip.split("-").slice(-1)[0])}</span>
       <span>${d.crates} crates / ${Number(d.kg).toFixed(1)} kg</span>
-      <span class="text-slate-400">${d.time}</span>
+      <span class="text-slate-400">${Boord.escapeHtml(d.time)}</span>
     </div>`).join("");
   const totalCrates = dispatched.reduce((s, d) => s + d.crates, 0);
   const totalKg = dispatched.reduce((s, d) => s + d.kg, 0);

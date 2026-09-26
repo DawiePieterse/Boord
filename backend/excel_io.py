@@ -9,6 +9,7 @@ import io
 from typing import Any
 
 from fastapi import UploadFile
+from fastapi.responses import Response
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 
@@ -36,9 +37,24 @@ def rows_to_csv_bytes(headers: list[str], rows: list[list[Any]]) -> bytes:
     return buf.getvalue().encode("utf-8-sig")  # BOM so Excel opens UTF-8 correctly
 
 
-async def parse_uploaded_table(file: UploadFile) -> list[dict]:
-    """Returns a list of dict rows keyed by the header row. Accepts .csv or .xlsx."""
-    content = await file.read()
+XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def tabular_response(headers: list[str], rows: list[list[Any]], fmt: str, filename: str,
+                     sheet_title: str = "") -> Response:
+    """A csv/xlsx download of headers + rows; `filename` has no extension."""
+    if fmt == "xlsx":
+        data, media, ext = rows_to_xlsx_bytes(headers, rows, sheet_title or filename), XLSX_MEDIA, "xlsx"
+    else:
+        data, media, ext = rows_to_csv_bytes(headers, rows), "text/csv", "csv"
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{filename}.{ext}"'})
+
+
+def parse_uploaded_table(file: UploadFile) -> list[dict]:
+    """Returns a list of dict rows keyed by the header row. Accepts .csv or .xlsx.
+    Synchronous, so callers are plain `def` routes run off the event loop."""
+    content = file.file.read()
     name = (file.filename or "").lower()
     if name.endswith(".xlsx"):
         wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)

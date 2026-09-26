@@ -8,7 +8,7 @@ const Boord = {
   // actually up to date - especially useful given the service workers'
   // cache-first strategy (see field/packhouse/admin service-worker.js).
   // Reset to 2.0 on 2026-08-26 for the Boord rename and clean reinstall.
-  VERSION: "3.11",
+  VERSION: "3.12",
 
   getDeviceId() { return localStorage.getItem("boord_device_id"); },
   // Re-pointing a tablet at a different device slot has to drop the picking
@@ -58,11 +58,27 @@ const Boord = {
     return e instanceof TypeError || (!!e && (e.name === "AbortError" || e.name === "TimeoutError"));
   },
 
-  // The human-readable half of a server rejection. api() throws
-  // `${status} ${body}` and FastAPI puts its message in a JSON "detail"
-  // field, so showing e.message raw hands the user a status code and a lump
-  // of JSON. Falls back to the whole message when it isn't shaped that way.
+  // Anything from the server that is interpolated into innerHTML goes through
+  // here - names, slip numbers, notes, error text. They are typed by people
+  // (or quoted back from an imported spreadsheet), and a stray "<" or quote
+  // otherwise becomes markup: at best it silently eats the rest of the line,
+  // at worst it runs. Safe inside attribute values as well as text.
+  escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  },
+
+  // The human-readable half of a server rejection. api() attaches FastAPI's
+  // JSON "detail" (or the raw body) as e.detail, so showing e.message raw
+  // would hand the user a status code and a lump of JSON. Errors that did
+  // not come from api() are still parsed out of `${status} ${body}` if they
+  // are shaped that way, and otherwise shown whole.
   errorDetail(e, fallback = "Something went wrong") {
+    if (e && typeof e.detail === "string") return e.detail.trim() || fallback;
     // Read .message directly rather than `e.message || e`: an Error with an
     // empty message would otherwise stringify to the bare word "Error" and
     // that would win over the caller's fallback.
@@ -78,19 +94,51 @@ const Boord = {
   // True when the server actively refused this request rather than failing to
   // answer it. There are no credentials to refuse any more - a 403 from the
   // Admin app means it was reached from an address that is not the server
-  // console or the tailnet (backend/security.py). api() puts the status code
-  // at the front of the error message.
+  // console or the tailnet (backend/security.py).
   isAuthError(e) {
-    const status = parseInt(String(e && e.message).slice(0, 3), 10);
+    const status = e && e.status;
     return status === 401 || status === 403;
   },
 
+  // Goes through api() like every other request, so it gets the same
+  // deadline and offline-banner bookkeeping. Any rejection - a 404 for an
+  // id the server has never heard of included - reads as "Unknown device id".
   async fetchDeviceConfig(deviceId) {
-    const res = await Boord._fetchWithTimeout(`${API_BASE}/api/devices/${encodeURIComponent(deviceId)}`);
-    if (!res.ok) throw new Error("Unknown device id");
-    const config = await res.json();
+    let config;
+    try {
+      config = await Boord.api(`/api/devices/${encodeURIComponent(deviceId)}`);
+    } catch (e) {
+      if (Boord.isNetworkError(e)) throw e;
+      const err = new Error("Unknown device id");
+      err.status = e.status;
+      throw err;
+    }
     localStorage.setItem("boord_device_config", JSON.stringify(config));
     return config;
+  },
+
+  // The device config a Field or Receiving screen runs under. A device this
+  // browser has already set up keeps working from its cached config forever;
+  // only a never-seen device needs the server, and only that case may bounce
+  // the user to setup - an unreachable server must never be mistaken for an
+  // unknown device. `onFresh(config)` runs only when the server answered, so
+  // the screen can redraw whatever depends on it. Resolves to null when there
+  // is no config to run under (redirecting, or offline with nothing cached).
+  async resolveDeviceConfig(deviceId, cachedConfig, onFresh) {
+    try {
+      const config = await Boord.fetchDeviceConfig(deviceId);
+      if (onFresh) onFresh(config);
+      return config;
+    } catch (e) {
+      if (Boord.isNetworkError(e)) {
+        if (cachedConfig) return cachedConfig;
+        Boord.toast("No connection - cannot set up this device yet");
+        return null;
+      }
+      if (cachedConfig) return cachedConfig; // server says unknown, but we've run before
+      location.href = "../";
+      return null;
+    }
   },
 
   // Reads a cached JSON blob, tolerating a missing or corrupted entry.
@@ -101,6 +149,25 @@ const Boord = {
     } catch (e) {
       localStorage.removeItem(key);
       return null;
+    }
+  },
+
+  // Fetch a list or setting and keep a copy on the device, or - when that
+  // fails for any reason - hand back the copy kept last time. Resolves to
+  // {data, cached}: `cached` true means `data` is the saved copy (null if
+  // nothing was ever saved) and the fetch did not succeed. Never rejects, so
+  // a screen in a dead spot carries on with what it already has.
+  async cachedLoad(key, fetchFn) {
+    try {
+      const data = await fetchFn();
+      if (data != null) {
+        try {
+          localStorage.setItem(key, JSON.stringify(data));
+        } catch (e) { /* out of quota - the live data still renders */ }
+      }
+      return { data, cached: false };
+    } catch (e) {
+      return { data: Boord.getCachedJSON(key), cached: true };
     }
   },
 
@@ -122,11 +189,30 @@ const Boord = {
       headers["Content-Type"] = "application/json";
       payload = JSON.stringify(body);
     }
-    const res = await Boord._fetchWithTimeout(
-      `${API_BASE}${path}`, { method, headers, body: payload }, timeoutMs);
+    // The offline banner is kept here rather than at every call site: a
+    // request that never got an answer means the server is unreachable, and
+    // any answer at all - an error status included - means it is not.
+    let res;
+    try {
+      res = await Boord._fetchWithTimeout(
+        `${API_BASE}${path}`, { method, headers, body: payload }, timeoutMs);
+    } catch (e) {
+      if (Boord.isNetworkError(e)) Boord.setOffline(true);
+      throw e;
+    }
+    Boord.setOffline(false);
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`${res.status} ${text}`);
+      // e.status and e.detail carry the rejection in usable form; the
+      // message keeps the `${status} ${body}` shape for logs and old callers.
+      const err = new Error(`${res.status} ${text}`);
+      err.status = res.status;
+      err.detail = text;
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed.detail === "string") err.detail = parsed.detail;
+      } catch (_) { /* not JSON - the body text is the detail */ }
+      throw err;
     }
     const contentType = res.headers.get("content-type") || "";
     if (contentType.includes("application/json")) return res.json();
@@ -164,11 +250,6 @@ const Boord = {
     return d ? d.toLocaleTimeString() : fallback;
   },
 
-  fmtDate(value, fallback = "") {
-    const d = Boord.parseServerDate(value);
-    return d ? d.toLocaleDateString() : fallback;
-  },
-
   // "Today" as the farm sees it, formatted for a date input. toISOString()
   // would give the UTC date, which is still yesterday between midnight and
   // 02:00 local - early enough to matter once picking starts before dawn.
@@ -199,10 +280,10 @@ const Boord = {
   },
 
   // Slim amber banner pinned under the header telling the user the screen is
-  // offline. Wired to the browser's online/offline events, but screens should
-  // ALSO call Boord.setOffline(true/false) from their own request results:
-  // navigator.onLine only reflects the radio, not whether the farm server is
-  // actually reachable (WiFi up + server unreachable is the common case).
+  // offline. Wired to the browser's online/offline events, and api() also
+  // flips it from every request's result: navigator.onLine only reflects the
+  // radio, not whether the farm server is actually reachable (WiFi up +
+  // server unreachable is the common case).
   offlineBanner(message) {
     let el = document.getElementById("boord-offline-banner");
     if (!el) {

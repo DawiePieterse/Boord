@@ -126,21 +126,22 @@ def _git_version() -> tuple:
     return None, None, None, (err[:200] or None)
 
 
-def _alembic() -> tuple:
-    """(head, current). Imported here rather than at module import so a
-    broken database cannot stop this module loading."""
-    head = current = None
+def _alembic_head() -> Optional[str]:
+    """Imported here rather than at module import so a broken database
+    cannot stop this module loading."""
     try:
         import migrate
-        head = migrate.head_revision()
+        return migrate.head_revision()
     except Exception:
-        pass
+        return None
+
+
+def _alembic_current() -> Optional[str]:
     try:
         import migrate
-        current = migrate.current_revision()
+        return migrate.current_revision()
     except Exception:
-        pass
-    return head, current
+        return None
 
 
 def _backup_summary() -> dict:
@@ -211,7 +212,7 @@ def _compute_static() -> dict:
     if state == "release" and tag and frontend_version:
         matches = tag.lstrip("v") == frontend_version
 
-    head, _ = _alembic()
+    head = _alembic_head()
     return {
         "version": version,
         "tag": tag,
@@ -247,7 +248,7 @@ def version_info() -> dict:
     # Live, because it is the one thing that can change under a running
     # server and the one worth alerting on: current behind head means the
     # migrations did not run.
-    _, current = _alembic()
+    current = _alembic_current()
     info["alembic_current"] = current
     info["migrations_applied"] = (
         None if (current is None or info.get("alembic_head") is None)

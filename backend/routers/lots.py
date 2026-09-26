@@ -4,13 +4,13 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import Session, SQLModel, func, select
 
-from db import get_session, supplier_id_for_device
+from db import get_session, supplier_id_for_device, supplier_map, upsert
 from models import HarvestRecord, Lot, LotStatus, Supplier, SystemSetting
 from security import require_admin_client
-from timeutil import day_bounds
-from weather import current_farm_weather, farm_weather_configured
+from timeutil import as_utc, day_bounds
+from weather import current_farm_weather
 
 router = APIRouter(prefix="/api/lots", tags=["lots"])
 
@@ -55,8 +55,7 @@ def _urgency(age_minutes: float, settings: SystemSetting) -> str:
 
 def _with_urgency(lot: Lot, settings: SystemSetting, suppliers: dict) -> dict:
     now = datetime.now(timezone.utc)
-    ts = lot.timestamp if lot.timestamp.tzinfo else lot.timestamp.replace(tzinfo=timezone.utc)
-    age_minutes = (now - ts).total_seconds() / 60
+    age_minutes = (now - as_utc(lot.timestamp)).total_seconds() / 60
     supplier = suppliers.get(lot.supplier_id)
     return {
         **lot.model_dump(),
@@ -66,10 +65,6 @@ def _with_urgency(lot: Lot, settings: SystemSetting, suppliers: dict) -> dict:
         "supplier_name": supplier.name if supplier else "",
         "is_own_farm": supplier.is_own_farm if supplier else False,
     }
-
-
-def _supplier_map(session: Session) -> dict:
-    return {s.id: s for s in session.exec(select(Supplier)).all()}
 
 
 def recompute_lot_totals(session: Session, lot: Lot) -> None:
@@ -86,10 +81,32 @@ def recompute_lot_totals(session: Session, lot: Lot) -> None:
     same number the crates actually add up to."""
     if lot.status == LotStatus.created:
         return
-    crates = session.exec(select(HarvestRecord).where(HarvestRecord.lot_id == lot.id)).all()
-    lot.total_crates = len(crates)
-    lot.total_kg = round(sum(c.weight_kg - c.deduction_kg for c in crates), 1)
+    total_crates, total_kg = _crate_totals(session, [lot.id]).get(lot.id, (0, 0.0))
+    lot.total_crates = total_crates
+    lot.total_kg = round(total_kg, 1)
     session.add(lot)
+
+
+def _crate_totals(session: Session, lot_ids) -> dict:
+    """{lot_id: (crates, net kg)} for the given lots in one grouped query.
+    Lots with no crates are absent from the result."""
+    lot_ids = list(lot_ids)
+    if not lot_ids:
+        return {}
+    rows = session.exec(
+        select(HarvestRecord.lot_id, func.count(),
+               func.sum(HarvestRecord.weight_kg - HarvestRecord.deduction_kg))
+        .where(HarvestRecord.lot_id.in_(lot_ids)).group_by(HarvestRecord.lot_id)).all()
+    return {lot_id: (crates, kg or 0.0) for lot_id, crates, kg in rows}
+
+
+def _stamp_weather(session: Session, lot: Lot) -> None:
+    """Capture the farm's current conditions onto a lot; {} (no source
+    configured, or fetch failed) leaves the model defaults."""
+    weather = current_farm_weather(session)
+    lot.weather_temp = weather.get("temp")
+    lot.weather_humidity = weather.get("humidity")
+    lot.weather_condition = weather.get("condition", "")
 
 
 def _build_split_index(session: Session):
@@ -107,7 +124,8 @@ def _build_split_index(session: Session):
     return parents_by_slip, children_by_parent_slip
 
 
-def _related_lots(session: Session, lot: Lot, parents_by_slip: dict, children_by_parent_slip: dict) -> list:
+def _related_lots(lot: Lot, parents_by_slip: dict, children_by_parent_slip: dict,
+                  crate_totals: dict) -> list:
     related = []
     if lot.split_from_slip_number and lot.split_from_slip_number in parents_by_slip:
         related.append(parents_by_slip[lot.split_from_slip_number])
@@ -119,9 +137,8 @@ def _related_lots(session: Session, lot: Lot, parents_by_slip: dict, children_by
             # Still-pending lots don't have real totals stored yet (see
             # list_pending) - compute them live so the relative's crate/kg
             # count shown at receiving isn't misleadingly 0.
-            crates = session.exec(select(HarvestRecord).where(HarvestRecord.lot_id == r.id)).all()
-            total_crates = len(crates)
-            total_kg = round(sum(c.weight_kg - c.deduction_kg for c in crates), 1)
+            total_crates, total_kg = crate_totals.get(r.id, (0, 0.0))
+            total_kg = round(total_kg, 1)
         else:
             total_crates = r.total_crates
             total_kg = round(r.total_kg, 1)
@@ -149,7 +166,7 @@ def list_pending(supplier_id: Optional[int] = None, period_start: Optional[date]
     passed (dashboard KPI use) - left unfiltered by default so device screens
     always see every pending lot regardless of when picking started."""
     settings = session.exec(select(SystemSetting)).first() or SystemSetting()
-    suppliers = _supplier_map(session)
+    suppliers = supplier_map(session)
     query = select(Lot).where(Lot.status == LotStatus.created)
     if supplier_id is not None:
         query = query.where(Lot.supplier_id == supplier_id)
@@ -157,14 +174,14 @@ def list_pending(supplier_id: Optional[int] = None, period_start: Optional[date]
         start_dt, end_dt = day_bounds(period_start, period_end)
         query = query.where(Lot.timestamp >= start_dt, Lot.timestamp <= end_dt)
     lots = session.exec(query.order_by(Lot.timestamp.asc())).all()
+    totals = _crate_totals(session, (l.id for l in lots))
     result = []
     for l in lots:
-        crates = session.exec(select(HarvestRecord).where(HarvestRecord.lot_id == l.id)).all()
-        if not crates:
+        if l.id not in totals:
             continue
-        total_kg = sum(c.weight_kg - c.deduction_kg for c in crates)
+        total_crates, total_kg = totals[l.id]
         enriched = _with_urgency(l, settings, suppliers)
-        enriched["total_crates"] = len(crates)
+        enriched["total_crates"] = total_crates
         enriched["total_kg"] = round(total_kg, 1)
         result.append(enriched)
     result.sort(key=lambda r: r["age_minutes"], reverse=True)
@@ -183,7 +200,7 @@ def list_in_transit(supplier_id: Optional[int] = None, period_start: Optional[da
     house gate always sees every truck currently on its way, regardless of
     when it was dispatched."""
     settings = session.exec(select(SystemSetting)).first() or SystemSetting()
-    suppliers = _supplier_map(session)
+    suppliers = supplier_map(session)
     query = select(Lot).where(Lot.status == LotStatus.in_transit)
     if supplier_id is not None:
         query = query.where(Lot.supplier_id == supplier_id)
@@ -192,10 +209,14 @@ def list_in_transit(supplier_id: Optional[int] = None, period_start: Optional[da
         query = query.where(Lot.timestamp >= start_dt, Lot.timestamp <= end_dt)
     lots = session.exec(query.order_by(Lot.timestamp.asc())).all()
     parents_by_slip, children_by_parent_slip = _build_split_index(session)
+    pending_relatives = {r.id for r in [*parents_by_slip.values(),
+                                        *(c for cs in children_by_parent_slip.values() for c in cs)]
+                         if r.status == LotStatus.created}
+    crate_totals = _crate_totals(session, pending_relatives)
     enriched = []
     for l in lots:
         e = _with_urgency(l, settings, suppliers)
-        e["related_lots"] = _related_lots(session, l, parents_by_slip, children_by_parent_slip)
+        e["related_lots"] = _related_lots(l, parents_by_slip, children_by_parent_slip, crate_totals)
         enriched.append(e)
     enriched.sort(key=lambda r: r["age_minutes"], reverse=True)
     return enriched
@@ -209,7 +230,7 @@ def list_received(period_start: Optional[date] = None, period_end: Optional[date
     period_start/period_end are optional and only applied when both are
     passed - left unfiltered by default (all received lots, any time)."""
     settings = session.exec(select(SystemSetting)).first() or SystemSetting()
-    suppliers = _supplier_map(session)
+    suppliers = supplier_map(session)
     # received_at is only ever set at gate check-in, so it alone defines
     # "received" - graded lots (status=processing_complete) stay in the list.
     query = select(Lot).where(Lot.received_at != None)  # noqa: E711
@@ -261,33 +282,22 @@ def upsert_lot(lot_in: LotIn, session: Session = Depends(get_session)):
         # the device; otherwise resolve it from the device now.
         data["supplier_id"] = (existing.supplier_id if existing and existing.supplier_id is not None
                                 else supplier_id_for_device(session, data.get("device_id")))
-    lot = Lot(**data, id=existing.id if existing else None)
-    if existing:
-        # LotIn doesn't carry split_from_slip_number (dispatch never sets it),
-        # so without this the merge below would silently wipe it back to None
-        # every time an existing lot is re-upserted (e.g. field->in_transit).
-        lot.split_from_slip_number = existing.split_from_slip_number
-
     # Capture conditions at the moment of dispatch. Most lots already exist as
     # a placeholder row by this point (crates synced from the field before
     # "Send Picking Slip" was tapped - see sync.py _resolve_lot_id), so this
     # can't be gated on `not existing`; it has to key off the created->in_transit
     # transition instead. Once a lot is in_transit, leave its weather alone -
     # a retried dispatch shouldn't overwrite the conditions at check-in.
+    # Worked out before upsert() below, which updates `existing` in place.
     dispatching = lot_in.status == LotStatus.in_transit and (
         not existing or existing.status != LotStatus.in_transit)
-    if dispatching:
-        if farm_weather_configured(session):
-            weather = current_farm_weather(session)
-            lot.weather_temp = weather.get("temp")
-            lot.weather_humidity = weather.get("humidity")
-            lot.weather_condition = weather.get("condition", "")
-    elif existing:
-        lot.weather_temp = existing.weather_temp
-        lot.weather_humidity = existing.weather_humidity
-        lot.weather_condition = existing.weather_condition
 
-    saved = session.merge(lot)
+    # Only LotIn's fields are written, so server-owned columns it doesn't
+    # carry (split_from_slip_number, the weather stamps, received_at) survive
+    # a re-upsert such as field->in_transit.
+    saved = upsert(session, existing, Lot, data)
+    if dispatching:
+        _stamp_weather(session, saved)
     session.commit()
     session.refresh(saved)
 
@@ -403,11 +413,7 @@ def create_external_lot(lot_in: ExternalLotIn, session: Session = Depends(get_se
     # there's no GPS for wherever the other farmer picked, so this is read as
     # "conditions at the pack house when the delivery was logged," not
     # "conditions where it was grown."
-    if farm_weather_configured(session):
-        weather = current_farm_weather(session)
-        lot.weather_temp = weather.get("temp")
-        lot.weather_humidity = weather.get("humidity")
-        lot.weather_condition = weather.get("condition", "")
+    _stamp_weather(session, lot)
     session.add(lot)
     session.commit()
     session.refresh(lot)

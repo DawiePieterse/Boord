@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy import inspect, text
 from sqlmodel import SQLModel, Session, create_engine, select
 
-from models import Device, DeviceRole, Supplier, SystemSetting, Team
+from models import Device, DeviceRole, RateSetting, Supplier, SystemSetting, Team, Worker
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -146,6 +146,56 @@ def get_own_supplier_id(session: Session):
     return own.id if own else None
 
 
+def deactivate(session: Session, model, obj_id) -> dict:
+    """Soft-delete: master data is deactivated, never removed, so history
+    that references it keeps resolving."""
+    obj = session.get(model, obj_id)
+    if obj:
+        obj.active = False
+        session.add(obj)
+        session.commit()
+    return {"ok": True}
+
+
+def upsert(session: Session, existing, model, fields: dict):
+    """Create or update a row, setting only `fields`.
+
+    session.merge() of a freshly built object replaces the WHOLE row, so every
+    column the request doesn't carry (server-owned stamps like synced_at,
+    last_seen, photo_filename, split_from_slip_number) had to be copied back
+    from the existing row by hand, one patch per column. Setting just the
+    fields that arrived leaves the rest alone by construction. `fields` must
+    include the primary key for a new row; `existing` is the current row or
+    None (passed in so callers that prefetched rows don't query again)."""
+    obj = existing if existing is not None else model()
+    for name, value in fields.items():
+        setattr(obj, name, value)
+    session.add(obj)
+    return obj
+
+
+def supplier_map(session: Session) -> dict:
+    return {s.id: s for s in session.exec(select(Supplier)).all()}
+
+
+def latest_rate_setting(session: Session) -> Optional[RateSetting]:
+    """The wage rate in force: rates are an append-only history, so "current"
+    is the newest row. Ordering by effective_date alone is not enough -
+    setting a rate twice in one day leaves two rows sharing a date, and the
+    tie used to resolve to the OLD one. The admin saw "Rate saved" while
+    wages carried on at the previous rate, so the tie breaks on id."""
+    return session.exec(
+        select(RateSetting).order_by(RateSetting.effective_date.desc(), RateSetting.id.desc())
+    ).first()
+
+
+def supplier_or_own(session: Session, supplier_id: Optional[int]) -> Optional[int]:
+    """A worker's supplier_id as stored: unset means the pack house's own
+    fruit, written as the own-fruit supplier's id rather than NULL (see
+    migration 5e0b7d3c21aa)."""
+    return supplier_id if supplier_id is not None else get_own_supplier_id(session)
+
+
 def supplier_id_for_device(session: Session, device_id) -> Optional[int]:
     """Which supplier a field lot from this device belongs to: the device's
     own allocation if it has one, otherwise the pack house's own fruit. A
@@ -192,7 +242,14 @@ def seed_defaults() -> None:
             session.add(SystemSetting())
 
         if not session.exec(select(Supplier).where(Supplier.is_own_farm == True)).first():  # noqa: E712
-            session.add(Supplier(name="Own fruit", is_own_farm=True))
+            own = Supplier(name="Own fruit", is_own_farm=True)
+            session.add(own)
+            session.flush()
+            # Same fill as migration 5e0b7d3c21aa, for a database that had
+            # workers before it had an own-fruit supplier to point them at.
+            for worker in session.exec(select(Worker).where(Worker.supplier_id == None)).all():  # noqa: E711
+                worker.supplier_id = own.id
+                session.add(worker)
 
         # No admin account is seeded, because there is no longer one to seed.
         # A fresh install used to generate a password, print it, and leave a
