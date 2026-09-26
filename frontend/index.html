@@ -53,7 +53,7 @@ async function loadDeviceOptions() {
     if (!devices.length) throw new Error("no devices configured");
     select.innerHTML = devices.map((d) => {
       const label = d.station ? `${d.id} - ${d.station}` : d.id;
-      return `<option value="${d.id}">${label}</option>`;
+      return `<option value="${Boord.escapeHtml(d.id)}">${Boord.escapeHtml(label)}</option>`;
     }).join("");
     select.classList.remove("hidden");
     status.classList.add("hidden");

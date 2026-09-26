@@ -11,25 +11,17 @@ from models import HarvestRecord, Payment, RateType, Worker
 from security import require_admin_client
 from timeutil import day_bounds
 
-router = APIRouter(prefix="/api/payments", tags=["payments"])
+# Every endpoint here is admin-only.
+router = APIRouter(prefix="/api/payments", tags=["payments"], dependencies=[Depends(require_admin_client)])
 
 
 def _worker_ids_for_supplier(session: Session, supplier_id: Optional[int]) -> Optional[set]:
     """Resolve which workers belong to a supplier filter, or None for no filter.
-    Own-fruit workers are seeded with supplier_id left unset (None) rather than
-    pointing at the own-fruit Supplier row (see master_data.py/seed_demo.py),
-    so matching the own-fruit supplier has to include NULL too - a plain
-    equality check would silently return zero workers for that case."""
+    Own-fruit workers carry the own-fruit supplier's id like any other
+    (migration 5e0b7d3c21aa), so this is a plain equality match."""
     if supplier_id is None:
         return None
-    own_id = get_own_supplier_id(session)
-    if supplier_id == own_id:
-        ids = session.exec(select(Worker.id).where(
-            (Worker.supplier_id == None) | (Worker.supplier_id == own_id)  # noqa: E711
-        )).all()
-    else:
-        ids = session.exec(select(Worker.id).where(Worker.supplier_id == supplier_id)).all()
-    return set(ids)
+    return set(session.exec(select(Worker.id).where(Worker.supplier_id == supplier_id)).all())
 
 
 def harvest_records_between(session: Session, start_day: date, end_day: Optional[date] = None,
@@ -43,20 +35,17 @@ def harvest_records_between(session: Session, start_day: date, end_day: Optional
     return session.exec(query).all()
 
 
-def suppliers_with_own(session: Session) -> tuple[dict, Optional[int], str]:
-    """(suppliers_by_id, own-fruit supplier id, own-fruit display name)."""
+def suppliers_with_own(session: Session) -> tuple[dict, str]:
+    """(suppliers_by_id, own-fruit display name)."""
     suppliers_by_id = supplier_map(session)
-    own_id = get_own_supplier_id(session)
-    own_supplier = suppliers_by_id.get(own_id)
-    return suppliers_by_id, own_id, own_supplier.name if own_supplier else "Own fruit"
+    own_supplier = suppliers_by_id.get(get_own_supplier_id(session))
+    return suppliers_by_id, own_supplier.name if own_supplier else "Own fruit"
 
 
-def _supplier_display_name(worker: Optional[Worker], suppliers_by_id: dict, own_id: Optional[int],
-                            own_name: str) -> str:
-    """Resolve the supplier name to show for a worker, for grouping the
-    wage sheet - own-fruit workers have supplier_id left unset (None), so they
-    fall back to the own-fruit supplier's name rather than an "Unknown" group."""
-    if not worker or worker.supplier_id is None or worker.supplier_id == own_id:
+def _supplier_display_name(worker: Optional[Worker], suppliers_by_id: dict, own_name: str) -> str:
+    """The supplier name to show for a worker, for grouping the wage sheet. A
+    payment whose worker has since been removed files under own fruit."""
+    if not worker:
         return own_name
     supplier = suppliers_by_id.get(worker.supplier_id)
     return supplier.name if supplier else "Unknown"
@@ -96,7 +85,7 @@ def _worker_totals(session: Session, records: list[HarvestRecord]):
 
 @router.post("/calculate")
 def calculate_payments(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                        session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+                        session: Session = Depends(get_session)):
     totals, setting = _worker_totals(
         session, harvest_records_between(session, period_start, period_end, supplier_id))
     if setting is None:
@@ -131,7 +120,7 @@ def calculate_payments(period_start: date, period_end: date, supplier_id: Option
 
 @router.get("")
 def list_payments(period_start: Optional[date] = None, period_end: Optional[date] = None,
-                   session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+                   session: Session = Depends(get_session)):
     """Admin-only, like every other endpoint in this router. It was the one
     that lacked the dependency, so anyone who could reach the server could
     read every worker's amount_due - the farm's whole payroll, to anyone who
@@ -150,7 +139,7 @@ def list_payments(period_start: Optional[date] = None, period_end: Optional[date
 @router.get("/export")
 def export_payments(period_start: date, period_end: date, supplier_id: Optional[int] = None,
                      fmt: str = Query("xlsx", pattern="^(csv|xlsx)$"),
-                     session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+                     session: Session = Depends(get_session)):
     payments = session.exec(
         select(Payment).where(Payment.period_start == period_start, Payment.period_end == period_end)
     ).all()
@@ -158,11 +147,11 @@ def export_payments(period_start: date, period_end: date, supplier_id: Optional[
     if worker_ids is not None:
         payments = [p for p in payments if p.worker_id in worker_ids]
     workers = {w.id: w for w in session.exec(select(Worker)).all()}
-    suppliers_by_id, own_id, own_name = suppliers_with_own(session)
+    suppliers_by_id, own_name = suppliers_with_own(session)
 
     groups: dict[str, list[Payment]] = {}
     for p in payments:
-        name = _supplier_display_name(workers.get(p.worker_id), suppliers_by_id, own_id, own_name)
+        name = _supplier_display_name(workers.get(p.worker_id), suppliers_by_id, own_name)
         groups.setdefault(name, []).append(p)
     group_names = sorted(groups.keys(), key=lambda n: (n != own_name, n))
 

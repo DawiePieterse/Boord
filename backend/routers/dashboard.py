@@ -9,12 +9,13 @@ from models import Block, Worker
 from routers.payments import _supplier_display_name, _worker_totals, harvest_records_between, suppliers_with_own
 from security import require_admin_client
 
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+# Every endpoint here is admin-only.
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(require_admin_client)])
 
 
 @router.get("/summary")
 def dashboard_summary(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                       session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+                       session: Session = Depends(get_session)):
     """Active-entity counts + per-worker and per-block breakdowns for the
     admin Dashboard tab. "Active" means had harvest activity within the
     filtered period/supplier, not a static master-data active flag - so
@@ -35,7 +36,7 @@ def dashboard_summary(period_start: date, period_end: date, supplier_id: Optiona
     # figure is worse than one that says no rate is set.
     totals, rate_setting = _worker_totals(session, records)
     workers_by_id = {w.id: w for w in session.exec(select(Worker)).all()}
-    suppliers_by_id, own_id, own_name = suppliers_with_own(session)
+    suppliers_by_id, own_name = suppliers_with_own(session)
     workers = []
     for worker_id, data in totals.items():
         w = workers_by_id.get(worker_id)
@@ -43,7 +44,7 @@ def dashboard_summary(period_start: date, period_end: date, supplier_id: Optiona
         workers.append({
             "worker_id": worker_id,
             "name": w.name if w else worker_id,
-            "supplier_name": _supplier_display_name(w, suppliers_by_id, own_id, own_name),
+            "supplier_name": _supplier_display_name(w, suppliers_by_id, own_name),
             "crates": crates,
             "total_kg": round(data["total_kg"], 1),
             "amount_due": round(data["amount"], 2),

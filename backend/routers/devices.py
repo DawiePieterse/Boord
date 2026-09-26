@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, SQLModel, select
 
-from db import get_session
+from db import get_session, upsert
 from models import Device, DeviceRole, Team
 from security import require_admin_client
 
@@ -70,9 +70,7 @@ def list_devices(session: Session = Depends(get_session), _admin=Depends(require
 
 @router.post("")
 def upsert_device(device_in: DeviceIn, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
-    existing = session.get(Device, device_in.id)
-    device = Device(**device_in.model_dump(), last_seen=existing.last_seen if existing else None)
-    session.merge(device)
+    upsert(session, session.get(Device, device_in.id), Device, device_in.model_dump())
     session.commit()
     return {"ok": True}
 

@@ -1025,11 +1025,18 @@ def test_every_shell_file_a_worker_lists_actually_exists():
 def test_the_shell_refreshes_all_or_nothing():
     """The property itself, asserted against the source: a shell file is never
     written back on its own. Restoring the per-file `cache.put` would bring
-    back the blank screen without failing anything else."""
+    back the blank screen without failing anything else. The caching logic
+    lives once in shared/sw-core.js; each screen's worker only declares its
+    cache name and shell list, then loads the core."""
+    core = "frontend/shared/sw-core.js"
+    source = open(_repo_file(core)).read()
+    assert "refreshShell" in source, f"{core} lost its atomic shell refresh"
+    assert "shellFileChanged" in source, f"{core} no longer checks whether the shell moved"
     for worker in SERVICE_WORKERS[:3]:
         source = open(_repo_file(worker)).read()
-        assert "refreshShell" in source, f"{worker} lost its atomic shell refresh"
-        assert "shellFileChanged" in source, f"{worker} no longer checks whether the shell moved"
+        assert 'importScripts("../shared/sw-core.js")' in source, f"{worker} does not load sw-core.js"
+        assert "../shared/sw-core.js" in _shell_entries(worker), (
+            f"{worker} does not cache sw-core.js, so it cannot start offline")
 
 
 def test_every_screen_starts_through_the_boot_guard():

@@ -23,7 +23,8 @@ from models import (Block, Device, HarvestRecord, RateSetting, SetupState,
                     Supplier, SystemSetting, Worker)
 from security import require_admin_client
 
-router = APIRouter(prefix="/api/setup", tags=["setup"])
+# Every endpoint here is admin-only.
+router = APIRouter(prefix="/api/setup", tags=["setup"], dependencies=[Depends(require_admin_client)])
 
 # The supplier names db.seed_defaults() has written for the pack house's own
 # fruit. Still holding one means nobody has said whose pack house this is.
@@ -133,12 +134,12 @@ def build_setup_state(session: Session) -> dict:
 
 
 @router.get("/state")
-def setup_state(session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+def setup_state(session: Session = Depends(get_session)):
     return build_setup_state(session)
 
 
 @router.post("/start")
-def start_setup(session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+def start_setup(session: Session = Depends(get_session)):
     """Records that the wizard has been opened, so it survives a reload.
 
     Called by the wizard itself as it paints, not by anything a farm can
@@ -154,7 +155,7 @@ def start_setup(session: Session = Depends(get_session), _admin=Depends(require_
 
 
 @router.post("/complete")
-def complete_setup(session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+def complete_setup(session: Session = Depends(get_session)):
     """Marks the wizard finished. Idempotent, and deliberately says nothing
     about whether every step was actually filled in - skipping the optional
     ones is a legitimate way to finish, and the steps that genuinely cannot

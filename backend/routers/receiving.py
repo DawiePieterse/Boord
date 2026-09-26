@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import Session, SQLModel
 
 from db import get_session
 from models import Lot, LotStatus, ReceivingRecord
@@ -37,7 +37,7 @@ def confirm_receipt(record_in: ReceivingRecordIn, session: Session = Depends(get
     lot.status = LotStatus.received
     # Honor the device-reported check-in time (normalized to UTC) so backlog
     # check-ins land on their real day instead of piling into "today".
-    received_at = record_in.timestamp or datetime.now(timezone.utc)
+    received_at = record_in.timestamp
     if received_at.tzinfo is not None:
         received_at = received_at.astimezone(timezone.utc)
     lot.received_at = received_at
@@ -46,8 +46,3 @@ def confirm_receipt(record_in: ReceivingRecordIn, session: Session = Depends(get
     session.commit()
     session.refresh(record)
     return record
-
-
-@router.get("/{lot_id}")
-def get_receiving_for_lot(lot_id: int, session: Session = Depends(get_session)):
-    return session.exec(select(ReceivingRecord).where(ReceivingRecord.lot_id == lot_id)).all()

@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, SQLModel, func, select
 
-from db import get_session, supplier_id_for_device, supplier_map
+from db import get_session, supplier_id_for_device, supplier_map, upsert
 from models import HarvestRecord, Lot, LotStatus, Supplier, SystemSetting
 from security import require_admin_client
 from timeutil import as_utc, day_bounds
@@ -282,29 +282,22 @@ def upsert_lot(lot_in: LotIn, session: Session = Depends(get_session)):
         # the device; otherwise resolve it from the device now.
         data["supplier_id"] = (existing.supplier_id if existing and existing.supplier_id is not None
                                 else supplier_id_for_device(session, data.get("device_id")))
-    lot = Lot(**data, id=existing.id if existing else None)
-    if existing:
-        # LotIn doesn't carry split_from_slip_number (dispatch never sets it),
-        # so without this the merge below would silently wipe it back to None
-        # every time an existing lot is re-upserted (e.g. field->in_transit).
-        lot.split_from_slip_number = existing.split_from_slip_number
-
     # Capture conditions at the moment of dispatch. Most lots already exist as
     # a placeholder row by this point (crates synced from the field before
     # "Send Picking Slip" was tapped - see sync.py _resolve_lot_id), so this
     # can't be gated on `not existing`; it has to key off the created->in_transit
     # transition instead. Once a lot is in_transit, leave its weather alone -
     # a retried dispatch shouldn't overwrite the conditions at check-in.
+    # Worked out before upsert() below, which updates `existing` in place.
     dispatching = lot_in.status == LotStatus.in_transit and (
         not existing or existing.status != LotStatus.in_transit)
-    if dispatching:
-        _stamp_weather(session, lot)
-    elif existing:
-        lot.weather_temp = existing.weather_temp
-        lot.weather_humidity = existing.weather_humidity
-        lot.weather_condition = existing.weather_condition
 
-    saved = session.merge(lot)
+    # Only LotIn's fields are written, so server-owned columns it doesn't
+    # carry (split_from_slip_number, the weather stamps, received_at) survive
+    # a re-upsert such as field->in_transit.
+    saved = upsert(session, existing, Lot, data)
+    if dispatching:
+        _stamp_weather(session, saved)
     session.commit()
     session.refresh(saved)
 

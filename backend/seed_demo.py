@@ -167,7 +167,8 @@ def main():
 
     # --- Workers ---------------------------------------------------------
     # emp 007/008 belong to an external supplier's crew; the rest are the
-    # farm's own workers (supplier_id left unset).
+    # farm's own workers (supplier_id left unset - the server files them under
+    # the own-fruit supplier).
     supplier_by_emp = {"007": jansen["id"], "008": jansen["id"]}
     for emp, first, last in WORKERS:
         api("/api/workers", {

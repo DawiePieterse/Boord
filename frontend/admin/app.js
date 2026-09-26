@@ -2,6 +2,10 @@
 
 let _systemSettings = null;
 
+// Every server-supplied string interpolated into innerHTML goes through this
+// - see Boord.escapeHtml in shared/api.js.
+const esc = Boord.escapeHtml;
+
 function updateBannerPackhouseName() {
   const el = document.getElementById("headerPackhouseName");
   if (!el) return;
@@ -31,7 +35,7 @@ async function updateBannerWeather() {
       el.innerHTML = `<i class="fa-solid fa-location-dot"></i> Set pack house location in Settings`;
     } else if (w && w.temp !== undefined && w.temp !== null) {
       const icon = Boord.weatherIcon(w.condition);
-      el.innerHTML = `<i class="fa-solid ${icon}"></i> ${Math.round(w.temp)}°C · ${w.condition}${w.humidity != null ? ` · ${w.humidity}% humidity` : ""}`;
+      el.innerHTML = `<i class="fa-solid ${icon}"></i> ${Math.round(w.temp)}°C · ${esc(w.condition)}${w.humidity != null ? ` · ${w.humidity}% humidity` : ""}`;
     }
   } catch (e) {
     // weather is a nice-to-have - never blocks or errors the rest of the header
@@ -62,8 +66,7 @@ async function fetchSetupState() {
   try {
     return await Boord.api("/api/setup/state");
   } catch (e) {
-    if (Boord.isNetworkError(e)) { Boord.setOffline(true); return null; }
-    return null;
+    return null; // api() has already flagged an unreachable server as offline
   }
 }
 
@@ -205,12 +208,11 @@ async function refreshDashboard() {
       Boord.api(`/api/dashboard/summary?${qs}`),
     ]);
   } catch (e) {
-    if (Boord.isNetworkError(e)) { Boord.setOffline(true); return; } // keep last data on screen
+    if (Boord.isNetworkError(e)) return; // keep last data on screen
     if (Boord.isAuthError(e)) { accessRefused(e); return; }
     Boord.toast("Could not load the dashboard");
     return;
   }
-  Boord.setOffline(false);
 
   renderDashboardKpis(harvesting, inTransit, received, summary);
   renderDashboardLists(harvesting, inTransit, received, summary);
@@ -260,24 +262,24 @@ function renderDashboardLists(harvesting, inTransit, received, summary) {
 
   document.getElementById("dash-harvesting-title").textContent = `Harvesting - ${h.crates} crates / ${h.kg.toFixed(1)} kg`;
   document.getElementById("dash-harvesting-body").innerHTML = harvesting.map((l) => `
-    <div class="p-3 urgency-${l.urgency}">
-      <div class="font-semibold text-sm">${l.slip_number} <span class="text-xs font-normal text-slate-500">${l.supplier_name}</span></div>
+    <div class="p-3 urgency-${esc(l.urgency)}">
+      <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}</span></div>
       <div class="text-sm">${l.total_crates} crates / ${l.total_kg.toFixed(1)} kg - ${l.age_minutes} min ago</div>
     </div>
   `).join("") || `<div class="p-3 text-sm text-slate-400">Nothing currently being harvested</div>`;
 
   document.getElementById("dash-intransit-title").textContent = `In transit - ${t.crates} crates / ${t.kg.toFixed(1)} kg`;
   document.getElementById("dash-intransit-body").innerHTML = inTransit.map((l) => `
-    <div class="p-3 urgency-${l.urgency}">
-      <div class="font-semibold text-sm">${l.slip_number} <span class="text-xs font-normal text-slate-500">${l.supplier_name}</span></div>
+    <div class="p-3 urgency-${esc(l.urgency)}">
+      <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}</span></div>
       <div class="text-sm">${l.total_crates} crates / ${l.total_kg.toFixed(1)} kg - ${l.age_minutes} min ago</div>
     </div>
   `).join("") || `<div class="p-3 text-sm text-slate-400">Nothing currently in transit</div>`;
 
   document.getElementById("dash-received-title").textContent = `Received - ${r.crates} crates / ${r.kg.toFixed(1)} kg`;
   document.getElementById("dash-received-body").innerHTML = received.map((l) => `
-    <button type="button" data-lot-id="${l.id}" class="received-lot-row w-full text-left p-3 hover:bg-slate-50">
-      <div class="font-semibold text-sm">${l.slip_number} <span class="text-xs font-normal text-slate-500">${l.supplier_name}</span></div>
+    <button type="button" data-lot-id="${esc(l.id)}" class="received-lot-row w-full text-left p-3 hover:bg-slate-50">
+      <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}</span></div>
       <div class="text-sm text-slate-600">${l.total_crates} crates / ${l.total_kg.toFixed(1)} kg - received ${Boord.fmtDateTime(l.received_at)} <span class="text-blue-700">· view / edit crates</span></div>
     </button>
   `).join("") || `<div class="p-3 text-sm text-slate-400">Nothing received in this period</div>`;
@@ -291,8 +293,8 @@ function renderDashboardLists(harvesting, inTransit, received, summary) {
   document.getElementById("dash-workers-title").textContent = `Workers - ${summary.workers.length} workers`;
   document.getElementById("dash-workers-rows").innerHTML = summary.workers.map((w) => `
     <tr class="border-b">
-      <td class="p-2">${w.name}</td>
-      <td class="p-2">${w.supplier_name}</td>
+      <td class="p-2">${esc(w.name)}</td>
+      <td class="p-2">${esc(w.supplier_name)}</td>
       <td class="p-2">${w.crates}</td>
       <td class="p-2">${w.total_kg.toFixed(1)}</td>
       <td class="p-2">R${w.amount_due.toFixed(2)}</td>
@@ -303,7 +305,7 @@ function renderDashboardLists(harvesting, inTransit, received, summary) {
   document.getElementById("dash-blocks-title").textContent = `Blocks - ${summary.blocks.length} blocks`;
   document.getElementById("dash-blocks-rows").innerHTML = summary.blocks.map((b) => `
     <tr class="border-b">
-      <td class="p-2">${b.name}</td>
+      <td class="p-2">${esc(b.name)}</td>
       <td class="p-2">${b.crates}</td>
       <td class="p-2">${b.total_kg.toFixed(1)}</td>
       <td class="p-2">${b.avg_kg_crate.toFixed(1)}</td>
@@ -361,17 +363,17 @@ function renderLotCratesModal() {
   document.getElementById("lotCratesRows").innerHTML = crates.map((c) => {
     const net = (c.weight_kg - (c.deduction_kg || 0)).toFixed(1);
     const editedNote = c.edited_at
-      ? `<div class="text-[11px] text-amber-700">edited by ${c.edited_by || "admin"}, ${Boord.fmtDateTime(c.edited_at)}</div>`
+      ? `<div class="text-[11px] text-amber-700">edited by ${esc(c.edited_by || "admin")}, ${Boord.fmtDateTime(c.edited_at)}</div>`
       : "";
     return `
       <tr class="border-b align-top">
         <td class="p-2 whitespace-nowrap">${Boord.fmtTime(c.timestamp)}</td>
-        <td class="p-2">${c.block_id || ""}</td>
-        <td class="p-2">${_workerName(c.worker_id)}${editedNote}</td>
+        <td class="p-2">${esc(c.block_id || "")}</td>
+        <td class="p-2">${esc(_workerName(c.worker_id))}${editedNote}</td>
         <td class="p-2">${c.weight_kg.toFixed(1)}</td>
         <td class="p-2">${(c.deduction_kg || 0).toFixed(1)}</td>
         <td class="p-2 font-semibold">${net}</td>
-        <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit-crate="${c.uuid}">Edit</button></td>
+        <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit-crate="${esc(c.uuid)}">Edit</button></td>
       </tr>`;
   }).join("") || `<tr><td class="p-2 text-slate-400" colspan="7">No crates on this lot</td></tr>`;
 
@@ -390,7 +392,7 @@ function renderWagesWarning(wagesAffected) {
   if (!wagesAffected || !wagesAffected.length) return;
   const el = document.getElementById("lotCratesWagesWarning");
   const lines = wagesAffected.map((w) =>
-    `<strong>${w.worker_name}</strong>: wages for ${w.period_start} to ${w.period_end} were already calculated and do not reflect this change.`);
+    `<strong>${esc(w.worker_name)}</strong>: wages for ${esc(w.period_start)} to ${esc(w.period_end)} were already calculated and do not reflect this change.`);
   el.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> ${lines.join("<br>")}<br>` +
     `Re-run <strong>Calculate Wages</strong> for the affected period(s) in Payments to update the wage sheet.`;
   el.classList.remove("hidden");
@@ -458,7 +460,7 @@ function openEditModal(title, fields, initial, onSave) {
     <div>
       <label class="text-xs text-slate-500 block">${f.label}</label>
       ${f.type === "select"
-        ? `<select data-key="${f.key}" class="w-full border border-slate-300 rounded-lg p-2">${f.options.map((o) => `<option value="${o.value}">${o.label}</option>`).join("")}</select>`
+        ? `<select data-key="${f.key}" class="w-full border border-slate-300 rounded-lg p-2">${f.options.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("")}</select>`
         : f.type === "checkbox"
         ? `<label class="flex items-center gap-2 mt-1"><input data-key="${f.key}" type="checkbox" class="w-4 h-4"> <span class="text-sm">${f.label}</span></label>`
         : f.type === "file"
@@ -639,18 +641,18 @@ function renderWorkersTable() {
 
   document.getElementById("workersTable").innerHTML = filtered.map((w) => `
     <tr class="border-b ${w.active ? "" : "opacity-50"}">
-      <td class="p-2"><input type="checkbox" class="worker-select-checkbox w-4 h-4" data-select="${w.id}"></td>
+      <td class="p-2"><input type="checkbox" class="worker-select-checkbox w-4 h-4" data-select="${esc(w.id)}"></td>
       <td class="p-2">${w.photo_filename
-        ? `<img src="/photos/${w.photo_filename}" class="w-8 h-8 rounded-full object-cover">`
+        ? `<img src="/photos/${esc(encodeURIComponent(w.photo_filename))}" class="w-8 h-8 rounded-full object-cover">`
         : '<span class="w-8 h-8 rounded-full bg-slate-200 inline-flex items-center justify-center text-slate-400 text-xs">?</span>'}</td>
-      <td class="p-2 font-mono">${w.id}</td>
-      <td class="p-2">${w.first_name || ""}</td>
-      <td class="p-2">${w.last_name || w.name || ""}</td>
-      <td class="p-2 text-xs">${suppliers.get(w.supplier_id) || ""}</td>
+      <td class="p-2 font-mono">${esc(w.id)}</td>
+      <td class="p-2">${esc(w.first_name || "")}</td>
+      <td class="p-2">${esc(w.last_name || w.name || "")}</td>
+      <td class="p-2 text-xs">${esc(suppliers.get(w.supplier_id) || "")}</td>
       <td class="p-2">${w.active ? '<span class="text-green-600 text-xs">Active</span>' : '<span class="text-slate-400 text-xs">Inactive</span>'}</td>
       <td class="p-2 text-right space-x-2">
-        <button class="text-blue-700 text-xs" data-edit="${w.id}">Edit</button>
-        <button class="text-slate-500 text-xs" data-qr="${w.id}">QR</button>
+        <button class="text-blue-700 text-xs" data-edit="${esc(w.id)}">Edit</button>
+        <button class="text-slate-500 text-xs" data-qr="${esc(w.id)}">QR</button>
       </td>
     </tr>
   `).join("");
@@ -677,7 +679,7 @@ function populateSupplierFilterSelect(elementId, suppliers) {
   const current = select.value;
   const active = suppliers.filter((s) => s.active);
   select.innerHTML = `<option value="">All suppliers</option>` +
-    active.map((s) => `<option value="${s.id}">${s.name}${s.is_own_farm ? " (Own fruit)" : ""}</option>`).join("");
+    active.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}${s.is_own_farm ? " (Own fruit)" : ""}</option>`).join("");
   if (current) select.value = current;
 }
 
@@ -741,9 +743,9 @@ async function loadTeams() {
   window._teamsCache = teams;
   document.getElementById("teamsTable").innerHTML = teams.map((t) => `
     <tr class="border-b ${t.active ? "" : "opacity-50"}">
-      <td class="p-2">${t.id}</td><td class="p-2">${t.name}</td><td class="p-2">${t.induna}</td>
+      <td class="p-2">${esc(t.id)}</td><td class="p-2">${esc(t.name)}</td><td class="p-2">${esc(t.induna)}</td>
       <td class="p-2">${t.active ? '<span class="text-green-600 text-xs">Active</span>' : '<span class="text-slate-400 text-xs">Inactive</span>'}</td>
-      <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit="${t.id}">Edit</button></td>
+      <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit="${esc(t.id)}">Edit</button></td>
     </tr>
   `).join("");
   document.querySelectorAll("#teamsTable [data-edit]").forEach((btn) => {
@@ -776,11 +778,11 @@ async function loadBlocks() {
   const blocks = await Boord.api("/api/blocks");
   document.getElementById("blocksTable").innerHTML = blocks.map((b) => `
     <tr class="border-b ${b.active ? "" : "opacity-50"}">
-      <td class="p-2">${b.id}</td><td class="p-2">${b.variety}</td><td class="p-2">${b.trees}</td>
-      <td class="p-2">${b.hectares}</td>
-      <td class="p-2 text-xs">${supplierName(b.supplier_id)}</td>
+      <td class="p-2">${esc(b.id)}</td><td class="p-2">${esc(b.variety)}</td><td class="p-2">${esc(b.trees)}</td>
+      <td class="p-2">${esc(b.hectares)}</td>
+      <td class="p-2 text-xs">${esc(supplierName(b.supplier_id))}</td>
       <td class="p-2">${b.active ? '<span class="text-green-600 text-xs">Active</span>' : '<span class="text-slate-400 text-xs">Inactive</span>'}</td>
-      <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit="${b.id}">Edit</button></td>
+      <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit="${esc(b.id)}">Edit</button></td>
     </tr>
   `).join("");
   document.querySelectorAll("#blocksTable [data-edit]").forEach((btn) => {
@@ -820,10 +822,10 @@ async function loadDevices() {
   const devices = await Boord.api("/api/devices");
   document.getElementById("devicesTable").innerHTML = devices.map((d) => `
     <tr class="border-b">
-      <td class="p-2">${d.id}</td><td class="p-2">${d.role}</td><td class="p-2">${d.station}</td><td class="p-2">${d.team_id || ""}</td>
-      <td class="p-2 text-xs">${d.role === "field" ? (supplierName(d.supplier_id) || "Own fruit") : ""}</td>
+      <td class="p-2">${esc(d.id)}</td><td class="p-2">${esc(d.role)}</td><td class="p-2">${esc(d.station)}</td><td class="p-2">${esc(d.team_id || "")}</td>
+      <td class="p-2 text-xs">${d.role === "field" ? esc(supplierName(d.supplier_id) || "Own fruit") : ""}</td>
       <td class="p-2">${Boord.fmtDateTime(d.last_seen, "never")}</td>
-      <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit="${d.id}">Edit</button></td>
+      <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit="${esc(d.id)}">Edit</button></td>
     </tr>
   `).join("");
   document.querySelectorAll("#devicesTable [data-edit]").forEach((btn) => {
@@ -863,11 +865,11 @@ async function loadSuppliers() {
   window._suppliersCache = suppliers;
   document.getElementById("suppliersTable").innerHTML = suppliers.map((s) => `
     <tr class="border-b ${s.active ? "" : "opacity-50"}">
-      <td class="p-2">${s.name}${s.is_own_farm ? ' <span class="text-xs text-blue-700 font-semibold">(Own fruit)</span>' : ""}</td>
-      <td class="p-2 text-xs">${s.contact_name || ""}${s.contact_phone ? ` - ${s.contact_phone}` : ""}</td>
+      <td class="p-2">${esc(s.name)}${s.is_own_farm ? ' <span class="text-xs text-blue-700 font-semibold">(Own fruit)</span>' : ""}</td>
+      <td class="p-2 text-xs">${esc(s.contact_name || "")}${s.contact_phone ? ` - ${esc(s.contact_phone)}` : ""}</td>
       <td class="p-2 text-xs">${s.packing_rate_per_kg > 0 ? `R${s.packing_rate_per_kg.toFixed(2)}/kg` : s.packing_rate_per_crate > 0 ? `R${s.packing_rate_per_crate.toFixed(2)}/crate` : "-"}</td>
       <td class="p-2">${s.active ? '<span class="text-green-600 text-xs">Active</span>' : '<span class="text-slate-400 text-xs">Inactive</span>'}</td>
-      <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit="${s.id}">Edit</button></td>
+      <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit="${esc(s.id)}">Edit</button></td>
     </tr>
   `).join("");
   document.querySelectorAll("#suppliersTable [data-edit]").forEach((btn) => {
@@ -917,7 +919,7 @@ function populateBillingSupplierSelect(suppliers) {
   const current = select.value;
   const external = suppliers.filter((s) => s.active && !s.is_own_farm);
   select.innerHTML = external.length
-    ? external.map((s) => `<option value="${s.id}">${s.name}</option>`).join("")
+    ? external.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")
     : `<option value="">(no external suppliers yet)</option>`;
   if (current) select.value = current;
 }
@@ -941,7 +943,7 @@ async function calculateBilling() {
     summaryEl.classList.remove("hidden");
     document.getElementById("billingTable").innerHTML = data.lots.map((l) => `
       <tr class="border-b">
-        <td class="p-2 font-mono">${l.slip_number}</td>
+        <td class="p-2 font-mono">${esc(l.slip_number)}</td>
         <td class="p-2">${Boord.fmtDateTime(l.received_at)}</td>
         <td class="p-2">${l.crates}</td>
         <td class="p-2">${l.kg.toFixed(1)}</td>
@@ -1025,7 +1027,7 @@ function renderPayments(payments) {
     const totalWages = groupPayments.reduce((sum, p) => sum + p.amount_due, 0);
     const summaryRow = `
       <tr class="bg-slate-100 font-semibold">
-        <td class="p-2" colspan="5">${name} - ${groupPayments.length} worker${groupPayments.length === 1 ? "" : "s"} - ${totalKg.toFixed(1)} kg - R${totalWages.toFixed(2)} total wages</td>
+        <td class="p-2" colspan="5">${esc(name)} - ${groupPayments.length} worker${groupPayments.length === 1 ? "" : "s"} - ${totalKg.toFixed(1)} kg - R${totalWages.toFixed(2)} total wages</td>
       </tr>
     `;
     const rows = groupPayments.map((p) => {
@@ -1033,8 +1035,8 @@ function renderPayments(payments) {
       const displayName = w ? (w.name || `${w.first_name} ${w.last_name}`.trim() || w.id) : p.worker_id;
       return `
         <tr class="border-b">
-          <td class="p-2 text-xs text-slate-500">${name}</td>
-          <td class="p-2">${displayName}</td>
+          <td class="p-2 text-xs text-slate-500">${esc(name)}</td>
+          <td class="p-2">${esc(displayName)}</td>
           <td class="p-2">${p.total_kg.toFixed(1)}</td>
           <td class="p-2">R${p.rate_applied.toFixed(2)}/kg</td>
           <td class="p-2">R${p.amount_due.toFixed(2)}</td>
@@ -1060,42 +1062,40 @@ async function exportPayments() {
 const REPORTS = [
   { key: "daily-harvest", label: "Daily Harvest Summary", icon: "fa-sun",
     desc: "Crates and kg by block and team for one day. Uses the period start date even if a wider range is picked.",
-    params: (d1, d2, s) => `day=${d1}${s ? `&supplier_id=${s}` : ""}` },
+    single_day: true },
   { key: "lot-receiving", label: "Lot & Receiving Report", icon: "fa-truck",
-    desc: "Every lot dispatched in the range, with its receiving detail once the truck has been checked in.",
-    params: (d1, d2, s) => `date_from=${d1}&date_to=${d2}${s ? `&supplier_id=${s}` : ""}` },
+    desc: "Every lot dispatched in the range, with its receiving detail once the truck has been checked in." },
   { key: "picking-notes", label: "Plukstrokies / Picking Notes", icon: "fa-clipboard-list",
-    desc: "One row per dispatched lot - slip, block(s), crates sent vs received, driver, supplier, condition, weather - matching the paper picking slip.",
-    params: (d1, d2, s) => `date_from=${d1}&date_to=${d2}${s ? `&supplier_id=${s}` : ""}` },
+    desc: "One row per dispatched lot - slip, block(s), crates sent vs received, driver, supplier, condition, weather - matching the paper picking slip." },
   { key: "team-picking-list", label: "Span Pluklys / Team Picking List", icon: "fa-people-group",
-    desc: "One row per team per day - data capturer, induna, worker count, deductions, plus each block picked and each lot dispatched that day.",
-    params: (d1, d2, s) => `date_from=${d1}&date_to=${d2}${s ? `&supplier_id=${s}` : ""}` },
+    desc: "One row per team per day - data capturer, induna, worker count, deductions, plus each block picked and each lot dispatched that day." },
   { key: "harvest-data", label: "Daaglikse Oesdata / Daily Harvest Data", icon: "fa-table-cells",
-    desc: "Kg by date (rows) against block (columns) over the range, with per-day and per-block totals including avg per tree and per hectare.",
-    params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
+    desc: "Kg by date (rows) against block (columns) over the range, with per-day and per-block totals including avg per tree and per hectare." },
   { key: "harvesting-list", label: "Harvesting List", icon: "fa-seedling",
-    desc: "Loads still being picked, matching the Dashboard's Harvesting list.",
-    params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
+    desc: "Loads still being picked, matching the Dashboard's Harvesting list." },
   { key: "in-transit-list", label: "In Transit List", icon: "fa-truck-fast",
-    desc: "Loads dispatched from the field but not yet received at the pack house.",
-    params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
+    desc: "Loads dispatched from the field but not yet received at the pack house." },
   { key: "received-list", label: "Pakhuis Ontvangstes / Pack House Receivables", icon: "fa-warehouse",
-    desc: "Received loads - slip, date/time, receiving block, supplier, team, driver, crates, kg and rejected waste kg - matching the paper receipt list.",
-    params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
+    desc: "Received loads - slip, date/time, receiving block, supplier, team, driver, crates, kg and rejected waste kg - matching the paper receipt list." },
   { key: "worker-harvest", label: "Worker Harvest Report", icon: "fa-users",
-    desc: "Per-worker crates, kg, amount due and average kg per crate over the range.",
-    params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
+    desc: "Per-worker crates, kg, amount due and average kg per crate over the range." },
   { key: "litchi-wages", label: "Lietsjie Lone / Litchi Wages", icon: "fa-hand-holding-dollar",
-    desc: "One row per worker with crates broken out per day worked, plus a total - a whole pay period on a single line.",
-    params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
+    desc: "One row per worker with crates broken out per day worked, plus a total - a whole pay period on a single line." },
   { key: "block-harvest", label: "Block Harvest Report", icon: "fa-tree",
-    desc: "Per-block crates, kg, average kg per crate and average kg per tree over the range.",
-    params: (d1, d2, s) => `period_start=${d1}&period_end=${d2}${s ? `&supplier_id=${s}` : ""}` },
+    desc: "Per-block crates, kg, average kg per crate and average kg per tree over the range." },
 ];
 
-// Reports whose export ignores the period-end date and only ever covers a
-// single day, no matter how wide a range is picked above.
-const DAILY_ONLY_REPORTS = new Set(["daily-harvest"]);
+// The query string for one report. Every report takes the same
+// period_start/period_end pair (and the optional supplier filter) except the
+// `single_day` ones, whose export ignores the period end and only ever covers
+// the start date as `day`, no matter how wide a range is picked above.
+function reportParams(report, d1, d2, supplierId) {
+  const qs = new URLSearchParams(report.single_day
+    ? { day: d1 }
+    : { period_start: d1, period_end: d2 });
+  if (supplierId) qs.set("supplier_id", supplierId);
+  return qs.toString();
+}
 
 function renderReportsGrid() {
   const d1 = document.getElementById("reportDate1").value;
@@ -1103,7 +1103,7 @@ function renderReportsGrid() {
   const isRange = d1 && d2 && d1 !== d2;
 
   document.getElementById("reportsGrid").innerHTML = REPORTS.map((r) => {
-    const flagDailyOnly = isRange && DAILY_ONLY_REPORTS.has(r.key);
+    const flagDailyOnly = isRange && r.single_day;
     const note = flagDailyOnly
       ? `<div class="text-xs text-amber-600 font-medium mt-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Daily report only - uses ${d1} (period start)</div>`
       : `<div class="text-xs text-slate-400 mt-1">Download .xlsx</div>`;
@@ -1153,7 +1153,7 @@ async function downloadReport(key) {
   const supplierId = document.getElementById("reportsSupplierFilter").value;
   if (!d1 || !d2) { Boord.toast("Pick both dates first"); return; }
   try {
-    const blob = await Boord.api(`/api/reports/${key}?${report.params(d1, d2, supplierId)}`, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+    const blob = await Boord.api(`/api/reports/${key}?${reportParams(report, d1, d2, supplierId)}`, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
     Boord.downloadBlob(blob, `${report.label.replace(/[^a-zA-Z0-9]+/g, "_")}.xlsx`);
   } catch (e) {
     console.error("Report generation failed:", e);
@@ -1247,7 +1247,7 @@ async function loadServerCard() {
     if (u && u.available) {
       upd.classList.remove("hidden");
       upd.className = "text-sm rounded-lg p-3 bg-blue-50 text-blue-800 border border-blue-200";
-      upd.innerHTML = `<b>${u.latest} is available.</b> This server is on ${u.current}. To install it, run <b>update_server.bat</b> on the server PC - it is not installed automatically. Checked ${Boord.fmtDateTime(u.checked_at)}.`;
+      upd.innerHTML = `<b>${esc(u.latest)} is available.</b> This server is on ${esc(u.current)}. To install it, run <b>update_server.bat</b> on the server PC - it is not installed automatically. Checked ${Boord.fmtDateTime(u.checked_at)}.`;
     } else if (u && u.signature && u.signature !== "ok") {
       // A check that keeps failing looks exactly like "no updates" unless
       // it says so.
@@ -1279,13 +1279,13 @@ async function loadBackupsList() {
     <tr class="border-b">
       <td class="p-2">${Boord.fmtDateTime(b.created_at)}</td>
       <td class="p-2">${(b.size_bytes / 1024 / 1024).toFixed(2)} MB</td>
-      <td class="p-2 text-right"><a href="#" class="text-blue-700 text-xs" data-download="${b.filename}">Download</a></td>
+      <td class="p-2 text-right"><a href="#" class="text-blue-700 text-xs" data-download="${esc(b.filename)}">Download</a></td>
     </tr>
   `).join("") || `<tr><td class="p-2 text-slate-400" colspan="3">No backups yet</td></tr>`;
   document.querySelectorAll("#backupsTable [data-download]").forEach((a) => {
     a.addEventListener("click", async (e) => {
       e.preventDefault();
-      const blob = await Boord.api(`/api/backups/${a.dataset.download}/download`, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+      const blob = await Boord.api(`/api/backups/${encodeURIComponent(a.dataset.download)}/download`, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
       Boord.downloadBlob(blob, a.dataset.download);
     });
   });
@@ -1319,17 +1319,17 @@ async function loadOffsiteStatus() {
   const last = s.last || {};
   if (s.problem) {
     line.className = "text-sm rounded-lg p-3 bg-red-50 text-red-800 border border-red-200";
-    line.innerHTML = `<b>Off-site copy is not working:</b> ${s.destination} - ${s.problem}. ${folder}.`;
+    line.innerHTML = `<b>Off-site copy is not working:</b> ${esc(s.destination)} - ${esc(s.problem)}. ${folder}.`;
   } else if (last.ok) {
     line.className = "text-sm rounded-lg p-3 bg-green-50 text-green-800 border border-green-200";
-    line.innerHTML = `<b>Last copied ${Boord.fmtDateTime(last.at)}</b> to ${s.destination}. ${folder}.`;
+    line.innerHTML = `<b>Last copied ${Boord.fmtDateTime(last.at)}</b> to ${esc(s.destination)}. ${folder}.`;
   } else if (last.error) {
     line.className = "text-sm rounded-lg p-3 bg-red-50 text-red-800 border border-red-200";
     const runs = last.consecutive_failures > 1 ? `${last.consecutive_failures} times running` : "last night";
-    line.innerHTML = `<b>Off-site copy FAILED ${runs}:</b> ${last.error} - to ${s.destination}. ${folder}.`;
+    line.innerHTML = `<b>Off-site copy FAILED ${runs}:</b> ${esc(last.error)} - to ${esc(s.destination)}. ${folder}.`;
   } else {
     line.className = "text-sm rounded-lg p-3 bg-slate-50 text-slate-600";
-    line.innerHTML = `Copying to ${s.destination}. Nothing copied yet - the next backup will be the first. ${folder}.`;
+    line.innerHTML = `Copying to ${esc(s.destination)}. Nothing copied yet - the next backup will be the first. ${folder}.`;
   }
 
   // Warned about, not blocked. A synced folder is a decision for whoever

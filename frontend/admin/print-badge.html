@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Worker ID Badges</title>
 <script src="../shared/qrcode.min.js"></script>
+<script src="../shared/api.js"></script>
 <style>
   body { font-family: Arial, sans-serif; margin: 0; background: #eee; }
   .toolbar { padding: 16px; text-align: center; }
@@ -94,6 +95,10 @@
   const params = new URLSearchParams(location.search);
   const ids = (params.get("ids") || "").split(",").map((s) => s.trim()).filter(Boolean);
 
+  // Worker names are typed by people - escaped like everywhere else that
+  // puts server data into innerHTML (see Boord.escapeHtml).
+  const esc = Boord.escapeHtml;
+
   async function init() {
     const container = document.getElementById("badgesContainer");
     if (!ids.length) {
@@ -114,19 +119,19 @@
     }
 
     container.innerHTML = selected.map((w) => `<div class="badge"><div class="badge-inner">
-        <div class="badge-farm">${packhouseName}</div>
+        <div class="badge-farm">${esc(packhouseName)}</div>
         <div class="badge-head">
           <div class="badge-photo">
             ${w.photo_filename
-              ? `<img src="/photos/${w.photo_filename}">`
+              ? `<img src="/photos/${esc(encodeURIComponent(w.photo_filename))}">`
               : '<span class="placeholder">&#9787;</span>'}
           </div>
           <div class="badge-id">
-            <div class="badge-name">${w.first_name || ""} ${w.last_name || w.name || ""}</div>
-            <div class="badge-emp">#${w.id}</div>
+            <div class="badge-name">${esc(w.first_name || "")} ${esc(w.last_name || w.name || "")}</div>
+            <div class="badge-emp">#${esc(w.id)}</div>
           </div>
         </div>
-        <div class="badge-qr" id="qr-${w.id}"></div>
+        <div class="badge-qr" id="qr-${esc(w.id)}"></div>
       </div></div>`).join("");
 
     // toString() is this build's SVG renderer (shape-rendering="crispEdges"),

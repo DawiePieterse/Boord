@@ -17,7 +17,8 @@ from routers.payments import harvest_records_between
 from security import require_admin_client
 from timeutil import day_bounds, local_str, to_local
 
-router = APIRouter(prefix="/api/reports", tags=["reports"])
+# Every endpoint here is admin-only.
+router = APIRouter(prefix="/api/reports", tags=["reports"], dependencies=[Depends(require_admin_client)])
 
 REPORTS_DIR = os.path.join(DATA_DIR, "reports")
 os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -60,8 +61,8 @@ def _mean(values: list, places: int):
     return round(sum(values) / len(values), places) if places else round(sum(values) / len(values))
 
 
-def _lots_between(session: Session, date_from: date, date_to: date, supplier_id: Optional[int]) -> list[Lot]:
-    start, end = day_bounds(date_from, date_to)
+def _lots_between(session: Session, period_start: date, period_end: date, supplier_id: Optional[int]) -> list[Lot]:
+    start, end = day_bounds(period_start, period_end)
     query = select(Lot).where(Lot.timestamp >= start, Lot.timestamp <= end)
     if supplier_id is not None:
         query = query.where(Lot.supplier_id == supplier_id)
@@ -87,7 +88,7 @@ def _blocks_by_lot(session: Session, lot_ids: list) -> dict:
 
 @router.get("/daily-harvest")
 def daily_harvest_report(day: date = Query(default_factory=date.today), supplier_id: Optional[int] = None,
-                          session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+                          session: Session = Depends(get_session)):
     records = harvest_records_between(session, day, day, supplier_id)
     blocks = {b.id: b for b in session.exec(select(Block)).all()}
     teams = {t.id: t for t in session.exec(select(Team)).all()}
@@ -128,7 +129,7 @@ def daily_harvest_report(day: date = Query(default_factory=date.today), supplier
 
 @router.get("/harvest-data")
 def harvest_data_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                         session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+                         session: Session = Depends(get_session)):
     """Daaglikse Oesdata / Daily Harvest Data: the block x date pivot behind
     the paper "Daaglikse Oesdata" log - one column per block, one row per
     day, matching how the paper form and the season workbook both lay it
@@ -202,9 +203,9 @@ def harvest_data_report(period_start: date, period_end: date, supplier_id: Optio
 
 
 @router.get("/lot-receiving")
-def lot_receiving_report(date_from: date, date_to: date, supplier_id: Optional[int] = None,
-                          session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
-    lots = _lots_between(session, date_from, date_to, supplier_id)
+def lot_receiving_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
+                          session: Session = Depends(get_session)):
+    lots = _lots_between(session, period_start, period_end, supplier_id)
     receiving_by_lot = _receiving_by_lot(session, [l.id for l in lots])
     suppliers = supplier_map(session)
     phc = _packhouse_code(session)
@@ -229,13 +230,13 @@ def lot_receiving_report(date_from: date, date_to: date, supplier_id: Optional[i
             lot.weather_humidity if lot.weather_humidity is not None else "",
             lot.weather_condition or "",
         ])
-    return _xlsx_response(headers, rows, "Lot & Receiving", f"Lot_Receiving_{date_from}_{date_to}.xlsx")
+    return _xlsx_response(headers, rows, "Lot & Receiving", f"Lot_Receiving_{period_start}_{period_end}.xlsx")
 
 
 @router.get("/picking-notes")
-def picking_notes_report(date_from: date, date_to: date, supplier_id: Optional[int] = None,
-                          session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
-    lots = _lots_between(session, date_from, date_to, supplier_id)
+def picking_notes_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
+                          session: Session = Depends(get_session)):
+    lots = _lots_between(session, period_start, period_end, supplier_id)
     receiving_by_lot = _receiving_by_lot(session, [l.id for l in lots])
     suppliers = supplier_map(session)
     teams = {t.id: t for t in session.exec(select(Team)).all()}
@@ -272,18 +273,18 @@ def picking_notes_report(date_from: date, date_to: date, supplier_id: Optional[i
         ))
     entries.sort(key=lambda e: (e[0], e[1], e[2]))
     rows = [e[3] for e in entries]
-    return _xlsx_response(headers, rows, "Picking Notes", f"Picking_Notes_{date_from}_{date_to}.xlsx")
+    return _xlsx_response(headers, rows, "Picking Notes", f"Picking_Notes_{period_start}_{period_end}.xlsx")
 
 
 @router.get("/team-picking-list")
-def team_picking_list_report(date_from: date, date_to: date, supplier_id: Optional[int] = None,
-                              session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+def team_picking_list_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
+                              session: Session = Depends(get_session)):
     """Span Pluklys / Team Picking List: one row per team per day, with the
     day's blocks (kg + deductions) and dispatched lots (crates, time, slip
     number) laid out as repeating column groups - matching the fields on the
     paper "Inligting van die Dag" slip an induna's team fills in by hand."""
-    records = harvest_records_between(session, date_from, date_to, supplier_id)
-    lots = _lots_between(session, date_from, date_to, supplier_id)
+    records = harvest_records_between(session, period_start, period_end, supplier_id)
+    lots = _lots_between(session, period_start, period_end, supplier_id)
 
     teams = {t.id: t for t in session.exec(select(Team)).all()}
     blocks = {b.id: b for b in session.exec(select(Block)).all()}
@@ -345,7 +346,7 @@ def team_picking_list_report(date_from: date, date_to: date, supplier_id: Option
         row += [""] * (3 * (max_lots - len(g["lots"])))
         rows.append(row)
 
-    return _xlsx_response(headers, rows, "Team Picking List", f"Team_Picking_List_{date_from}_{date_to}.xlsx")
+    return _xlsx_response(headers, rows, "Team Picking List", f"Team_Picking_List_{period_start}_{period_end}.xlsx")
 
 
 LOT_LIST_HEADERS = ["Pack House Code", "Slip Number", "Supplier", "PUC", "GlobalG.A.P. Number",
@@ -362,7 +363,7 @@ def _lot_rows(lots_data: list, suppliers: dict, phc: str) -> list:
 
 @router.get("/harvesting-list")
 def harvesting_list_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                            session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+                            session: Session = Depends(get_session)):
     lots_data = list_pending(supplier_id=supplier_id, period_start=period_start, period_end=period_end,
                               session=session)
     suppliers = supplier_map(session)
@@ -373,7 +374,7 @@ def harvesting_list_report(period_start: date, period_end: date, supplier_id: Op
 
 @router.get("/in-transit-list")
 def in_transit_list_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                            session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+                            session: Session = Depends(get_session)):
     lots_data = list_in_transit(supplier_id=supplier_id, period_start=period_start, period_end=period_end,
                                  session=session)
     suppliers = supplier_map(session)
@@ -384,7 +385,7 @@ def in_transit_list_report(period_start: date, period_end: date, supplier_id: Op
 
 @router.get("/received-list")
 def received_list_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                          session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+                          session: Session = Depends(get_session)):
     """Matches the packhouse's paper "Packhouse Receipt Lists" slip: date and
     time split out, plus the receiving block and rejected (waste) amount."""
     lots_data = list_received(period_start=period_start, period_end=period_end, supplier_id=supplier_id,
@@ -415,19 +416,18 @@ def received_list_report(period_start: date, period_end: date, supplier_id: Opti
 
 @router.get("/worker-harvest")
 def worker_harvest_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                           session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
-    summary = dashboard_summary(period_start, period_end, supplier_id, session, _admin)
-    # dashboard_summary resolves each worker to a supplier NAME only, and an
-    # own-fruit worker has supplier_id left unset - so the traceability numbers
-    # are looked up the same way _supplier_display_name resolves that name,
-    # falling back to the own-fruit supplier rather than coming out blank.
+                           session: Session = Depends(get_session)):
+    summary = dashboard_summary(period_start, period_end, supplier_id, session)
+    # dashboard_summary resolves each worker to a supplier NAME only, so the
+    # traceability numbers are looked up the same way _supplier_display_name
+    # resolves that name.
     workers_by_id = {w.id: w for w in session.exec(select(Worker)).all()}
     suppliers_by_id = supplier_map(session)
     own_supplier = suppliers_by_id.get(get_own_supplier_id(session))
 
     def _supplier_for(worker_id):
         w = workers_by_id.get(worker_id)
-        if not w or w.supplier_id is None:
+        if not w:
             return own_supplier
         return suppliers_by_id.get(w.supplier_id)
 
@@ -443,7 +443,7 @@ def worker_harvest_report(period_start: date, period_end: date, supplier_id: Opt
 
 @router.get("/litchi-wages")
 def litchi_wages_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                         session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
+                         session: Session = Depends(get_session)):
     """Lietsjie Lone / Litchi Wages: one row per worker, with the crates that
     worker harvested broken out per day - one column per day worked, so the
     wage clerk can read a whole pay period off a single row."""
@@ -476,8 +476,8 @@ def litchi_wages_report(period_start: date, period_end: date, supplier_id: Optio
 
 @router.get("/block-harvest")
 def block_harvest_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
-                          session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
-    summary = dashboard_summary(period_start, period_end, supplier_id, session, _admin)
+                          session: Session = Depends(get_session)):
+    summary = dashboard_summary(period_start, period_end, supplier_id, session)
     headers = ["Block", "Crates", "Kg", "Avg Kg/Crate", "Avg Kg/Tree", "Avg Kg/Ha"]
     rows = [[
         b["name"], b["crates"], b["total_kg"], b["avg_kg_crate"],
