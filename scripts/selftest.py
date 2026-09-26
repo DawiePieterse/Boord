@@ -43,7 +43,6 @@ from alembic.script import ScriptDirectory  # noqa: E402
 from sqlalchemy import create_engine, inspect  # noqa: E402
 from sqlmodel import Session, SQLModel, func, select  # noqa: E402
 
-import asyncio  # noqa: E402
 from fastapi import HTTPException, UploadFile  # noqa: E402
 
 import backup  # noqa: E402
@@ -370,7 +369,7 @@ def test_replacing_all_blocks_with_an_empty_file_is_refused():
                                     file=io.BytesIO(b"id,name,variety,trees,hectares,active\n"))
         with Session(temp_engine) as s:
             try:
-                asyncio.run(import_blocks(file=headings_only, replace=True, session=s, _admin=None))
+                import_blocks(file=headings_only, replace=True, session=s, _admin=None)
             except HTTPException as e:
                 assert e.status_code == 400, e.status_code
                 assert "no data rows" in e.detail
@@ -411,7 +410,7 @@ def test_importing_blocks_without_a_supplier_column_keeps_the_supplier():
             filename="blocks.csv",
             file=io.BytesIO(b"id,name,variety,trees,hectares,active\n15,Blok 15,Mauritius,100,1.5,true\n"))
         with Session(temp_engine) as s:
-            asyncio.run(import_blocks(file=old_format, replace=False, session=s, _admin=None))
+            import_blocks(file=old_format, replace=False, session=s, _admin=None)
         with Session(temp_engine) as s:
             assert s.get(Block, "15").supplier_id == supplier_id, \
                 "a file with no supplier_id column unassigned the block's supplier"
@@ -421,7 +420,7 @@ def test_importing_blocks_without_a_supplier_column_keeps_the_supplier():
             filename="blocks.csv",
             file=io.BytesIO(b"id,name,variety,trees,hectares,supplier_id,active\n15,Blok 15,Mauritius,100,1.5,,true\n"))
         with Session(temp_engine) as s:
-            asyncio.run(import_blocks(file=with_blank, replace=False, session=s, _admin=None))
+            import_blocks(file=with_blank, replace=False, session=s, _admin=None)
         with Session(temp_engine) as s:
             assert s.get(Block, "15").supplier_id is None, \
                 "an explicitly blank supplier_id did not clear the block's supplier"

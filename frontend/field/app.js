@@ -447,7 +447,7 @@ async function sendPickingSlip() {
       crates = crates.filter((c) => !movedUuids.has(c.uuid));
       didSplit = true;
     } catch (e) {
-      Boord.toast("Could not split the load - try again: " + (e.message || e));
+      Boord.toast("Could not split the load - try again: " + Boord.errorDetail(e));
       return;
     }
   }

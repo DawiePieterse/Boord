@@ -1,16 +1,20 @@
 import os
+import shutil
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
-from fastapi.responses import Response
 from sqlmodel import Session, SQLModel, select
 
-from db import PHOTOS_DIR, get_session
-from excel_io import parse_uploaded_table, rows_to_csv_bytes, rows_to_xlsx_bytes
+from db import PHOTOS_DIR, deactivate, get_session, latest_rate_setting
+from excel_io import parse_uploaded_table, tabular_response
 from models import Block, RateSetting, RateType, Supplier, SystemSetting, Team, Worker
 from security import is_admin_client, require_admin_client
 
 router = APIRouter(prefix="/api", tags=["master-data"])
+
+
+def _truthy(value) -> bool:
+    return str(value).strip().lower() not in ("false", "0", "no")
 
 
 class RateSettingIn(SQLModel):
@@ -18,19 +22,6 @@ class RateSettingIn(SQLModel):
     rate_type: RateType = RateType.per_kg
     default_rate_per_kg: float = 0.0
     tier_rates_json: str = "{}"
-
-
-def _export(headers, rows, fmt: str, filename: str):
-    if fmt == "xlsx":
-        data = rows_to_xlsx_bytes(headers, rows, filename)
-        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ext = "xlsx"
-    else:
-        data = rows_to_csv_bytes(headers, rows)
-        media = "text/csv"
-        ext = "csv"
-    return Response(content=data, media_type=media,
-                     headers={"Content-Disposition": f'attachment; filename="{filename}.{ext}"'})
 
 
 # --- Teams -------------------------------------------------------------
@@ -49,12 +40,7 @@ def upsert_team(team: Team, session: Session = Depends(get_session), _admin=Depe
 
 @router.delete("/teams/{team_id}")
 def deactivate_team(team_id: str, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
-    obj = session.get(Team, team_id)
-    if obj:
-        obj.active = False
-        session.add(obj)
-        session.commit()
-    return {"ok": True}
+    return deactivate(session, Team, team_id)
 
 
 # --- Blocks --------------------------------------------------------------
@@ -73,12 +59,7 @@ def upsert_block(block: Block, session: Session = Depends(get_session), _admin=D
 
 @router.delete("/blocks/{block_id}")
 def deactivate_block(block_id: str, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
-    obj = session.get(Block, block_id)
-    if obj:
-        obj.active = False
-        session.add(obj)
-        session.commit()
-    return {"ok": True}
+    return deactivate(session, Block, block_id)
 
 
 @router.get("/blocks/export")
@@ -88,14 +69,14 @@ def export_blocks(fmt: str = Query("xlsx", pattern="^(csv|xlsx)$"), session: Ses
     headers = ["id", "name", "variety", "trees", "hectares", "supplier_id", "active"]
     rows = [[b.id, b.name, b.variety, b.trees, b.hectares, b.supplier_id or "", b.active]
             for b in blocks]
-    return _export(headers, rows, fmt, "Blocks")
+    return tabular_response(headers, rows, fmt, "Blocks")
 
 
 @router.post("/blocks/import")
-async def import_blocks(file: UploadFile, replace: bool = Query(False),
+def import_blocks(file: UploadFile, replace: bool = Query(False),
                          session: Session = Depends(get_session),
                          _admin=Depends(require_admin_client)):
-    records = await parse_uploaded_table(file)
+    records = parse_uploaded_table(file)
     # Refuse a file with nothing in it, before anything is written.
     # "Replace all" reads this file as the farm's new complete block list, so
     # an empty one means "the new list is empty" and retires every block the
@@ -118,8 +99,7 @@ async def import_blocks(file: UploadFile, replace: bool = Query(False),
             continue
         block_id = str(r["id"]).strip()
         imported_ids.add(block_id)
-        active_raw = r.get("active", True)
-        active = str(active_raw).strip().lower() not in ("false", "0", "no")
+        active = _truthy(r.get("active", True))
         # A file with no supplier_id COLUMN leaves each block's supplier as it
         # is; only a column that is present and blank clears it. session.merge
         # rebuilds the whole row, so reading the absent column as None would
@@ -203,7 +183,7 @@ def upsert_worker(worker: Worker, session: Session = Depends(get_session), _admi
 
 
 @router.post("/workers/{worker_id}/photo")
-async def upload_worker_photo(worker_id: str, file: UploadFile, session: Session = Depends(get_session),
+def upload_worker_photo(worker_id: str, file: UploadFile, session: Session = Depends(get_session),
                                _admin=Depends(require_admin_client)):
     worker = session.get(Worker, worker_id)
     if not worker:
@@ -217,7 +197,7 @@ async def upload_worker_photo(worker_id: str, file: UploadFile, session: Session
             os.remove(old_path)  # avoid orphan if extension changes between uploads
     filename = f"{worker_id}{ext}"
     with open(os.path.join(PHOTOS_DIR, filename), "wb") as f:
-        f.write(await file.read())
+        shutil.copyfileobj(file.file, f)
     worker.photo_filename = filename
     session.add(worker)
     session.commit()
@@ -226,12 +206,7 @@ async def upload_worker_photo(worker_id: str, file: UploadFile, session: Session
 
 @router.delete("/workers/{worker_id}")
 def deactivate_worker(worker_id: str, session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
-    obj = session.get(Worker, worker_id)
-    if obj:
-        obj.active = False
-        session.add(obj)
-        session.commit()
-    return {"ok": True}
+    return deactivate(session, Worker, worker_id)
 
 
 @router.get("/workers/export")
@@ -244,20 +219,19 @@ def export_workers(fmt: str = Query("xlsx", pattern="^(csv|xlsx)$"), session: Se
     rows = [[w.id, w.first_name, w.last_name, w.whatsapp_number,
              w.supplier_id, supplier_names.get(w.supplier_id, ""), w.active]
             for w in workers]
-    return _export(headers, rows, fmt, "Workers")
+    return tabular_response(headers, rows, fmt, "Workers")
 
 
 @router.post("/workers/import")
-async def import_workers(file: UploadFile, session: Session = Depends(get_session),
+def import_workers(file: UploadFile, session: Session = Depends(get_session),
                           _admin=Depends(require_admin_client)):
-    records = await parse_uploaded_table(file)
+    records = parse_uploaded_table(file)
     count = 0
     for r in records:
         emp_nr = r.get("emp_nr") or r.get("id") or r.get("Emp Nr") or r.get("emp nr")
         if not emp_nr:
             continue
-        active_raw = r.get("active", True)
-        active = str(active_raw).strip().lower() not in ("false", "0", "no")
+        active = _truthy(r.get("active", True))
         first_name = r.get("first_name") or r.get("First Name") or ""
         last_name = r.get("last_name") or r.get("Last Name") or ""
         legacy_name = r.get("name") or r.get("Naam & Van") or ""
@@ -289,18 +263,7 @@ async def import_workers(file: UploadFile, session: Session = Depends(get_sessio
 
 @router.get("/rate-settings/current")
 def current_rate_setting(session: Session = Depends(get_session)):
-    # Rates are an append-only history, so "current" is the newest row.
-    # Ordering by effective_date alone is not enough: setting a rate twice in
-    # one day (or correcting one the same day) leaves two rows sharing a date,
-    # and the tie resolved to whichever the database happened to return first -
-    # in practice the OLD one. The admin saw "Rate saved" while wages carried
-    # on being worked out at the previous rate. Break the tie on id so the most
-    # recently saved row wins. Kept in step with the same lookup in
-    # routers/payments.py.
-    setting = session.exec(
-        select(RateSetting).order_by(RateSetting.effective_date.desc(), RateSetting.id.desc())
-    ).first()
-    return setting
+    return latest_rate_setting(session)
 
 
 @router.post("/rate-settings")

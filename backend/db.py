@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy import inspect, text
 from sqlmodel import SQLModel, Session, create_engine, select
 
-from models import Device, DeviceRole, Supplier, SystemSetting, Team
+from models import Device, DeviceRole, RateSetting, Supplier, SystemSetting, Team
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -144,6 +144,32 @@ def get_own_supplier_id(session: Session):
     fallback for a field lot whose device is not allocated to a supplier."""
     own = session.exec(select(Supplier).where(Supplier.is_own_farm == True)).first()  # noqa: E712
     return own.id if own else None
+
+
+def deactivate(session: Session, model, obj_id) -> dict:
+    """Soft-delete: master data is deactivated, never removed, so history
+    that references it keeps resolving."""
+    obj = session.get(model, obj_id)
+    if obj:
+        obj.active = False
+        session.add(obj)
+        session.commit()
+    return {"ok": True}
+
+
+def supplier_map(session: Session) -> dict:
+    return {s.id: s for s in session.exec(select(Supplier)).all()}
+
+
+def latest_rate_setting(session: Session) -> Optional[RateSetting]:
+    """The wage rate in force: rates are an append-only history, so "current"
+    is the newest row. Ordering by effective_date alone is not enough -
+    setting a rate twice in one day leaves two rows sharing a date, and the
+    tie used to resolve to the OLD one. The admin saw "Rate saved" while
+    wages carried on at the previous rate, so the tie breaks on id."""
+    return session.exec(
+        select(RateSetting).order_by(RateSetting.effective_date.desc(), RateSetting.id.desc())
+    ).first()
 
 
 def supplier_id_for_device(session: Session, device_id) -> Optional[int]:

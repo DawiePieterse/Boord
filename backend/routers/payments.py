@@ -3,12 +3,11 @@ from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import Response
 from sqlmodel import Session, select
 
-from db import get_own_supplier_id, get_session
-from excel_io import rows_to_xlsx_bytes
-from models import HarvestRecord, Payment, RateSetting, RateType, Supplier, Worker
+from db import get_own_supplier_id, get_session, latest_rate_setting, supplier_map
+from excel_io import tabular_response
+from models import HarvestRecord, Payment, RateType, Worker
 from security import require_admin_client
 from timeutil import day_bounds
 
@@ -33,6 +32,25 @@ def _worker_ids_for_supplier(session: Session, supplier_id: Optional[int]) -> Op
     return set(ids)
 
 
+def harvest_records_between(session: Session, start_day: date, end_day: Optional[date] = None,
+                            supplier_id: Optional[int] = None) -> list[HarvestRecord]:
+    """Crates picked over a span of local days, optionally for one supplier's workers."""
+    start_dt, end_dt = day_bounds(start_day, end_day)
+    query = select(HarvestRecord).where(HarvestRecord.timestamp >= start_dt, HarvestRecord.timestamp <= end_dt)
+    worker_ids = _worker_ids_for_supplier(session, supplier_id)
+    if worker_ids is not None:
+        query = query.where(HarvestRecord.worker_id.in_(worker_ids))
+    return session.exec(query).all()
+
+
+def suppliers_with_own(session: Session) -> tuple[dict, Optional[int], str]:
+    """(suppliers_by_id, own-fruit supplier id, own-fruit display name)."""
+    suppliers_by_id = supplier_map(session)
+    own_id = get_own_supplier_id(session)
+    own_supplier = suppliers_by_id.get(own_id)
+    return suppliers_by_id, own_id, own_supplier.name if own_supplier else "Own fruit"
+
+
 def _supplier_display_name(worker: Optional[Worker], suppliers_by_id: dict, own_id: Optional[int],
                             own_name: str) -> str:
     """Resolve the supplier name to show for a worker, for grouping the
@@ -51,27 +69,15 @@ def _tier_rate_for_weight(weight_kg: float, tiers: dict[str, float]) -> float:
     1.5 / 2 kg classes) rather than a flat rate per kg."""
     if not tiers:
         return 0.0
-    keys = sorted(float(k) for k in tiers)
-    chosen = keys[0]
-    for k in keys:
-        if weight_kg >= k:
-            chosen = k
-    return tiers[str(chosen) if str(chosen) in tiers else next(k for k in tiers if float(k) == chosen)]
+    rates = {float(k): v for k, v in tiers.items()}
+    return rates[max((k for k in rates if weight_kg >= k), default=min(rates))]
 
 
-def _worker_totals(session: Session, period_start: date, period_end: date, supplier_id: Optional[int] = None):
-    start_dt, end_dt = day_bounds(period_start, period_end)
-    query = select(HarvestRecord).where(HarvestRecord.timestamp >= start_dt, HarvestRecord.timestamp <= end_dt)
-    worker_ids = _worker_ids_for_supplier(session, supplier_id)
-    if worker_ids is not None:
-        query = query.where(HarvestRecord.worker_id.in_(worker_ids))
-    records = session.exec(query).all()
-    # Deliberately the newest RateSetting regardless of period_start/period_end,
-    # not the rate in effect during the period being calculated - confirmed
-    # farm policy: wages are always recalculated using the latest rate.
-    setting = session.exec(
-        select(RateSetting).order_by(RateSetting.effective_date.desc(), RateSetting.id.desc())
-    ).first()
+def _worker_totals(session: Session, records: list[HarvestRecord]):
+    # Deliberately the newest RateSetting regardless of the period being
+    # calculated, not the rate in effect during it - confirmed farm policy:
+    # wages are always recalculated using the latest rate.
+    setting = latest_rate_setting(session)
     tiers = json.loads(setting.tier_rates_json) if setting else {}
 
     totals: dict[str, dict] = {}
@@ -91,7 +97,8 @@ def _worker_totals(session: Session, period_start: date, period_end: date, suppl
 @router.post("/calculate")
 def calculate_payments(period_start: date, period_end: date, supplier_id: Optional[int] = None,
                         session: Session = Depends(get_session), _admin=Depends(require_admin_client)):
-    totals, setting = _worker_totals(session, period_start, period_end, supplier_id)
+    totals, setting = _worker_totals(
+        session, harvest_records_between(session, period_start, period_end, supplier_id))
     if setting is None:
         # No wage rate has ever been set on this install. Refuse rather than
         # fall through to _worker_totals' 0.0 default and write a full set of
@@ -105,13 +112,12 @@ def calculate_payments(period_start: date, period_end: date, supplier_id: Option
             "No wage rate has been set. Add one under Settings before calculating wages.",
         )
     rate_applied = setting.default_rate_per_kg
+    existing_by_worker = {p.worker_id: p for p in session.exec(
+        select(Payment).where(Payment.period_start == period_start, Payment.period_end == period_end)
+    ).all()}
     results = []
     for worker_id, data in totals.items():
-        existing = session.exec(
-            select(Payment).where(Payment.worker_id == worker_id, Payment.period_start == period_start,
-                                   Payment.period_end == period_end)
-        ).first()
-        payment = existing or Payment(worker_id=worker_id, period_start=period_start, period_end=period_end)
+        payment = existing_by_worker.get(worker_id) or Payment(worker_id=worker_id, period_start=period_start, period_end=period_end)
         payment.total_kg = round(data["total_kg"], 1)
         payment.rate_applied = rate_applied
         payment.amount_due = round(data["amount"], 2)
@@ -152,10 +158,7 @@ def export_payments(period_start: date, period_end: date, supplier_id: Optional[
     if worker_ids is not None:
         payments = [p for p in payments if p.worker_id in worker_ids]
     workers = {w.id: w for w in session.exec(select(Worker)).all()}
-    suppliers_by_id = {s.id: s for s in session.exec(select(Supplier)).all()}
-    own_id = get_own_supplier_id(session)
-    own_supplier = suppliers_by_id.get(own_id)
-    own_name = own_supplier.name if own_supplier else "Own fruit"
+    suppliers_by_id, own_id, own_name = suppliers_with_own(session)
 
     groups: dict[str, list[Payment]] = {}
     for p in payments:
@@ -179,14 +182,4 @@ def export_payments(period_start: date, period_end: date, supplier_id: Optional[
                 name, p.worker_id, w.name if w else "", p.total_kg, p.rate_applied, p.amount_due,
             ])
 
-    if fmt == "xlsx":
-        data = rows_to_xlsx_bytes(headers, rows, "Payments")
-        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ext = "xlsx"
-    else:
-        from excel_io import rows_to_csv_bytes
-        data = rows_to_csv_bytes(headers, rows)
-        media = "text/csv"
-        ext = "csv"
-    filename = f"Wages_{period_start}_{period_end}.{ext}"
-    return Response(content=data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    return tabular_response(headers, rows, fmt, f"Wages_{period_start}_{period_end}", "Payments")

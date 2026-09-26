@@ -164,11 +164,6 @@ const Boord = {
     return d ? d.toLocaleTimeString() : fallback;
   },
 
-  fmtDate(value, fallback = "") {
-    const d = Boord.parseServerDate(value);
-    return d ? d.toLocaleDateString() : fallback;
-  },
-
   // "Today" as the farm sees it, formatted for a date input. toISOString()
   // would give the UTC date, which is still yesterday between midnight and
   // 02:00 local - early enough to matter once picking starts before dawn.

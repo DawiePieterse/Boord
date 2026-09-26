@@ -48,22 +48,22 @@ def _resolve_lot_id(session: Session, slip_number: Optional[str], device_id, tea
     return lot.id
 
 
-def _farm_weather(session: Session) -> dict:
-    """Conditions at the farm right now, or {} if it can't be established.
-    Same source and same silent-failure rule as the per-dispatch capture in
-    routers/lots.py - weather is a nice-to-have and must never fail a sync."""
-    return current_farm_weather(session)
-
-
 @router.post("/harvest")
 def sync_harvest(batch: HarvestSyncBatch, session: Session = Depends(get_session)):
     """Idempotent upsert by client-generated uuid - safe for a field device
     to retry the same batch after regaining mobile signal."""
     accepted = 0
     weather = None  # looked up lazily - a batch of pure retries needs no call
+    uuids = [r.uuid for r in batch.records]
+    existing_by_uuid = {h.uuid: h for h in session.exec(
+        select(HarvestRecord).where(HarvestRecord.uuid.in_(uuids))).all()} if uuids else {}
+    lot_ids = {}  # slip_number -> lot id; a batch almost always shares one slip
     for r in batch.records:
-        existing = session.get(HarvestRecord, r.uuid)
-        lot_id = _resolve_lot_id(session, r.slip_number, r.device_id, r.team_id, r.timestamp)
+        existing = existing_by_uuid.get(r.uuid)
+        if r.slip_number not in lot_ids:
+            lot_ids[r.slip_number] = _resolve_lot_id(
+                session, r.slip_number, r.device_id, r.team_id, r.timestamp)
+        lot_id = lot_ids[r.slip_number]
         worker_id, weight_kg, deduction_kg = r.worker_id, r.weight_kg, r.deduction_kg
         if existing:
             # A retry of an already-stored crate keeps its original stamps -
@@ -84,7 +84,8 @@ def sync_harvest(batch: HarvestSyncBatch, session: Session = Depends(get_session
                     existing.worker_id, existing.weight_kg, existing.deduction_kg)
         else:
             if weather is None:
-                weather = _farm_weather(session)
+                # {} when unavailable - weather must never fail a sync.
+                weather = current_farm_weather(session)
             synced_at = datetime.now(timezone.utc)
             temp = weather.get("temp")
             humidity = weather.get("humidity")
@@ -97,7 +98,7 @@ def sync_harvest(batch: HarvestSyncBatch, session: Session = Depends(get_session
             edited_at=existing.edited_at if existing else None,
             edited_by=existing.edited_by if existing else None,
         )
-        session.merge(record)
+        existing_by_uuid[r.uuid] = session.merge(record)
         accepted += 1
     session.commit()
     return {"accepted": accepted}

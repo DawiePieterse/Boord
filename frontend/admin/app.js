@@ -122,7 +122,7 @@ async function showApp() {
 // dropping mid-session is the way that actually happens. Show what the server
 // said, which names the fix, rather than a generic "could not load".
 function accessRefused(e) {
-  Boord.toast(_apiErrorDetail(e) || "The server refused this request");
+  Boord.toast(Boord.errorDetail(e, "The server refused this request"));
 }
 
 // ---------------------------------------------------------------------
@@ -318,17 +318,6 @@ function renderDashboardLists(harvesting, inTransit, received, summary) {
 // ---------------------------------------------------------------------
 let _lotCratesContext = null; // { lot, crates } for whichever lot is open
 
-function _apiErrorDetail(e) {
-  // Boord.api() throws `new Error("${status} ${bodyText}")` - FastAPI's body is
-  // usually {"detail": "..."}, so pull that out rather than toasting raw JSON.
-  const bodyText = String((e && e.message) || e || "").replace(/^\d+\s*/, "");
-  try {
-    const parsed = JSON.parse(bodyText);
-    if (parsed && typeof parsed.detail === "string") return parsed.detail;
-  } catch (err) { /* not JSON - the raw text is all there is */ }
-  return bodyText || "Unknown error";
-}
-
 function _workerOptionLabel(w) {
   const name = w.name || `${w.first_name || ""} ${w.last_name || ""}`.trim() || w.id;
   return `${name} (${w.id})${w.active ? "" : " - inactive"}`;
@@ -436,7 +425,7 @@ function editCrate(crate) {
       });
     } catch (e) {
       if (Boord.isAuthError(e)) { accessRefused(e); return; }
-      Boord.toast("Could not save: " + _apiErrorDetail(e));
+      Boord.toast("Could not save: " + Boord.errorDetail(e, "Unknown error"));
       throw e; // the bindMasterData save handler only closes the modal on
       // success - rethrowing keeps it open so a bad number can be fixed
       // without re-entering everything.
@@ -785,7 +774,6 @@ function supplierName(id) {
 // Blocks
 async function loadBlocks() {
   const blocks = await Boord.api("/api/blocks");
-  window._blocksCache = blocks;
   document.getElementById("blocksTable").innerHTML = blocks.map((b) => `
     <tr class="border-b ${b.active ? "" : "opacity-50"}">
       <td class="p-2">${b.id}</td><td class="p-2">${b.variety}</td><td class="p-2">${b.trees}</td>
@@ -1366,7 +1354,11 @@ async function runBackupNow() {
 }
 
 async function loadSettingsForm() {
-  const settings = await Boord.api("/api/system-settings");
+  // Independent reads - fetched together rather than one round trip at a time.
+  const [settings, rate] = await Promise.all([
+    Boord.api("/api/system-settings"), Boord.api("/api/rate-settings/current"),
+    loadServerCard(), loadBackupsList(), loadOffsiteStatus(),
+  ]);
   _systemSettings = settings;
   if (settings) {
     document.getElementById("setPackhouseName").value = settings.packhouse_name || "";
@@ -1381,13 +1373,9 @@ async function loadSettingsForm() {
     document.getElementById("setWeatherStationId").value = settings.weather_station_id || "";
     updateSeasonYearLabel();
   }
-  const rate = await Boord.api("/api/rate-settings/current");
   if (rate) {
     document.getElementById("setRatePerKg").value = rate.default_rate_per_kg;
   }
-  await loadServerCard();
-  await loadBackupsList();
-  await loadOffsiteStatus();
 }
 
 // The season year shown beside the anchor: derived, never typed, so it can
