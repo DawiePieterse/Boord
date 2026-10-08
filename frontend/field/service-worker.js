@@ -2,7 +2,7 @@
 // Data (worker/block lists, sync) always goes over the network when
 // available - this only guarantees the UI itself is installable/offline.
 const CACHE_PREFIX = "boord-field-";
-const CACHE = "boord-field-v23";
+const CACHE = "boord-field-v24";
 const SHELL = [
   "./",
   "./index.html",

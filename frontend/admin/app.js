@@ -373,7 +373,10 @@ function renderLotCratesModal() {
         <td class="p-2">${c.weight_kg.toFixed(1)}</td>
         <td class="p-2">${(c.deduction_kg || 0).toFixed(1)}</td>
         <td class="p-2 font-semibold">${net}</td>
-        <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit-crate="${esc(c.uuid)}">Edit</button></td>
+        <td class="p-2 text-right whitespace-nowrap">
+          <button class="text-blue-700 text-xs" data-edit-crate="${esc(c.uuid)}">Edit</button>
+          <button class="text-red-700 text-xs ml-2" data-delete-crate="${esc(c.uuid)}">Delete</button>
+        </td>
       </tr>`;
   }).join("") || `<tr><td class="p-2 text-slate-400" colspan="7">No crates on this lot</td></tr>`;
 
@@ -383,6 +386,41 @@ function renderLotCratesModal() {
       if (crate) editCrate(crate);
     });
   });
+  document.querySelectorAll("#lotCratesRows [data-delete-crate]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const crate = _lotCratesContext.crates.find((c) => c.uuid === btn.dataset.deleteCrate);
+      if (crate) deleteCrate(crate);
+    });
+  });
+}
+
+// Lot totals in the open modal follow whatever the server re-derived.
+function _applyLotTotals(lotTotals) {
+  if (lotTotals && _lotCratesContext && _lotCratesContext.lot.id === lotTotals.lot_id) {
+    _lotCratesContext.lot.total_crates = lotTotals.total_crates;
+    _lotCratesContext.lot.total_kg = lotTotals.total_kg;
+  }
+}
+
+async function deleteCrate(crate) {
+  const net = (crate.weight_kg - (crate.deduction_kg || 0)).toFixed(1);
+  if (!confirm(`Delete this crate?\n\n${_workerName(crate.worker_id)} - block ${crate.block_id || "?"} - ${net} kg\n\nThis can't be undone.`)) return;
+  let result;
+  try {
+    result = await Boord.api(`/api/harvest-records/${encodeURIComponent(crate.uuid)}`, { method: "DELETE" });
+  } catch (e) {
+    if (Boord.isAuthError(e)) { accessRefused(e); return; }
+    Boord.toast("Could not delete: " + _apiErrorDetail(e));
+    return;
+  }
+  Boord.toast("Crate deleted");
+  if (_lotCratesContext) {
+    _lotCratesContext.crates = _lotCratesContext.crates.filter((c) => c.uuid !== crate.uuid);
+    _applyLotTotals(result.lot);
+    renderLotCratesModal();
+  }
+  renderWagesWarning(result.wages_affected);
+  await refreshDashboard();
 }
 
 function renderWagesWarning(wagesAffected) {
@@ -409,14 +447,23 @@ function editCrate(crate) {
     .filter((w) => w.active || w.id === crate.worker_id)
     .map((w) => ({ value: w.id, label: _workerOptionLabel(w) }));
   if (!crate.worker_id) options.unshift({ value: "", label: "(no worker recorded)" });
+  // Same rule for the block: a since-retired block must stay selectable.
+  const blockOptions = (window._blocksCache || [])
+    .filter((b) => b.active || b.id === crate.block_id)
+    .map((b) => ({ value: b.id, label: `${b.name || b.id}${b.active ? "" : " - inactive"}` }));
+  if (!blockOptions.some((o) => o.value === crate.block_id)) {
+    blockOptions.unshift({ value: crate.block_id || "", label: crate.block_id || "(no block recorded)" });
+  }
 
   openEditModal("Edit Crate", [
     { key: "worker_id", label: "Worker", type: "select", options },
+    { key: "block_id", label: "Block", type: "select", options: blockOptions },
     { key: "weight_kg", label: "Weight (kg)", type: "number" },
     { key: "deduction_kg", label: "Deduction (kg)", type: "number" },
   ], crate, async (values) => {
     const body = {
       worker_id: values.worker_id,
+      block_id: values.block_id || null,
       weight_kg: parseFloat(values.weight_kg),
       deduction_kg: parseFloat(values.deduction_kg) || 0,
     };
@@ -437,10 +484,7 @@ function editCrate(crate) {
     if (_lotCratesContext) {
       const idx = _lotCratesContext.crates.findIndex((c) => c.uuid === crate.uuid);
       if (idx >= 0) _lotCratesContext.crates[idx] = result.record;
-      if (result.lot && _lotCratesContext.lot.id === result.lot.lot_id) {
-        _lotCratesContext.lot.total_crates = result.lot.total_crates;
-        _lotCratesContext.lot.total_kg = result.lot.total_kg;
-      }
+      _applyLotTotals(result.lot);
       renderLotCratesModal();
     }
     renderWagesWarning(result.wages_affected);

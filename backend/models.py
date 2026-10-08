@@ -213,6 +213,18 @@ class HarvestRecord(SQLModel, table=True):
     edited_by: Optional[str] = None  # always "admin" - see routers/harvest_records
 
 
+class DeletedHarvestRecord(SQLModel, table=True):
+    """Tombstone for a crate that was deleted - by the admin, or by the field
+    device's "Undo last crate". A field device can replay a crate it thinks
+    never landed (lost response, retry loop, restored IndexedDB), and without
+    this the sync upsert would quietly bring a deleted crate - and its wage -
+    back. routers/sync.py skips any uuid listed here."""
+    uuid: str = Field(primary_key=True)
+    lot_id: Optional[int] = Field(default=None, foreign_key="lot.id")
+    deleted_at: datetime
+    deleted_by: str  # "admin" or "field"
+
+
 class ReceivingRecord(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     lot_id: int = Field(foreign_key="lot.id")

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, SQLModel, func, select
 
 from db import get_session, supplier_id_for_device, supplier_map, upsert
-from models import HarvestRecord, Lot, LotStatus, Supplier, SystemSetting
+from models import DeletedHarvestRecord, HarvestRecord, Lot, LotStatus, Supplier, SystemSetting
 from security import require_admin_client
 from timeutil import as_utc, day_bounds
 from weather import current_farm_weather
@@ -305,11 +305,16 @@ def upsert_lot(lot_in: LotIn, session: Session = Depends(get_session)):
     # response) posts the totals it computed at capture time - if an admin
     # has since corrected one of this lot's crates, that payload would
     # silently undo the correction. Existing-lot only: a brand new slip_number
-    # can't have any crates against it yet, edited or otherwise.
+    # can't have any crates against it yet, edited or otherwise. An admin
+    # delete counts too; a field undo doesn't - the device's own totals already
+    # leave that crate out.
     if existing:
         has_edit = session.exec(
             select(HarvestRecord.uuid)
             .where(HarvestRecord.lot_id == saved.id, HarvestRecord.edited_at != None)  # noqa: E711
+        ).first() or session.exec(
+            select(DeletedHarvestRecord.uuid)
+            .where(DeletedHarvestRecord.lot_id == saved.id, DeletedHarvestRecord.deleted_by == "admin")
         ).first()
         if has_edit:
             recompute_lot_totals(session, saved)

@@ -90,6 +90,11 @@ const IDB = (() => {
       const all = await request(store.getAll());
       return all.filter((r) => !r.synced);
     },
+    async remove(uuid) {
+      const store = await tx("readwrite");
+      store.delete(uuid);
+      await done(store);
+    },
     async markSynced(uuids) {
       await IDB._patch(uuids, (rec) => { rec.synced = true; });
     },
