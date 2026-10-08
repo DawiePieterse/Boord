@@ -762,6 +762,7 @@ def test_a_destination_inside_the_repo_is_refused():
 ADMIN_ONLY_ROUTES = {
     ("DELETE", "/api/blocks/{block_id}"),
     ("DELETE", "/api/devices/{device_id}"),
+    ("DELETE", "/api/harvest-records/{record_uuid}"),
     ("DELETE", "/api/suppliers/{supplier_id}"),
     ("DELETE", "/api/teams/{team_id}"),
     ("DELETE", "/api/workers/{worker_id}"),
@@ -997,6 +998,76 @@ SCREEN_ENTRY_POINTS = ("frontend/admin/app.js",
                        "frontend/packhouse/receiving.js")
 
 
+# ---------------------------------------------------------------------------
+# Deleted crates
+#
+# A crate deleted by the admin, or undone in the field, is a wage that must
+# stay gone - and the field device is built to resend whatever it thinks never
+# landed. Runs in a throwaway database, like the migration checks.
+# ---------------------------------------------------------------------------
+def test_a_deleted_crate_stays_deleted():
+    from datetime import timezone  # noqa: E402
+    from models import DeletedHarvestRecord  # noqa: E402
+    from routers.harvest_records import (HarvestRecordEdit, delete_harvest_record,  # noqa: E402
+                                         edit_harvest_record)
+    from routers.lots import LotIn, upsert_lot  # noqa: E402
+    from routers.sync import FieldUndoBatch, HarvestSyncBatch, sync_harvest, undo_harvest  # noqa: E402
+
+    tmp = tempfile.mkdtemp()
+    try:
+        eng = create_engine(f"sqlite:///{os.path.join(tmp, 't.db')}")
+        run_migrations(eng, snapshot=False)
+        now = datetime.now(timezone.utc)
+
+        def crate(uuid):
+            return {"uuid": uuid, "timestamp": now, "worker_id": "001", "block_id": "1",
+                    "weight_kg": 20.0, "device_id": "dev1", "slip_number": "S1"}
+
+        def sync(*uuids):
+            sync_harvest(HarvestSyncBatch(records=[crate(u) for u in uuids]), s)
+
+        def dispatch():
+            return upsert_lot(LotIn(slip_number="S1", timestamp=now, device_id="dev1",
+                                    total_crates=2, total_kg=40, status="in_transit"), s)
+
+        with Session(eng) as s:
+            s.add_all([Worker(id="001"), Block(id="1"), Block(id="2"), Block(id="3", active=False)])
+            s.commit()
+            sync("a", "b", "c")
+
+            # Field undo while picking - including a crate the undo beat to the server.
+            assert undo_harvest(FieldUndoBatch(device_id="dev1", uuids=["c", "x"]), s) == {"refused": []}
+            sync("c", "x")
+            assert s.get(HarvestRecord, "c") is None and s.get(HarvestRecord, "x") is None, (
+                "a replayed sync brought an undone crate back")
+            assert s.get(DeletedHarvestRecord, "x"), "an undo that beat its crate left no tombstone"
+            assert undo_harvest(FieldUndoBatch(device_id="dev2", uuids=["b"]), s)["refused"] == ["b"], (
+                "a device undid another device's crate")
+
+            dispatch()
+            assert undo_harvest(FieldUndoBatch(device_id="dev1", uuids=["b"]), s)["refused"] == ["b"], (
+                "the field undid a crate already on a truck")
+
+            # Admin: block edit is validated and survives a replay.
+            edit_harvest_record("a", HarvestRecordEdit(block_id="2"), s)
+            try:
+                edit_harvest_record("a", HarvestRecordEdit(block_id="3"), s)
+                raise AssertionError("a crate was moved onto an inactive block")
+            except HTTPException as exc:
+                assert exc.status_code == 400
+            sync("a")
+            assert s.get(HarvestRecord, "a").block_id == "2", "a replay undid the admin's block edit"
+
+            # Admin delete re-derives the lot, and neither a replay nor a stale
+            # dispatch retry puts the crate or its kg back.
+            assert delete_harvest_record("b", s)["lot"]["total_crates"] == 1
+            sync("b")
+            assert s.get(HarvestRecord, "b") is None, "a replayed sync brought a deleted crate back"
+            assert dispatch().total_crates == 1, "a stale dispatch restored a deleted crate's totals"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _repo_file(relative):
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), relative)
 
@@ -1085,6 +1156,9 @@ def main():
     for fn in (test_replacing_all_blocks_with_an_empty_file_is_refused,
                test_importing_blocks_without_a_supplier_column_keeps_the_supplier):
         check(fn.__name__, fn)
+
+    section("Deleted crates")
+    check(test_a_deleted_crate_stays_deleted.__name__, test_a_deleted_crate_stays_deleted)
 
     section("Backups")
     for fn in (test_no_destination_configured_is_not_a_failure,

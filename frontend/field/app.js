@@ -8,6 +8,8 @@ let weightBuffer = "";
 
 const PENDING_LOTS_KEY = "boord_pending_lots";
 const CURRENT_SLIP_KEY = "boord_current_slip";
+// Crates undone on this device whose delete hasn't reached the server yet.
+const PENDING_UNDOS_KEY = "boord_pending_undos";
 
 function getCurrentSlip() {
   let slip = localStorage.getItem(CURRENT_SLIP_KEY);
@@ -29,6 +31,12 @@ function getPendingLots() {
 }
 function setPendingLots(lots) {
   localStorage.setItem(PENDING_LOTS_KEY, JSON.stringify(lots));
+}
+function getPendingUndos() {
+  return JSON.parse(localStorage.getItem(PENDING_UNDOS_KEY) || "[]");
+}
+function setPendingUndos(uuids) {
+  localStorage.setItem(PENDING_UNDOS_KEY, JSON.stringify(uuids));
 }
 
 // Everything this screen needs to work is already on the device (IndexedDB
@@ -61,6 +69,7 @@ async function init() {
   bindKeypad();
   updateWorkerDisplay();
   document.getElementById("saveCrateBtn").addEventListener("click", saveCrate);
+  document.getElementById("undoCrateBtn").addEventListener("click", undoLastCrate);
   document.getElementById("sendSlipBtn").addEventListener("click", openDriverModal);
   document.getElementById("cancelSlipBtn").addEventListener("click", closeDriverModal);
   document.getElementById("confirmSlipBtn").addEventListener("click", sendPickingSlip);
@@ -338,6 +347,55 @@ function renderElapsed() {
   else card.classList.add("urgency-green");
 }
 
+// Takes back the newest crate on the slip still being picked - a double tap on
+// Save Crate, or the wrong weight noticed straight away. Crates already sent
+// on a truck are out of reach here on purpose: those belong to the office
+// (Admin -> Received -> view / edit crates). The crate leaves this device at
+// once; the server is told by syncLoop, so undo works offline too.
+async function undoLastCrate() {
+  let crates;
+  try {
+    crates = await IDB.getBySlip(getCurrentSlip());
+  } catch (e) {
+    Boord.toast("Could not read saved crates on this device");
+    return;
+  }
+  if (!crates.length) { Boord.toast("No crates on this slip to undo"); return; }
+  const last = crates.reduce((a, b) => (b.timestamp > a.timestamp ? b : a));
+  const worker = (Boord.getCachedJSON("boord_cached_workers") || []).find((w) => w.id === last.worker_id);
+  const who = worker ? (worker.name || worker.id) : last.worker_id;
+  if (!confirm(`Undo the last crate?\n\n${who} - block ${last.block_id} - ${Number(last.weight_kg).toFixed(1)} kg`)) return;
+  // Queued before the local delete: if the delete then fails the crate is
+  // still on screen, and the server delete is harmless either way.
+  setPendingUndos([...getPendingUndos(), last.uuid]);
+  try {
+    await IDB.remove(last.uuid);
+  } catch (e) {
+    setPendingUndos(getPendingUndos().filter((u) => u !== last.uuid));
+    Boord.toast("Could not undo the crate - try again");
+    return;
+  }
+  Boord.toast("Crate undone");
+  await renderLot();
+  syncLoop();
+}
+
+// Tells the server about crates undone on this device. Runs before pending
+// slips are flushed: the server only accepts an undo while the crate's slip
+// is still being picked, so a slip dispatched offline must not land first.
+async function flushPendingUndos() {
+  const uuids = getPendingUndos();
+  if (!uuids.length) return;
+  const result = await Boord.api("/api/sync/harvest/undo", {
+    method: "POST", body: { device_id: deviceConfig.id, uuids },
+  });
+  // Only what was sent - an undo tapped while this was in flight stays queued.
+  setPendingUndos(getPendingUndos().filter((u) => !uuids.includes(u)));
+  if (result.refused && result.refused.length) {
+    Boord.toast("An undone crate had already gone to the pack house - tell your supervisor");
+  }
+}
+
 async function renderLot() {
   const slip = getCurrentSlip();
   let crates;
@@ -500,7 +558,7 @@ async function showOfflineStatus() {
   try {
     const unsynced = await IDB.getUnsynced();
     const pendingLots = getPendingLots();
-    const count = unsynced.length + pendingLots.length;
+    const count = unsynced.length + pendingLots.length + getPendingUndos().length;
     if (count > 0) text = `Offline - ${count} pending`;
   } catch (e) { /* count is nice-to-have */ }
   setSyncStatus("offline", text);
@@ -521,7 +579,15 @@ async function syncLoop() {
       await showOfflineStatus();
       return;
     }
-    // Flush pending lot dispatches first (order matters less since the
+    try {
+      await flushPendingUndos();
+    } catch (e) {
+      // Same rule as a pending lot: unreachable is offline; anything else
+      // stays queued for the next tick without holding up the crates.
+      if (Boord.isNetworkError(e)) { await showOfflineStatus(); return; }
+    }
+
+    // Flush pending lot dispatches next (order matters less since the
     // server resolves lots lazily by slip_number either way).
     const pendingLots = getPendingLots();
     const stillPending = [];

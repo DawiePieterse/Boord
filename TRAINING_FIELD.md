@@ -91,6 +91,8 @@ When a truck is ready to take a load away, you send a **Picking Slip**
   button clears a mistyped digit).
 - **Save Crate** — logs the crate. Do this every single time, even if
   you're in a rush — a crate that isn't saved doesn't count.
+- **Undo last crate** — takes back the crate you just saved, if it was
+  wrong. Only works until the picking slip is sent.
 - **Send Picking Slip** — only tap this when a truck is actually leaving
   with the load.
 
@@ -235,9 +237,13 @@ saving crates: the number just tells you how many are still waiting.
 - **The top of the screen names the wrong grower?** Same thing — tell
   your supervisor before you carry on picking. Everything logged in the
   meantime is credited to whoever is named there.
-- **Logged the wrong weight or wrong worker on a crate that's already
-  saved?** You can't fix this from the field device — tell your
-  supervisor so the office can correct it.
+- **Logged the wrong weight, worker or block on a crate you just saved?**
+  Tap **Undo last crate** under Save Crate. It shows the crate and asks
+  you to confirm, then removes it — log it again correctly. Tap it again
+  to undo the crate before that. It works offline too.
+  Undo only reaches crates on the slip you're still picking. Once a
+  **Picking Slip** has been sent, those crates belong to the office — tell
+  your supervisor so they can correct or delete it.
 - **Screen looks different / missing a button?** The app may need
   updating — tell your supervisor, don't try to fix it yourself.
 - **Nothing happens when you tap Save Crate?** Make sure a weight is
