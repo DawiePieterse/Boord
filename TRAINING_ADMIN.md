@@ -85,10 +85,16 @@ and needs attention.
 
 Tapping a row in the **Received** list opens that load's crates —
 time, block, worker, weight, deduction, and net kg — each with an
-**Edit** link. Use this to fix a mistake made at capture time (wrong
-worker scanned, mistyped weight): you can change the **Worker**,
-**Weight (kg)**, and **Deduction (kg)** on that crate, and the lot's
-totals recalculate immediately everywhere they're shown.
+**Edit** and a **Delete** link. Use this to fix a mistake made at capture
+time (wrong worker scanned, mistyped weight, wrong block): you can change
+the **Worker**, **Block**, **Weight (kg)**, and **Deduction (kg)** on that
+crate, or **Delete** a crate that should never have been logged (it asks
+first, and can't be undone). The lot's totals recalculate immediately
+everywhere they're shown.
+
+Pickers can fix their own mistakes before the load leaves: the field
+phone's **Undo last crate** takes back the most recent crates on the slip
+still being picked. Once the slip is sent, fixes come here.
 
 If wages were already calculated for the affected period, a warning
 banner says so — re-run **Calculate Wages** in Payments for that period

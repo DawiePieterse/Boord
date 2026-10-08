@@ -1725,13 +1725,18 @@ expand for the detail rows.
 
 Tapping a row in the **Received** list opens that load's individual
 crates - time, block, worker, weight, deduction, and net kg - each with
-an **Edit** link. This is the one place to fix a mistake made at capture
-time (the wrong worker scanned, a mistyped weight) after the fact; there's
-no equivalent for a load still Harvesting or In Transit.
+an **Edit** and a **Delete** link. This is the one place to fix a mistake
+made at capture time (the wrong worker scanned, a mistyped weight, the
+wrong block) after the fact; there's no equivalent for a load still
+Harvesting or In Transit. While a slip is still being picked, the field
+device can take back its own most recent crates with **Undo last crate**
+instead.
 
-Editing a crate lets you change its **Worker**, **Weight (kg)**, and
-**Deduction (kg)** - nothing else about it (block, device, and when it was
-picked stay exactly as captured). Saving:
+Editing a crate lets you change its **Worker**, **Block**, **Weight (kg)**,
+and **Deduction (kg)** - the device and when it was picked stay exactly as
+captured. **Delete** removes a crate that should never have been logged (a
+double tap on Save Crate, a test crate), after asking you to confirm; it
+can't be undone. Saving or deleting:
 
 - Recalculates that lot's total crates/kg immediately, so the Received
   list, Dashboard KPIs, exports, and supplier billing all reflect the
@@ -1746,7 +1751,8 @@ picked stay exactly as captured). Saving:
 > A field device is never able to undo a correction made this way - it
 > doesn't re-send a crate it thinks already synced, and even if it retried
 > after a lost connection, the correction always wins over the device's
-> original capture.
+> original capture. A deleted crate is remembered for the same reason, so a
+> retry can't bring it back.
 
 ---
 
