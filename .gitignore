@@ -3,6 +3,9 @@ backend/__pycache__/
 backend/**/__pycache__/
 data/*.db
 data/*.db-journal
+# Hand-made copies of the farm database (boord.db.bak-*, boord.db.realmaster-*).
+# Same data as boord.db, so the same rule: never one `git add -A` from GitHub.
+data/boord.db.*
 data/.secret_key
 data/release_key.fpr
 # Written by update_server.bat with the tag it checked out. Only a fallback
@@ -33,3 +36,5 @@ data/reports/
 *.pyc
 heartbeat_url.txt
 NEXT_STEPS.md
+# Working file for the admin training deck - the PDFs are what ship.
+Boord_Admin_Training.pptx
