@@ -1736,7 +1736,9 @@ Editing a crate lets you change its **Worker**, **Block**, **Weight (kg)**,
 and **Deduction (kg)** - the device and when it was picked stay exactly as
 captured. **Delete** removes a crate that should never have been logged (a
 double tap on Save Crate, a test crate), after asking you to confirm; it
-can't be undone. Saving or deleting:
+can't be undone. Deleting a slip's last crate removes the slip as well,
+with its receiving record, so it doesn't linger at 0 crates. Saving or
+deleting:
 
 - Recalculates that lot's total crates/kg immediately, so the Received
   list, Dashboard KPIs, exports, and supplier billing all reflect the

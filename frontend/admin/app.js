@@ -216,6 +216,22 @@ async function refreshDashboard() {
 
   renderDashboardKpis(harvesting, inTransit, received, summary);
   renderDashboardLists(harvesting, inTransit, received, summary);
+  renderDashboardEmpty([...harvesting, ...inTransit, ...received], start, end);
+}
+
+// A row of zeros reads like a broken dashboard; an empty period says so in
+// words instead. Still rendered underneath, so nothing else changes.
+function renderDashboardEmpty(lots, start, end) {
+  const empty = !lots.some((l) => l.total_crates > 0);
+  document.getElementById("dashEmpty").classList.toggle("hidden", !empty);
+  document.getElementById("dashData").classList.toggle("hidden", empty);
+  if (!empty) return;
+  const day = (iso) => new Date(`${iso}T00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  const supplierSelect = document.getElementById("dashSupplierFilter");
+  const forSupplier = supplierSelect.value ? ` for ${supplierSelect.options[supplierSelect.selectedIndex].text}` : "";
+  document.getElementById("dashEmptyDetail").textContent = start === end
+    ? `No crates logged on ${day(start)}${forSupplier}.`
+    : `No crates logged between ${day(start)} and ${day(end)}${forSupplier}.`;
 }
 
 function _lotTotals(lots) {
@@ -413,11 +429,14 @@ async function deleteCrate(crate) {
     Boord.toast("Could not delete: " + _apiErrorDetail(e));
     return;
   }
-  Boord.toast("Crate deleted");
+  const slipGone = !!(result.lot && result.lot.deleted);
+  Boord.toast(slipGone ? "Crate deleted - the slip had no crates left and was removed" : "Crate deleted");
   if (_lotCratesContext) {
     _lotCratesContext.crates = _lotCratesContext.crates.filter((c) => c.uuid !== crate.uuid);
     _applyLotTotals(result.lot);
     renderLotCratesModal();
+    // Left open rather than closed, so a wages warning below still shows.
+    if (slipGone) document.getElementById("lotCratesMeta").textContent = "Slip removed - it had no crates left";
   }
   renderWagesWarning(result.wages_affected);
   await refreshDashboard();

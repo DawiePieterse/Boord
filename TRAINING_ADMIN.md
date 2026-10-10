@@ -90,7 +90,8 @@ time (wrong worker scanned, mistyped weight, wrong block): you can change
 the **Worker**, **Block**, **Weight (kg)**, and **Deduction (kg)** on that
 crate, or **Delete** a crate that should never have been logged (it asks
 first, and can't be undone). The lot's totals recalculate immediately
-everywhere they're shown.
+everywhere they're shown. Delete a slip's last crate and the slip itself
+is removed too.
 
 Pickers can fix their own mistakes before the load leaves: the field
 phone's **Undo last crate** takes back the most recent crates on the slip

@@ -1007,7 +1007,7 @@ SCREEN_ENTRY_POINTS = ("frontend/admin/app.js",
 # ---------------------------------------------------------------------------
 def test_a_deleted_crate_stays_deleted():
     from datetime import timezone  # noqa: E402
-    from models import DeletedHarvestRecord  # noqa: E402
+    from models import DeletedHarvestRecord, Lot, ReceivingRecord  # noqa: E402
     from routers.harvest_records import (HarvestRecordEdit, delete_harvest_record,  # noqa: E402
                                          edit_harvest_record)
     from routers.lots import LotIn, upsert_lot  # noqa: E402
@@ -1019,12 +1019,15 @@ def test_a_deleted_crate_stays_deleted():
         run_migrations(eng, snapshot=False)
         now = datetime.now(timezone.utc)
 
-        def crate(uuid):
+        def crate(uuid, slip="S1"):
             return {"uuid": uuid, "timestamp": now, "worker_id": "001", "block_id": "1",
-                    "weight_kg": 20.0, "device_id": "dev1", "slip_number": "S1"}
+                    "weight_kg": 20.0, "device_id": "dev1", "slip_number": slip}
 
-        def sync(*uuids):
-            sync_harvest(HarvestSyncBatch(records=[crate(u) for u in uuids]), s)
+        def sync(*uuids, slip="S1"):
+            sync_harvest(HarvestSyncBatch(records=[crate(u, slip) for u in uuids]), s)
+
+        def lot(slip):
+            return s.exec(select(Lot).where(Lot.slip_number == slip)).first()
 
         def dispatch():
             return upsert_lot(LotIn(slip_number="S1", timestamp=now, device_id="dev1",
@@ -1064,6 +1067,60 @@ def test_a_deleted_crate_stays_deleted():
             sync("b")
             assert s.get(HarvestRecord, "b") is None, "a replayed sync brought a deleted crate back"
             assert dispatch().total_crates == 1, "a stale dispatch restored a deleted crate's totals"
+
+            # The admin deleting a slip's last crate deletes the slip, and a
+            # stale dispatch retry can't bring it back.
+            s.add(ReceivingRecord(lot_id=lot("S1").id, timestamp=now))
+            s.commit()
+            assert delete_harvest_record("a", s)["lot"].get("deleted"), "emptied slip not reported deleted"
+            assert lot("S1") is None, "a slip with no crates left was not deleted"
+            assert not s.exec(select(ReceivingRecord)).all(), "the deleted slip's receiving row was left behind"
+            dispatch()
+            assert lot("S1") is None, "a stale dispatch re-created a deleted slip"
+
+            # A field undo emptying the slip still being picked removes its
+            # placeholder - and picking on into the same slip brings it back.
+            sync("d", slip="S2")
+            undo_harvest(FieldUndoBatch(device_id="dev1", uuids=["d"]), s)
+            assert lot("S2") is None, "undoing the only crate left an empty placeholder slip"
+            sync("e", slip="S2")
+            assert lot("S2") is not None, "a crate on an undone-to-empty slip found no slip"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_the_empty_slip_cleanup_only_takes_emptied_slips():
+    """Migration 9d4f1a6b2e70 deletes slips v3.13 left at 0 crates. It must
+    take only slips that lost every crate to a delete - never a lot logged by
+    hand at receiving, which never had crates in the first place."""
+    tmp = tempfile.mkdtemp()
+    try:
+        eng = create_engine(f"sqlite:///{os.path.join(tmp, 't.db')}")
+        cfg = _config(eng)
+        command.upgrade(cfg, "5b2e9d71c3a4")
+        with eng.begin() as conn:
+            for lot_id, slip in ((1, "emptied"), (2, "manual"), (3, "partly")):
+                conn.exec_driver_sql(
+                    "INSERT INTO lot (id, slip_number, timestamp, driver, total_crates, total_kg, status,"
+                    " notes, weather_condition) VALUES (?, ?, '2026-10-07', '', 0, 0, 'received', '', '')",
+                    (lot_id, slip))
+            conn.exec_driver_sql(
+                "INSERT INTO receivingrecord (lot_id, timestamp, expected_crates, actual_crates, discrepancy,"
+                " condition, waste_kg, notes, received_by) VALUES (1, '2026-10-07', 0, 0, 0, '', 0, '', ''),"
+                " (2, '2026-10-07', 0, 5, 0, '', 0, '', '')")
+            conn.exec_driver_sql(
+                "INSERT INTO harvestrecord (uuid, timestamp, weight_kg, deduction_kg, lot_id, notes,"
+                " weather_condition) VALUES ('kept', '2026-10-07', 20, 0, 3, '', '')")
+            conn.exec_driver_sql(
+                "INSERT INTO deletedharvestrecord (uuid, lot_id, deleted_at, deleted_by) VALUES"
+                " ('gone1', 1, '2026-10-07', 'admin'), ('gone3', 3, '2026-10-07', 'admin')")
+        command.upgrade(cfg, "head")
+        with eng.connect() as conn:
+            slips = {r[0] for r in conn.exec_driver_sql("SELECT slip_number FROM lot")}
+            assert slips == {"manual", "partly"}, f"wrong slips survived the cleanup: {slips}"
+            assert [r[0] for r in conn.exec_driver_sql("SELECT lot_id FROM receivingrecord")] == [2]
+            tombs = dict(conn.exec_driver_sql("SELECT uuid, slip_number FROM deletedharvestrecord").all())
+            assert tombs == {"gone1": "emptied", "gone3": "partly"}, f"tombstones lost their slip: {tombs}"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1158,7 +1215,9 @@ def main():
         check(fn.__name__, fn)
 
     section("Deleted crates")
-    check(test_a_deleted_crate_stays_deleted.__name__, test_a_deleted_crate_stays_deleted)
+    for fn in (test_a_deleted_crate_stays_deleted,
+               test_the_empty_slip_cleanup_only_takes_emptied_slips):
+        check(fn.__name__, fn)
 
     section("Backups")
     for fn in (test_no_destination_configured_is_not_a_failure,

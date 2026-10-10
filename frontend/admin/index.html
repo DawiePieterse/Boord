@@ -268,6 +268,14 @@
         <button id="dashSeasonBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">Season</button>
       </div>
 
+      <!-- Shown instead of everything below when nothing was picked in the period -->
+      <div id="dashEmpty" class="hidden bg-white rounded-xl shadow p-8 text-center">
+        <i class="fa-solid fa-seedling text-4xl text-slate-300"></i>
+        <div class="font-semibold text-lg mt-3">Nothing has been picked</div>
+        <div id="dashEmptyDetail" class="text-sm text-slate-500 mt-1"></div>
+      </div>
+
+      <div id="dashData" class="space-y-4">
       <div id="dashKpiGrid" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
 
       <div class="bg-white rounded-xl shadow">
@@ -318,6 +326,7 @@
             <tbody id="dash-blocks-rows"></tbody>
           </table>
         </div>
+      </div>
       </div>
     </div>
 
