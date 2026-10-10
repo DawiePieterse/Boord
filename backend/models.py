@@ -220,7 +220,11 @@ class DeletedHarvestRecord(SQLModel, table=True):
     this the sync upsert would quietly bring a deleted crate - and its wage -
     back. routers/sync.py skips any uuid listed here."""
     uuid: str = Field(primary_key=True)
-    lot_id: Optional[int] = Field(default=None, foreign_key="lot.id")
+    lot_id: Optional[int] = Field(default=None, foreign_key="lot.id")  # cleared if the lot itself goes
+    # Kept because lot_id does not survive the lot: when the last crate goes
+    # the slip is deleted too (routers/lots.py delete_lot_if_empty), and this
+    # is what stops a stale dispatch retry from re-creating it.
+    slip_number: Optional[str] = None
     deleted_at: datetime
     deleted_by: str  # "admin" or "field"
 

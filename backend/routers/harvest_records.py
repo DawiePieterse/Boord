@@ -7,7 +7,7 @@ from sqlmodel import Session, SQLModel, select
 
 from db import get_session
 from models import Block, DeletedHarvestRecord, HarvestRecord, Lot, Payment, Worker
-from routers.lots import recompute_lot_totals
+from routers.lots import delete_lot_if_empty, recompute_lot_totals
 from security import require_admin_client
 from timeutil import to_local
 
@@ -155,15 +155,20 @@ def delete_crate(session: Session, record_uuid: str, deleted_by: str) -> Optiona
     """Remove a crate and leave its tombstone, so a field device replaying it
     later is ignored by routers/sync.py rather than bringing it back. The
     tombstone is written even when the crate never reached the server - a
-    field undo can race the crate's own upload. Returns the removed record
-    (None if it wasn't here). Does not commit."""
+    field undo can race the crate's own upload. If it was the slip's last
+    crate, the slip goes too. Returns the removed record (None if it wasn't
+    here). Does not commit."""
     record = session.get(HarvestRecord, record_uuid)
+    lot = session.get(Lot, record.lot_id) if record and record.lot_id else None
     if record:
         session.delete(record)
     if not session.get(DeletedHarvestRecord, record_uuid):
         session.add(DeletedHarvestRecord(
-            uuid=record_uuid, lot_id=record.lot_id if record else None,
+            uuid=record_uuid, lot_id=lot.id if lot else None,
+            slip_number=lot.slip_number if lot else None,
             deleted_at=datetime.now(timezone.utc), deleted_by=deleted_by))
+    if lot:
+        delete_lot_if_empty(session, lot.id)
     return record
 
 
@@ -178,16 +183,20 @@ def delete_harvest_record(record_uuid: str, session: Session = Depends(get_sessi
         raise HTTPException(404, "Harvest record not found")
     # Read before the delete - the row is gone afterwards.
     wages_affected = _wages_affected(session, record, {record.worker_id} - {None})
+    lot_id = record.lot_id
     delete_crate(session, record_uuid, "admin")
     session.commit()
 
     lot_totals = None
-    if record.lot_id:
-        lot = session.get(Lot, record.lot_id)
+    if lot_id:
+        lot = session.get(Lot, lot_id)
         if lot:
             recompute_lot_totals(session, lot)
             session.commit()
             session.refresh(lot)
             lot_totals = {"lot_id": lot.id, "total_crates": lot.total_crates, "total_kg": lot.total_kg}
+        else:
+            # That was its last crate - delete_crate removed the slip too.
+            lot_totals = {"lot_id": lot_id, "deleted": True}
 
     return {"lot": lot_totals, "wages_affected": wages_affected}

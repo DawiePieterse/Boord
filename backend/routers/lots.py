@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, SQLModel, func, select
 
 from db import get_session, supplier_id_for_device, supplier_map, upsert
-from models import DeletedHarvestRecord, HarvestRecord, Lot, LotStatus, Supplier, SystemSetting
+from models import (DeletedHarvestRecord, HarvestRecord, Lot, LotStatus, PrePackRecord,
+                    ReceivingRecord, Supplier, SystemSetting)
 from security import require_admin_client
 from timeutil import as_utc, day_bounds
 from weather import current_farm_weather
@@ -107,6 +108,29 @@ def _stamp_weather(session: Session, lot: Lot) -> None:
     lot.weather_temp = weather.get("temp")
     lot.weather_humidity = weather.get("humidity")
     lot.weather_condition = weather.get("condition", "")
+
+
+def delete_lot_if_empty(session: Session, lot_id: int) -> bool:
+    """Delete a slip whose last crate has just been deleted (admin) or undone
+    (field), so it stops sitting in the lists at 0 crates / 0 kg. Its
+    receiving and pre-pack rows go with it - they describe a load that, it
+    turns out, never had any crates. Only called after a crate delete, so a
+    lot logged by hand at receiving (never any crates) is never touched. The
+    crates' tombstones stay, with lot_id cleared; their slip_number is what
+    keeps the slip from coming back (see upsert_lot). Does not commit."""
+    session.flush()
+    if session.exec(select(HarvestRecord.uuid).where(HarvestRecord.lot_id == lot_id)).first():
+        return False
+    for model in (ReceivingRecord, PrePackRecord):
+        for row in session.exec(select(model).where(model.lot_id == lot_id)).all():
+            session.delete(row)
+    for tomb in session.exec(select(DeletedHarvestRecord).where(DeletedHarvestRecord.lot_id == lot_id)).all():
+        tomb.lot_id = None
+        session.add(tomb)
+    lot = session.get(Lot, lot_id)
+    if lot:
+        session.delete(lot)
+    return True
 
 
 def _build_split_index(session: Session):
@@ -275,6 +299,14 @@ def upsert_lot(lot_in: LotIn, session: Session = Depends(get_session)):
     it's resolved here from the dispatching device's allocation, falling back
     to the pack house's own fruit."""
     existing = session.exec(select(Lot).where(Lot.slip_number == lot_in.slip_number)).first()
+    if not existing and session.exec(
+        select(DeletedHarvestRecord.uuid).where(DeletedHarvestRecord.slip_number == lot_in.slip_number,
+                                                DeletedHarvestRecord.deleted_by == "admin")
+    ).first():
+        # The admin emptied this slip and it was deleted - this is a field
+        # device replaying its queued dispatch. Answered 200 so the device
+        # stops retrying; nothing is re-created.
+        return {"slip_number": lot_in.slip_number, "deleted": True}
     data = lot_in.model_dump()
     data["total_kg"] = round(data.get("total_kg", 0.0), 1)
     if data.get("supplier_id") is None:
