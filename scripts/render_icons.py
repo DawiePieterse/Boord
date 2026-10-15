@@ -11,6 +11,7 @@ so their icons are only rendered when you say where to put them:
 
     python3 scripts/render_icons.py --owner ../BoordOwner/frontend/icons
     python3 scripts/render_icons.py --notes ../BoordNotes/frontend/app/icons
+    python3 scripts/render_icons.py --labour ../Boord-labour/frontend/icons
 
 Needs Pillow. The mark is drawn at 4x and downsampled, so no vector tooling
 is required on the machine that builds it.
@@ -28,6 +29,7 @@ RED = (200, 16, 46, 255)      # --boord-red    #C8102E
 GREEN = (22, 163, 74, 255)    # --boord-green  #16a34a
 YELLOW = (234, 179, 8, 255)   # --boord-yellow #eab308
 SKY = (56, 189, 248, 255)     # --boord-sky    #38bdf8
+VIOLET = (192, 132, 252, 255) # Labour's leaf  #c084fc
 WHITE = (255, 255, 255, 255)
 
 # Same crate for every app; the leaf colour tells them apart on a home
@@ -45,6 +47,10 @@ OWNER_LEAF = WHITE
 # accent. Sky reads as clearly distinct from green/red/yellow at the 48px a
 # home screen actually draws these at, which two warm colours would not.
 NOTES_LEAF = SKY
+# Labour (the packhouse time clock) came after Notes. Violet is the one hue
+# left that doesn't sit next to an existing leaf - orange or pink would read
+# as Field's red or Admin's yellow at 48px, teal as Notes' sky.
+LABOUR_LEAF = VIOLET
 
 SIZES = (512, 192, 180)
 SS = 4          # supersampling factor
@@ -212,6 +218,9 @@ def main():
     ap.add_argument("--notes", metavar="DIR",
                     help="also render the Notes icon into DIR "
                          "(BoordNotes' frontend/app/icons)")
+    ap.add_argument("--labour", metavar="DIR",
+                    help="also render the Labour icon into DIR "
+                         "(Boord-labour's frontend/icons)")
     args = ap.parse_args()
 
     for app, leaf_colour in APPS.items():
@@ -222,6 +231,9 @@ def main():
 
     if args.notes:
         write(render(NOTES_LEAF), args.notes)
+
+    if args.labour:
+        write(render(LABOUR_LEAF), args.labour)
 
 
 if __name__ == "__main__":
