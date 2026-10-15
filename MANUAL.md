@@ -923,6 +923,7 @@ address has to land here. Everything else gets its own port:
 | Boord Owner | 8443 | `localhost:8010` | `...ts.net:8443/` |
 | Boord Notes | 9443 | `localhost:8020` | `...ts.net:9443/app/` |
 | Kudde | 8030 | `localhost:8030` | `...ts.net:8030/` |
+| Boord Labour | 8040 | `localhost:8040` | `...ts.net:8040/` |
 
 Set every app this PC runs in one go. `tailscale serve status` should then
 list exactly those:
@@ -933,6 +934,7 @@ tailscale serve --bg --https=443  http://localhost:8000
 tailscale serve --bg --https=8443 http://localhost:8010
 tailscale serve --bg --https=9443 http://localhost:8020
 tailscale serve --bg --https=8030 http://localhost:8030
+tailscale serve --bg --https=8040 http://localhost:8040
 ```
 
 > **`tailscale serve reset` clears every mapping on the machine, including
@@ -995,7 +997,7 @@ problem.
 **Step 1 - Create a healthchecks.io check for each application.**
 1. Sign up free at [healthchecks.io](https://healthchecks.io).
 2. Create **one check per application you want watched** - Boord, Boord
-   Owner, Boord Notes and Kudde can each have their own. Name them so you
+   Owner, Boord Notes, Kudde and Boord Labour can each have their own. Name them so you
    can tell them apart in an email at six in the morning ("Boord",
    "Kudde", and so on). Watching only Boord is a perfectly reasonable
    choice; the others are then simply not reported on.
@@ -1017,9 +1019,10 @@ boord = https://hc-ping.com/aaaaaaaa-...
 owner = https://hc-ping.com/bbbbbbbb-...
 notes = https://hc-ping.com/cccccccc-...
 kudde = https://hc-ping.com/dddddddd-...
+labour = https://hc-ping.com/eeeeeeee-...
 ```
 
-The names on the left are `boord`, `owner`, `notes` and `kudde`. Case
+The names on the left are `boord`, `owner`, `notes`, `kudde` and `labour`. Case
 doesn't matter and neither do spaces or hyphens, so `Boord Owner` and
 `boord-owner` both work. Blank lines are ignored, and a line starting
 with `#` is a comment. Leave out any application you don't want watched.
@@ -1076,9 +1079,9 @@ line from the file too.
 **What the ping carries.** Each successful ping sends a short line of text
 with it, visible in the check's log on healthchecks.io. It is there so the
 release a site is running can be read from the monitoring account instead
-of phoning someone and asking them to read a screen. Boord and Kudde send
-it; Boord Owner and Boord Notes have no version endpoint and simply ping
-with nothing attached. It contains exactly:
+of phoning someone and asking them to read a screen. Boord, Kudde and
+Boord Labour send it; Boord Owner and Boord Notes have no version endpoint
+and simply ping with nothing attached. It contains exactly:
 
 - the release tag and whether it is a release, a checkout between releases,
   or unknown
@@ -1118,7 +1121,7 @@ reboots the PC. On a pack house floor that is a morning of paper.
 It registers a Scheduled Task ("Boord Watchdog") that runs every 5
 minutes and, for each of the servers installed on this PC, checks that
 the port actually answers. Anything that has stopped answering is
-stopped properly and started again. It covers all four applications that
+stopped properly and started again. It covers all five applications that
 can share this machine, not only Boord:
 
 | Application | Port | Scheduled task |
@@ -1127,6 +1130,7 @@ can share this machine, not only Boord:
 | Boord Owner | 8010 | Boord Owner Server |
 | Boord Notes | 8020 | Boord Notes Server |
 | Kudde | 8030 | Kudde Server |
+| Boord Labour | 8040 | Boord Labour Server |
 
 An application that isn't installed here is skipped, not reported as
 down, so the same file suits a PC running two of them and a PC running

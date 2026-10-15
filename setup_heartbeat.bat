@@ -5,7 +5,7 @@
 :: account setup this depends on - do that first (including creating
 :: heartbeat_url.txt next to this script), then run this once.
 ::
-:: One check per application: Boord, Boord Owner, Boord Notes and Kudde can
+:: One check per application: Boord, Boord Owner, Boord Notes, Kudde and Boord Labour can
 :: each have their own ping URL in heartbeat_url.txt. Apps with no URL are
 :: simply not reported on.
 ::

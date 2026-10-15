@@ -3,7 +3,7 @@
 ::
 :: Registers a Scheduled Task ("Boord Watchdog") that runs watchdog.ps1 every
 :: 5 minutes. That checks each server this PC has installed - Boord, Boord
-:: Owner, Boord Notes, Kudde - and restarts any that have stopped answering.
+:: Owner, Boord Notes, Kudde, Boord Labour - and restarts any that have stopped answering.
 ::
 :: This is the local half of keeping the farm online. The other half is
 :: setup_heartbeat.bat, which emails you when the PC itself is off or off the

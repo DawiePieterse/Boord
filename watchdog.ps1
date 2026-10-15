@@ -50,7 +50,8 @@ $Apps = @(
     @{ Name = "Boord";       Port = 8000; Task = "Boord Server";       Health = "/" },
     @{ Name = "Boord Owner"; Port = 8010; Task = "Boord Owner Server"; Health = "/" },
     @{ Name = "Boord Notes"; Port = 8020; Task = "Boord Notes Server"; Health = "/" },
-    @{ Name = "Kudde";       Port = 8030; Task = "Kudde Server";       Health = "/healthz" }
+    @{ Name = "Kudde";       Port = 8030; Task = "Kudde Server";       Health = "/healthz" },
+    @{ Name = "Boord Labour"; Port = 8040; Task = "Boord Labour Server"; Health = "/" }
 )
 
 $LogFile   = Join-Path (Join-Path $PSScriptRoot "data") "watchdog.log"
@@ -285,7 +286,7 @@ foreach ($app in $Apps) {
 }
 
 if ($checked -eq 0) {
-    Write-Log "No Boord/Kudde server tasks are registered on this PC - nothing to watch."
+    Write-Log "No Boord/Kudde/Labour server tasks are registered on this PC - nothing to watch."
     exit 0
 }
 
