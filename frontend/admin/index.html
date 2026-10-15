@@ -253,6 +253,11 @@
     <button class="tab-btn" data-tab="payments">Payments</button>
     <button class="tab-btn" data-tab="reports">Reports</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
+    <!-- Not a .tab-btn: bindTabs() would treat it as a tab. Boord Labour is a
+         separate app on this same server, port 8040; app.js sets the href. -->
+    <a id="labourLink" target="_blank" rel="noopener"
+       class="flex-1 text-center py-[0.6rem] text-[0.8rem] text-slate-600 whitespace-nowrap px-2">
+      Packhouse labour <i class="fa-solid fa-arrow-up-right-from-square text-[0.65rem]"></i></a>
   </div>
 
   <div class="p-4 max-w-7xl mx-auto">

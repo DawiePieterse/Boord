@@ -132,6 +132,9 @@ function accessRefused(e) {
 // Tabs
 // ---------------------------------------------------------------------
 function bindTabs() {
+  // Boord Labour's admin pages: the same Tailscale host, Labour's port. It
+  // asks for its own PIN - this link grants nothing by itself.
+  document.getElementById("labourLink").href = `https://${location.hostname}:8040/admin/`;
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
