@@ -924,6 +924,7 @@ address has to land here. Everything else gets its own port:
 | Boord Notes | 9443 | `localhost:8020` | `...ts.net:9443/app/` |
 | Kudde | 8030 | `localhost:8030` | `...ts.net:8030/` |
 | Boord Labour | 8040 | `localhost:8040` | `...ts.net:8040/` |
+| Boord Monitor | 8050 | `localhost:8050` | `...ts.net:8050/` |
 
 Set every app this PC runs in one go. `tailscale serve status` should then
 list exactly those:
@@ -935,6 +936,7 @@ tailscale serve --bg --https=8443 http://localhost:8010
 tailscale serve --bg --https=9443 http://localhost:8020
 tailscale serve --bg --https=8030 http://localhost:8030
 tailscale serve --bg --https=8040 http://localhost:8040
+tailscale serve --bg --https=8050 http://localhost:8050
 ```
 
 > **`tailscale serve reset` clears every mapping on the machine, including
@@ -1020,9 +1022,10 @@ owner = https://hc-ping.com/bbbbbbbb-...
 notes = https://hc-ping.com/cccccccc-...
 kudde = https://hc-ping.com/dddddddd-...
 labour = https://hc-ping.com/eeeeeeee-...
+monitor = https://hc-ping.com/ffffffff-...
 ```
 
-The names on the left are `boord`, `owner`, `notes`, `kudde` and `labour`. Case
+The names on the left are `boord`, `owner`, `notes`, `kudde`, `labour` and `monitor`. Case
 doesn't matter and neither do spaces or hyphens, so `Boord Owner` and
 `boord-owner` both work. Blank lines are ignored, and a line starting
 with `#` is a comment. Leave out any application you don't want watched.
@@ -1121,7 +1124,7 @@ reboots the PC. On a pack house floor that is a morning of paper.
 It registers a Scheduled Task ("Boord Watchdog") that runs every 5
 minutes and, for each of the servers installed on this PC, checks that
 the port actually answers. Anything that has stopped answering is
-stopped properly and started again. It covers all five applications that
+stopped properly and started again. It covers all six applications that
 can share this machine, not only Boord:
 
 | Application | Port | Scheduled task |
@@ -1131,6 +1134,7 @@ can share this machine, not only Boord:
 | Boord Notes | 8020 | Boord Notes Server |
 | Kudde | 8030 | Kudde Server |
 | Boord Labour | 8040 | Boord Labour Server |
+| Boord Monitor | 8050 | Boord Monitor Server |
 
 An application that isn't installed here is skipped, not reported as
 down, so the same file suits a PC running two of them and a PC running
@@ -1182,6 +1186,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File watchdog.ps1 -CheckOnly
 ```
 
 That reports what is up and what is down and changes nothing.
+
+**Restarting one app on purpose.** Boord Monitor's Restart button runs
+the watchdog with `-Restart`, so a restart asked for from a phone takes
+the same care as an automatic one: it stands down while an update is
+running, and refuses to kill a process it can't prove is that app's. The
+same works from a terminal in the Boord folder:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File watchdog.ps1 -Restart "Boord Owner"
+```
+
+The name is the one in the table above. It exits 0 once the app answers
+again, 2 if it refused because an update or install is running, and 1
+otherwise. Either way it says what it did in `data\watchdog.log`.
 
 ### What happens on first startup
 

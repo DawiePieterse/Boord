@@ -25,6 +25,13 @@ param(
     # Report what is up and what is down, restart nothing. Used by
     # setup_watchdog.bat so the first run shows its work.
     [switch]$CheckOnly,
+    # Restart this one app now, by its Name in the table below, whether or
+    # not it is answering. Used by Boord Monitor's restart button, so that a
+    # restart asked for from a phone goes through exactly the same stop,
+    # prove-the-port-is-free and stand-down-during-updates steps as an
+    # automatic one. Exits 0 when the app is answering again, 2 when it was
+    # refused because an update or install is running, 1 otherwise.
+    [string]$Restart = "",
     # A single missed probe is not an outage - a farm PC doing a virus scan
     # can stall a request past ten seconds. Only act after this many probes
     # in a row fail.
@@ -51,7 +58,8 @@ $Apps = @(
     @{ Name = "Boord Owner"; Port = 8010; Task = "Boord Owner Server"; Health = "/" },
     @{ Name = "Boord Notes"; Port = 8020; Task = "Boord Notes Server"; Health = "/" },
     @{ Name = "Kudde";       Port = 8030; Task = "Kudde Server";       Health = "/healthz" },
-    @{ Name = "Boord Labour"; Port = 8040; Task = "Boord Labour Server"; Health = "/" }
+    @{ Name = "Boord Labour"; Port = 8040; Task = "Boord Labour Server"; Health = "/" },
+    @{ Name = "Boord Monitor"; Port = 8050; Task = "Boord Monitor Server"; Health = "/api/version" }
 )
 
 $LogFile   = Join-Path (Join-Path $PSScriptRoot "data") "watchdog.log"
@@ -243,6 +251,33 @@ function Restart-App($app) {
     }
     Write-Log "  $name did not answer on port $($app.Port) within 60 seconds of being started. Will try again next run."
     return $false
+}
+
+# --- A restart asked for by hand ------------------------------------------
+# Before the boot check: a person asking for a restart five minutes after a
+# reboot has looked at the app and decided, which a timer cannot.
+if ($Restart) {
+    $app = $Apps | Where-Object { $_.Name -eq $Restart } | Select-Object -First 1
+    if (-not $app) {
+        Write-Log "Asked to restart '$Restart', which is not one of: $(($Apps | ForEach-Object { $_.Name }) -join ', ')."
+        exit 1
+    }
+    if (-not (Test-TaskRegistered $app.Task)) {
+        Write-Log "Asked to restart $($app.Name), but it is not installed on this PC (no '$($app.Task)' task)."
+        exit 1
+    }
+    $reason = Get-MaintenanceReason
+    if ($reason) {
+        Write-Log "NOT restarting $($app.Name) as asked: $reason. A server is meant to be down during that."
+        exit 2
+    }
+    # Two lines on purpose: Boord Monitor counts "Restarting <name>..." lines
+    # to report how often each app was restarted, and a note on the end of
+    # that line would become part of the name.
+    Write-Log "Restart of $($app.Name) asked for by hand (Boord Monitor)."
+    Write-Log "Restarting $($app.Name)..."
+    if (Restart-App $app) { exit 0 }
+    exit 1
 }
 
 # --- Don't fight the boot ------------------------------------------------
