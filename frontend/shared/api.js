@@ -8,7 +8,7 @@ const Boord = {
   // actually up to date - especially useful given the service workers'
   // cache-first strategy (see field/packhouse/admin service-worker.js).
   // Reset to 2.0 on 2026-08-26 for the Boord rename and clean reinstall.
-  VERSION: "3.15",
+  VERSION: "3.16",
 
   getDeviceId() { return localStorage.getItem("boord_device_id"); },
   // Re-pointing a tablet at a different device slot has to drop the picking
@@ -72,13 +72,46 @@ const Boord = {
       .replace(/'/g, "&#39;");
   },
 
+  // FastAPI's "detail" in words. Most rejections carry a plain sentence, but
+  // a request that fails validation (422) carries a LIST of problems, each
+  // {loc: ["body", "weight_kg"], msg: "Input should be a valid number"}.
+  // Shown raw, that is a lump of JSON in a toast that a picker in an orchard
+  // cannot act on, so only the first problem is shown, named by its field.
+  // Returns null for anything it does not recognise, so callers fall back.
+  _detailText(detail) {
+    if (typeof detail === "string") return detail;
+    if (!Array.isArray(detail) || !detail.length) return null;
+    const first = detail[0];
+    if (typeof first === "string") return first;
+    if (!first || typeof first.msg !== "string" || !first.msg) return null;
+    const loc = Array.isArray(first.loc) ? first.loc : [];
+    const field = loc.length ? loc[loc.length - 1] : null;
+    // "body" or a list index on its own names nothing a person would recognise.
+    if (typeof field === "string" && !["body", "query", "path"].includes(field)) {
+      return `${field.replace(/_/g, " ")}: ${first.msg}`;
+    }
+    return first.msg;
+  },
+
   // The human-readable half of a server rejection. api() attaches FastAPI's
   // JSON "detail" (or the raw body) as e.detail, so showing e.message raw
   // would hand the user a status code and a lump of JSON. Errors that did
   // not come from api() are still parsed out of `${status} ${body}` if they
   // are shaped that way, and otherwise shown whole.
   errorDetail(e, fallback = "Something went wrong") {
-    if (e && typeof e.detail === "string") return e.detail.trim() || fallback;
+    if (e && typeof e.detail === "string") {
+      // An older caller (or a body api() could not parse) may still hand over
+      // the raw JSON text; read it rather than showing it.
+      try {
+        const text = Boord._detailText(JSON.parse(e.detail).detail);
+        if (text) return text;
+      } catch (_) { /* plain text - shown as it is */ }
+      return e.detail.trim() || fallback;
+    }
+    if (e && e.detail != null) {
+      const text = Boord._detailText(e.detail);
+      if (text) return text;
+    }
     // Read .message directly rather than `e.message || e`: an Error with an
     // empty message would otherwise stringify to the bare word "Error" and
     // that would win over the caller's fallback.
@@ -86,7 +119,10 @@ const Boord = {
     const body = raw.replace(/^\d{3}\s*/, "");
     try {
       const parsed = JSON.parse(body);
-      if (parsed && typeof parsed.detail === "string") return parsed.detail;
+      const text = parsed ? Boord._detailText(parsed.detail) : null;
+      if (text) return text;
+      // JSON, but not a shape we know: never show it raw.
+      return fallback;
     } catch (_) { /* not JSON - fall through to the raw text */ }
     return body.trim() || fallback;
   },
@@ -210,7 +246,8 @@ const Boord = {
       err.detail = text;
       try {
         const parsed = JSON.parse(text);
-        if (parsed && typeof parsed.detail === "string") err.detail = parsed.detail;
+        const detail = parsed ? Boord._detailText(parsed.detail) : null;
+        if (detail) err.detail = detail;
       } catch (_) { /* not JSON - the body text is the detail */ }
       throw err;
     }
@@ -240,14 +277,60 @@ const Boord = {
     return isNaN(d.getTime()) ? null : d;
   },
 
+  // Every date, time, rand amount and weight a person reads goes through the
+  // fmt* helpers below, all pinned to en-ZA. Left to the device, the same
+  // number came out three ways: a tablet set to US English showed 1:46:21 PM,
+  // the admin PC showed 13:46:21, and a phone showed 08/08/2026 - which in
+  // South Africa reads as the 8th of August but in the US as the 8th of
+  // anything. A wage slip that reads differently on two screens is a dispute
+  // at the packhouse door, so everything reads the way a South African writes
+  // it: 24-hour time, day before month, "R 1 234,50". Times drop the seconds;
+  // nobody needs them, and they make a crate list harder to scan.
+  //
+  // Exports (CSV/XLSX), values sent to the server and values put into input
+  // fields must NOT use these: those are read by machines, which want
+  // "1234.50", not "1 234,50".
+  _dateOnly(value) {
+    // A bare "YYYY-MM-DD" is a calendar date. new Date() would read it as UTC
+    // midnight, which is the previous evening anywhere west of Greenwich, so
+    // it is built from its parts in local time instead.
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value == null ? "" : value).trim());
+    return m ? new Date(+m[1], +m[2] - 1, +m[3]) : Boord.parseServerDate(value);
+  },
+
   fmtDateTime(value, fallback = "") {
     const d = Boord.parseServerDate(value);
-    return d ? d.toLocaleString() : fallback;
+    return d ? d.toLocaleString("en-ZA", {
+      day: "numeric", month: "short", year: "numeric",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }) : fallback;
+  },
+
+  fmtDate(value, fallback = "") {
+    const d = Boord._dateOnly(value);
+    return d ? d.toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" }) : fallback;
   },
 
   fmtTime(value, fallback = "") {
     const d = Boord.parseServerDate(value);
-    return d ? d.toLocaleTimeString() : fallback;
+    return d ? d.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", hour12: false }) : fallback;
+  },
+
+  // A plain number for a table column already headed "Kg" or "Hours".
+  fmtNum(n, maxDigits = 1) {
+    const v = Number(n);
+    if (!isFinite(v)) return "-";
+    return v.toLocaleString("en-ZA", { maximumFractionDigits: maxDigits });
+  },
+
+  fmtRand(n) {
+    const v = Number(n);
+    if (!isFinite(v)) return "-";
+    return "R " + v.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
+  fmtKg(n) {
+    return Boord.fmtNum(n, 1) + " kg";
   },
 
   // "Today" as the farm sees it, formatted for a date input. toISOString()
@@ -398,18 +481,28 @@ const Boord = {
     location.reload();
   },
 
+  // A toast is the only thing most rejections ever show, so it must last
+  // long enough to read. A flat 2.2 s was fine for "Saved" and gone before
+  // anyone got halfway through "That worker is not registered at this
+  // station", so it stays up longer the more it says, capped at 6 s so a long
+  // one does not sit over the keypad. role="status" makes a screen reader
+  // announce it without stealing focus from what the user is doing.
   toast(message) {
     let el = document.getElementById("boord-toast");
     if (!el) {
       el = document.createElement("div");
       el.id = "boord-toast";
       el.className = "toast";
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
       document.body.appendChild(el);
     }
-    el.textContent = message;
+    const text = String(message == null ? "" : message);
+    el.textContent = text;
     el.classList.add("show");
     clearTimeout(el._timer);
-    el._timer = setTimeout(() => el.classList.remove("show"), 2200);
+    const ms = Math.min(6000, 2200 + 40 * text.length);
+    el._timer = setTimeout(() => el.classList.remove("show"), ms);
   },
 
   // Short synthesized tones (no audio files needed, works fully offline).

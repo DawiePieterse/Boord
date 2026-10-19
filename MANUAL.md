@@ -1291,9 +1291,9 @@ straight into a role's screen.
 
 ### Installing as an app icon (optional, recommended)
 
-Each of the three screens - Field, Pack House, Admin - is a small
-installable app (a "PWA") with its own name and icon, so a device can show
-"Veld", "Pakhuis", or "Admin" on its home screen like any
+Each of the three screens - Field, Receiving (the pack house), Admin - is a
+small installable app (a "PWA") with its own name and icon, so a device can
+show "Field", "Receiving", or "Admin" on its home screen like any
 other app, instead of a browser tab/bookmark. This isn't required (the
 browser bookmark/URL works fine on its own), but it makes the right screen
 one tap away and avoids anyone confusing a browser address bar with the

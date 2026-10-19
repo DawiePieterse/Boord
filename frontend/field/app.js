@@ -364,7 +364,7 @@ async function undoLastCrate() {
   const last = crates.reduce((a, b) => (b.timestamp > a.timestamp ? b : a));
   const worker = (Boord.getCachedJSON("boord_cached_workers") || []).find((w) => w.id === last.worker_id);
   const who = worker ? (worker.name || worker.id) : last.worker_id;
-  if (!confirm(`Undo the last crate?\n\n${who} - block ${last.block_id} - ${Number(last.weight_kg).toFixed(1)} kg`)) return;
+  if (!confirm(`Undo the last crate?\n\n${who} - block ${last.block_id} - ${Boord.fmtKg(last.weight_kg)}`)) return;
   // Queued before the local delete: if the delete then fails the crate is
   // still on screen, and the server delete is harmless either way.
   setPendingUndos([...getPendingUndos(), last.uuid]);
@@ -409,7 +409,7 @@ async function renderLot() {
   const totalKg = crates.reduce((s, c) => s + c.weight_kg - (c.deduction_kg || 0), 0);
   document.getElementById("crateCount").textContent =
     `${crateCount} ${crateCount === 1 ? "crate" : "crates"}`;
-  document.getElementById("totalKg").textContent = `${totalKg.toFixed(1)} kg`;
+  document.getElementById("totalKg").textContent = Boord.fmtKg(totalKg);
 
   _lotFirstCrateAt = crateCount
     ? crates.reduce((min, c) => (c.timestamp < min ? c.timestamp : min), crates[0].timestamp)
@@ -418,7 +418,7 @@ async function renderLot() {
 
   const recentCrates = [...crates].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 5);
   document.getElementById("recentList").innerHTML = recentCrates
-    .map((r) => `<div class="flex justify-between border-b py-1"><span>${Boord.escapeHtml(r.block_id)}</span><span>${Number(r.weight_kg).toFixed(1)} kg</span><span>${r.synced ? "✓ synced" : "⏳ pending"}</span></div>`)
+    .map((r) => `<div class="flex justify-between border-b py-1"><span>${Boord.escapeHtml(r.block_id)}</span><span>${Boord.fmtKg(r.weight_kg)}</span><span>${r.synced ? "✓ synced" : "⏳ pending"}</span></div>`)
     .join("") || `<div class="text-slate-400">No crates yet</div>`;
 }
 
@@ -723,7 +723,7 @@ function addDispatchedLot(slip, crates, kg) {
   const today = Boord.localDateStr();
   const cutoff = Boord.localDateStr(new Date(Date.now() - 30 * 86400000));
   const recent = all.filter((d) => d.date >= cutoff);
-  recent.push({ date: today, slip, crates, kg, time: new Date().toLocaleTimeString() });
+  recent.push({ date: today, slip, crates, kg, time: Boord.fmtTime(new Date()) });
   localStorage.setItem(DISPATCHED_KEY, JSON.stringify(recent));
 }
 
@@ -741,19 +741,19 @@ function renderDispatchedLots() {
   listEl.innerHTML = dispatched.map((d) => `
     <div class="flex justify-between border-b py-1">
       <span class="font-mono text-slate-600">${Boord.escapeHtml(d.slip.split("-").slice(-1)[0])}</span>
-      <span>${d.crates} crates / ${Number(d.kg).toFixed(1)} kg</span>
+      <span>${d.crates} crates / ${Boord.fmtKg(d.kg)}</span>
       <span class="text-slate-400">${Boord.escapeHtml(d.time)}</span>
     </div>`).join("");
   const totalCrates = dispatched.reduce((s, d) => s + d.crates, 0);
   const totalKg = dispatched.reduce((s, d) => s + d.kg, 0);
-  summaryEl.textContent = `${dispatched.length} lot${dispatched.length > 1 ? "s" : ""} — ${totalCrates} crates — ${totalKg.toFixed(1)} kg`;
+  summaryEl.textContent = `${dispatched.length} lot${dispatched.length > 1 ? "s" : ""} — ${totalCrates} crates — ${Boord.fmtKg(totalKg)}`;
   summaryEl.classList.remove("hidden");
 }
 
 function showSlipSuccess(slip, crates, kg) {
   const banner = document.getElementById("slipSuccessBanner");
   document.getElementById("slipSuccessDetail").textContent =
-    `${crates} crates — ${kg.toFixed(1)} kg dispatched`;
+    `${crates} crates — ${Boord.fmtKg(kg)} dispatched`;
   banner.classList.remove("hidden");
   setTimeout(() => banner.classList.add("hidden"), 5000);
 }

@@ -18,8 +18,11 @@ function updateBannerClock() {
   const el = document.getElementById("headerDateTime");
   if (!el) return;
   const now = new Date();
-  const dateStr = now.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const timeStr = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  // en-ZA and no seconds, like every other time on the screens (see the fmt*
+  // helpers in shared/api.js). A ticking seconds digit in the header only
+  // drew the eye away from the numbers that matter.
+  const dateStr = now.toLocaleDateString("en-ZA", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const timeStr = Boord.fmtTime(now);
   el.textContent = `${dateStr}  ·  ${timeStr}`;
 }
 
@@ -229,7 +232,7 @@ function renderDashboardEmpty(lots, start, end) {
   document.getElementById("dashEmpty").classList.toggle("hidden", !empty);
   document.getElementById("dashData").classList.toggle("hidden", empty);
   if (!empty) return;
-  const day = (iso) => new Date(`${iso}T00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  const day = (iso) => Boord.fmtDate(iso);
   const supplierSelect = document.getElementById("dashSupplierFilter");
   const forSupplier = supplierSelect.value ? ` for ${supplierSelect.options[supplierSelect.selectedIndex].text}` : "";
   document.getElementById("dashEmptyDetail").textContent = start === end
@@ -258,13 +261,13 @@ function renderDashboardKpis(harvesting, inTransit, received, summary) {
     ["Teams Active", `${summary.active_teams} teams`],
     ["Workers Active", `${summary.active_workers} workers`],
     ["Blocks Active", `${summary.active_blocks} blocks`],
-    ["Total Kg", `${totalKg.toFixed(1)} kg`],
+    ["Total Kg", Boord.fmtKg(totalKg)],
     ["Total Crates", `${totalCrates} crates`],
-    ["Avg Kg/Lot", avgKgPerLot.toFixed(1)],
-    ["Avg Kg/Crate", avgKgPerCrate.toFixed(1)],
-    ["Harvesting", `${h.crates} crates / ${h.kg.toFixed(1)} kg`],
-    ["In Transit", `${t.crates} crates / ${t.kg.toFixed(1)} kg`],
-    ["Received", `${r.crates} crates / ${r.kg.toFixed(1)} kg`],
+    ["Avg Kg/Lot", Boord.fmtNum(avgKgPerLot)],
+    ["Avg Kg/Crate", Boord.fmtNum(avgKgPerCrate)],
+    ["Harvesting", `${h.crates} crates / ${Boord.fmtKg(h.kg)}`],
+    ["In Transit", `${t.crates} crates / ${Boord.fmtKg(t.kg)}`],
+    ["Received", `${r.crates} crates / ${Boord.fmtKg(r.kg)}`],
   ];
   document.getElementById("dashKpiGrid").innerHTML = cards.map(([label, value]) => `
     <div class="bg-white rounded-xl shadow p-4">
@@ -279,27 +282,27 @@ function renderDashboardLists(harvesting, inTransit, received, summary) {
   const t = _lotTotals(inTransit);
   const r = _lotTotals(received);
 
-  document.getElementById("dash-harvesting-title").textContent = `Harvesting - ${h.crates} crates / ${h.kg.toFixed(1)} kg`;
+  document.getElementById("dash-harvesting-title").textContent = `Harvesting - ${h.crates} crates / ${Boord.fmtKg(h.kg)}`;
   document.getElementById("dash-harvesting-body").innerHTML = harvesting.map((l) => `
     <div class="p-3 urgency-${esc(l.urgency)}">
       <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}</span></div>
-      <div class="text-sm">${l.total_crates} crates / ${l.total_kg.toFixed(1)} kg - ${l.age_minutes} min ago</div>
+      <div class="text-sm">${l.total_crates} crates / ${Boord.fmtKg(l.total_kg)} - ${l.age_minutes} min ago</div>
     </div>
   `).join("") || `<div class="p-3 text-sm text-slate-400">Nothing currently being harvested</div>`;
 
-  document.getElementById("dash-intransit-title").textContent = `In transit - ${t.crates} crates / ${t.kg.toFixed(1)} kg`;
+  document.getElementById("dash-intransit-title").textContent = `In transit - ${t.crates} crates / ${Boord.fmtKg(t.kg)}`;
   document.getElementById("dash-intransit-body").innerHTML = inTransit.map((l) => `
     <div class="p-3 urgency-${esc(l.urgency)}">
       <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}</span></div>
-      <div class="text-sm">${l.total_crates} crates / ${l.total_kg.toFixed(1)} kg - ${l.age_minutes} min ago</div>
+      <div class="text-sm">${l.total_crates} crates / ${Boord.fmtKg(l.total_kg)} - ${l.age_minutes} min ago</div>
     </div>
   `).join("") || `<div class="p-3 text-sm text-slate-400">Nothing currently in transit</div>`;
 
-  document.getElementById("dash-received-title").textContent = `Received - ${r.crates} crates / ${r.kg.toFixed(1)} kg`;
+  document.getElementById("dash-received-title").textContent = `Received - ${r.crates} crates / ${Boord.fmtKg(r.kg)}`;
   document.getElementById("dash-received-body").innerHTML = received.map((l) => `
     <button type="button" data-lot-id="${esc(l.id)}" class="received-lot-row w-full text-left p-3 hover:bg-slate-50">
       <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}</span></div>
-      <div class="text-sm text-slate-600">${l.total_crates} crates / ${l.total_kg.toFixed(1)} kg - received ${Boord.fmtDateTime(l.received_at)} <span class="text-blue-700">· view / edit crates</span></div>
+      <div class="text-sm text-slate-600">${l.total_crates} crates / ${Boord.fmtKg(l.total_kg)} - received ${Boord.fmtDateTime(l.received_at)} <span class="text-blue-700">· view / edit crates</span></div>
     </button>
   `).join("") || `<div class="p-3 text-sm text-slate-400">Nothing received in this period</div>`;
   // Rebuilt from scratch on every refresh, so bind after render - the
@@ -315,9 +318,9 @@ function renderDashboardLists(harvesting, inTransit, received, summary) {
       <td class="p-2">${esc(w.name)}</td>
       <td class="p-2">${esc(w.supplier_name)}</td>
       <td class="p-2">${w.crates}</td>
-      <td class="p-2">${w.total_kg.toFixed(1)}</td>
-      <td class="p-2">R${w.amount_due.toFixed(2)}</td>
-      <td class="p-2">${w.avg_kg_crate.toFixed(1)}</td>
+      <td class="p-2">${Boord.fmtNum(w.total_kg)}</td>
+      <td class="p-2">${Boord.fmtRand(w.amount_due)}</td>
+      <td class="p-2">${Boord.fmtNum(w.avg_kg_crate)}</td>
     </tr>
   `).join("") || `<tr><td class="p-2 text-slate-400" colspan="6">No harvest activity in this period</td></tr>`;
 
@@ -326,10 +329,10 @@ function renderDashboardLists(harvesting, inTransit, received, summary) {
     <tr class="border-b">
       <td class="p-2">${esc(b.name)}</td>
       <td class="p-2">${b.crates}</td>
-      <td class="p-2">${b.total_kg.toFixed(1)}</td>
-      <td class="p-2">${b.avg_kg_crate.toFixed(1)}</td>
-      <td class="p-2">${b.avg_kg_tree != null ? b.avg_kg_tree.toFixed(1) : "-"}</td>
-      <td class="p-2">${b.avg_kg_hectare != null ? b.avg_kg_hectare.toFixed(1) : "-"}</td>
+      <td class="p-2">${Boord.fmtNum(b.total_kg)}</td>
+      <td class="p-2">${Boord.fmtNum(b.avg_kg_crate)}</td>
+      <td class="p-2">${b.avg_kg_tree != null ? Boord.fmtNum(b.avg_kg_tree) : "-"}</td>
+      <td class="p-2">${b.avg_kg_hectare != null ? Boord.fmtNum(b.avg_kg_hectare) : "-"}</td>
     </tr>
   `).join("") || `<tr><td class="p-2 text-slate-400" colspan="6">No harvest activity in this period</td></tr>`;
 }
@@ -377,10 +380,10 @@ function renderLotCratesModal() {
   const { lot, crates } = _lotCratesContext;
   document.getElementById("lotCratesTitle").textContent = `Lot ${lot.slip_number}`;
   document.getElementById("lotCratesMeta").textContent =
-    `${lot.total_crates} crates / ${lot.total_kg.toFixed(1)} kg - received ${Boord.fmtDateTime(lot.received_at)}`;
+    `${lot.total_crates} crates / ${Boord.fmtKg(lot.total_kg)} - received ${Boord.fmtDateTime(lot.received_at)}`;
 
   document.getElementById("lotCratesRows").innerHTML = crates.map((c) => {
-    const net = (c.weight_kg - (c.deduction_kg || 0)).toFixed(1);
+    const net = Boord.fmtNum(c.weight_kg - (c.deduction_kg || 0));
     const editedNote = c.edited_at
       ? `<div class="text-[11px] text-amber-700">edited by ${esc(c.edited_by || "admin")}, ${Boord.fmtDateTime(c.edited_at)}</div>`
       : "";
@@ -389,8 +392,8 @@ function renderLotCratesModal() {
         <td class="p-2 whitespace-nowrap">${Boord.fmtTime(c.timestamp)}</td>
         <td class="p-2">${esc(c.block_id || "")}</td>
         <td class="p-2">${esc(_workerName(c.worker_id))}${editedNote}</td>
-        <td class="p-2">${c.weight_kg.toFixed(1)}</td>
-        <td class="p-2">${(c.deduction_kg || 0).toFixed(1)}</td>
+        <td class="p-2">${Boord.fmtNum(c.weight_kg)}</td>
+        <td class="p-2">${Boord.fmtNum(c.deduction_kg || 0)}</td>
         <td class="p-2 font-semibold">${net}</td>
         <td class="p-2 text-right whitespace-nowrap">
           <button class="text-blue-700 text-xs" data-edit-crate="${esc(c.uuid)}">Edit</button>
@@ -422,8 +425,8 @@ function _applyLotTotals(lotTotals) {
 }
 
 async function deleteCrate(crate) {
-  const net = (crate.weight_kg - (crate.deduction_kg || 0)).toFixed(1);
-  if (!confirm(`Delete this crate?\n\n${_workerName(crate.worker_id)} - block ${crate.block_id || "?"} - ${net} kg\n\nThis can't be undone.`)) return;
+  const net = Boord.fmtKg(crate.weight_kg - (crate.deduction_kg || 0));
+  if (!confirm(`Delete this crate?\n\n${_workerName(crate.worker_id)} - block ${crate.block_id || "?"} - ${net}\n\nThis can't be undone.`)) return;
   let result;
   try {
     result = await Boord.api(`/api/harvest-records/${encodeURIComponent(crate.uuid)}`, { method: "DELETE" });
@@ -933,7 +936,7 @@ async function loadSuppliers() {
     <tr class="border-b ${s.active ? "" : "opacity-50"}">
       <td class="p-2">${esc(s.name)}${s.is_own_farm ? ' <span class="text-xs text-blue-700 font-semibold">(Own fruit)</span>' : ""}</td>
       <td class="p-2 text-xs">${esc(s.contact_name || "")}${s.contact_phone ? ` - ${esc(s.contact_phone)}` : ""}</td>
-      <td class="p-2 text-xs">${s.packing_rate_per_kg > 0 ? `R${s.packing_rate_per_kg.toFixed(2)}/kg` : s.packing_rate_per_crate > 0 ? `R${s.packing_rate_per_crate.toFixed(2)}/crate` : "-"}</td>
+      <td class="p-2 text-xs">${s.packing_rate_per_kg > 0 ? `${Boord.fmtRand(s.packing_rate_per_kg)}/kg` : s.packing_rate_per_crate > 0 ? `${Boord.fmtRand(s.packing_rate_per_crate)}/crate` : "-"}</td>
       <td class="p-2">${s.active ? '<span class="text-green-600 text-xs">Active</span>' : '<span class="text-slate-400 text-xs">Inactive</span>'}</td>
       <td class="p-2 text-right"><button class="text-blue-700 text-xs" data-edit="${esc(s.id)}">Edit</button></td>
     </tr>
@@ -1005,14 +1008,14 @@ async function calculateBilling() {
   try {
     const data = await Boord.api(`/api/suppliers/${supplierId}/billing?period_start=${start}&period_end=${end}`);
     const summaryEl = document.getElementById("billingSummary");
-    summaryEl.textContent = `${data.lots.length} lot${data.lots.length === 1 ? "" : "s"} - ${data.total_crates} crates - ${data.total_kg.toFixed(1)} kg - Rate: R${data.rate.toFixed(2)} ${data.rate_type === "per_kg" ? "/kg" : "/crate"} - Amount Due: R${data.amount_due.toFixed(2)}`;
+    summaryEl.textContent = `${data.lots.length} lot${data.lots.length === 1 ? "" : "s"} - ${data.total_crates} crates - ${Boord.fmtKg(data.total_kg)} - Rate: ${Boord.fmtRand(data.rate)} ${data.rate_type === "per_kg" ? "/kg" : "/crate"} - Amount Due: ${Boord.fmtRand(data.amount_due)}`;
     summaryEl.classList.remove("hidden");
     document.getElementById("billingTable").innerHTML = data.lots.map((l) => `
       <tr class="border-b">
         <td class="p-2 font-mono">${esc(l.slip_number)}</td>
         <td class="p-2">${Boord.fmtDateTime(l.received_at)}</td>
         <td class="p-2">${l.crates}</td>
-        <td class="p-2">${l.kg.toFixed(1)}</td>
+        <td class="p-2">${Boord.fmtNum(l.kg)}</td>
       </tr>
     `).join("") || `<tr><td class="p-2 text-slate-400" colspan="4">No received lots in this period</td></tr>`;
   } catch (e) {
@@ -1093,7 +1096,7 @@ function renderPayments(payments) {
     const totalWages = groupPayments.reduce((sum, p) => sum + p.amount_due, 0);
     const summaryRow = `
       <tr class="bg-slate-100 font-semibold">
-        <td class="p-2" colspan="5">${esc(name)} - ${groupPayments.length} worker${groupPayments.length === 1 ? "" : "s"} - ${totalKg.toFixed(1)} kg - R${totalWages.toFixed(2)} total wages</td>
+        <td class="p-2" colspan="5">${esc(name)} - ${groupPayments.length} worker${groupPayments.length === 1 ? "" : "s"} - ${Boord.fmtKg(totalKg)} - ${Boord.fmtRand(totalWages)} total wages</td>
       </tr>
     `;
     const rows = groupPayments.map((p) => {
@@ -1103,9 +1106,9 @@ function renderPayments(payments) {
         <tr class="border-b">
           <td class="p-2 text-xs text-slate-500">${esc(name)}</td>
           <td class="p-2">${esc(displayName)}</td>
-          <td class="p-2">${p.total_kg.toFixed(1)}</td>
-          <td class="p-2">R${p.rate_applied.toFixed(2)}/kg</td>
-          <td class="p-2">R${p.amount_due.toFixed(2)}</td>
+          <td class="p-2">${Boord.fmtNum(p.total_kg)}</td>
+          <td class="p-2">${Boord.fmtRand(p.rate_applied)}/kg</td>
+          <td class="p-2">${Boord.fmtRand(p.amount_due)}</td>
         </tr>
       `;
     }).join("");

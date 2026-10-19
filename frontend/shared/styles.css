@@ -9,7 +9,26 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   /* Keep the browser's native pull-to-refresh out of the way of LWPTR's. */
   overscroll-behavior-y: contain;
+  /* Stops a quick double tap on a keypad (weights, crate counts, PINs) from
+     zooming the page instead of typing two digits. This replaces the old
+     viewport "user-scalable=no", which also killed pinch zoom - and pinch
+     zoom is how older eyes read a small table in bright sun. */
+  touch-action: manipulation;
 }
+
+/* Safe areas. The pages ask for viewport-fit=cover so an installed app can
+   use the whole screen, which puts the top of the header under an iPhone's
+   notch or status bar and the bottom of the page under its home bar. These
+   push the content clear of both and change nothing on a phone without them.
+   They are written against the Tailwind padding class each page uses (two
+   classes outrank Tailwind's one), keeping that padding as the minimum. */
+.boord-header.p-3 { padding-top: max(0.75rem, env(safe-area-inset-top)); }
+.boord-header.p-4 { padding-top: max(1rem, env(safe-area-inset-top)); }
+body.pb-6 { padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)); }
+body.pb-20 { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+/* A bar fixed to the bottom of the screen (a tab bar) grows by the home-bar
+   height so its buttons stay above it. */
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 
 /* Offline banner injected by Boord.offlineBanner() (shared/api.js). */
 .offline-banner {
@@ -65,6 +84,9 @@ body {
 
 .tab-btn { flex: 1; text-align: center; padding: 0.6rem 0; font-size: 0.8rem; }
 .tab-btn.active { color: var(--boord-blue); font-weight: 600; border-bottom: 3px solid var(--boord-blue); }
+/* The current tab of a bottom tab bar, in the brand blue rather than a
+   Tailwind blue that is close to it but not the same. */
+.tab-active { color: var(--boord-blue); font-weight: 600; }
 
 .subtab-btn { padding: 0.4rem 1rem; border-radius: 999px; font-size: 0.85rem; background: #e2e8f0; color: #334155; }
 .subtab-btn.active { background: var(--boord-blue); color: white; font-weight: 600; }
@@ -72,7 +94,7 @@ body {
 .date-preset-btn.active { background: var(--boord-blue); color: white; font-weight: 600; }
 
 .toast {
-  position: fixed; bottom: 5rem; left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: calc(5rem + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
   background: #111827; color: white; padding: 0.6rem 1.2rem; border-radius: 999px;
   font-size: 0.9rem; z-index: 50; opacity: 0; transition: opacity 0.2s;
 }

@@ -145,7 +145,7 @@ function renderQueue(lots) {
         </div>
         <div class="text-right shrink-0 pl-2">
           <div class="font-semibold whitespace-nowrap">${lot.total_crates} crates</div>
-          <div class="font-semibold whitespace-nowrap">${lot.total_kg.toFixed(1)} kg</div>
+          <div class="font-semibold whitespace-nowrap">${Boord.fmtKg(lot.total_kg)}</div>
           <div class="text-xs text-slate-500 whitespace-nowrap">${lot.age_minutes} min ago</div>
         </div>
       </div>
@@ -196,7 +196,7 @@ function renderRelatedLots(lot) {
       <i class="fa-solid fa-triangle-exclamation"></i> Split load - part of this pickup was also sent separately:
     </div>
     ${related.map((r) => `
-      <div class="text-xs text-amber-700">Slip ${Boord.escapeHtml(r.slip_number)} - ${r.total_crates} crates / ${r.total_kg.toFixed(1)} kg - ${statusText(r)}</div>
+      <div class="text-xs text-amber-700">Slip ${Boord.escapeHtml(r.slip_number)} - ${r.total_crates} crates / ${Boord.fmtKg(r.total_kg)} - ${statusText(r)}</div>
     `).join("")}
   `;
 }

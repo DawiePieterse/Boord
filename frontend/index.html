@@ -2,9 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Boord</title>
+<!-- The root page has no manifest or icons of its own: it is the setup page
+     that sends a device on to its screen, and it borrows Field's manifest
+     because a field tablet is what is usually being set up here. The tags
+     below make "Add to Home Screen" on an iPhone match the installed apps -
+     brand-blue bar, the Boord icon, a short name - instead of a screenshot
+     icon labelled with the server's address. -->
 <link rel="manifest" href="field/manifest.json">
+<link rel="icon" href="field/icons/icon-192.png">
+<link rel="apple-touch-icon" href="field/icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Boord">
+<meta name="theme-color" content="#0A2F6B">
 <script src="shared/tailwind.js"></script>
 <link rel="stylesheet" href="shared/styles.css">
 <script src="shared/api.js"></script>
