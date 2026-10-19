@@ -433,6 +433,9 @@ async function openDriverModal() {
   const input = document.getElementById("cratesGoingInput");
   input.value = crates.length;
   input.max = crates.length;
+  const transport = document.getElementById("transportCratesInput");
+  transport.value = crates.length;
+  transport.max = crates.length;
   updateOfflineSplitHint();
   document.getElementById("driverModal").classList.remove("hidden");
   document.getElementById("driverModal").classList.add("flex");
@@ -466,6 +469,8 @@ async function sendPickingSlip() {
   let crates = await IDB.getBySlip(slip);
   if (crates.length === 0) { Boord.toast("No crates logged yet"); return; }
 
+  const transportInput = parseInt(document.getElementById("transportCratesInput").value, 10);
+  if (!(transportInput >= 1)) { Boord.toast("Enter how many crates are being sent"); return; }
   const totalPending = crates.length;
   const cratesGoing = parseInt(document.getElementById("cratesGoingInput").value, 10) || totalPending;
   let didSplit = false;
@@ -500,6 +505,7 @@ async function sendPickingSlip() {
     driver,
     total_crates: crates.length,
     total_kg: totalKg,
+    transport_crates: Math.min(transportInput, crates.length),
     status: "in_transit",
   };
 

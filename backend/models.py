@@ -171,6 +171,9 @@ class Lot(SQLModel, table=True):
     driver: str = ""
     total_crates: int = 0
     total_kg: float = 0.0
+    # Crates actually sent (field combines light crates for transport);
+    # None = same as total_crates. total_crates stays the picking count.
+    transport_crates: Optional[int] = None
     status: LotStatus = LotStatus.created
     notes: str = ""
     received_at: Optional[datetime] = None

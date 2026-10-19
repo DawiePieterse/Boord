@@ -285,7 +285,7 @@ function renderDashboardLists(harvesting, inTransit, received, summary) {
   document.getElementById("dash-harvesting-title").textContent = `Harvesting - ${h.crates} crates / ${Boord.fmtKg(h.kg)}`;
   document.getElementById("dash-harvesting-body").innerHTML = harvesting.map((l) => `
     <div class="p-3 urgency-${esc(l.urgency)}">
-      <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}</span></div>
+      <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}${_blocksText(l)}</span></div>
       <div class="text-sm">${l.total_crates} crates / ${Boord.fmtKg(l.total_kg)} - ${l.age_minutes} min ago</div>
     </div>
   `).join("") || `<div class="p-3 text-sm text-slate-400">Nothing currently being harvested</div>`;
@@ -293,16 +293,16 @@ function renderDashboardLists(harvesting, inTransit, received, summary) {
   document.getElementById("dash-intransit-title").textContent = `In transit - ${t.crates} crates / ${Boord.fmtKg(t.kg)}`;
   document.getElementById("dash-intransit-body").innerHTML = inTransit.map((l) => `
     <div class="p-3 urgency-${esc(l.urgency)}">
-      <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}</span></div>
-      <div class="text-sm">${l.total_crates} crates / ${Boord.fmtKg(l.total_kg)} - ${l.age_minutes} min ago</div>
+      <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}${_blocksText(l)}</span></div>
+      <div class="text-sm">${_crateText(l)} / ${Boord.fmtKg(l.total_kg)} - ${l.age_minutes} min ago</div>
     </div>
   `).join("") || `<div class="p-3 text-sm text-slate-400">Nothing currently in transit</div>`;
 
   document.getElementById("dash-received-title").textContent = `Received - ${r.crates} crates / ${Boord.fmtKg(r.kg)}`;
   document.getElementById("dash-received-body").innerHTML = received.map((l) => `
     <button type="button" data-lot-id="${esc(l.id)}" class="received-lot-row w-full text-left p-3 hover:bg-slate-50">
-      <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}</span></div>
-      <div class="text-sm text-slate-600">${l.total_crates} crates / ${Boord.fmtKg(l.total_kg)} - received ${Boord.fmtDateTime(l.received_at)} <span class="text-blue-700">· view / edit crates</span></div>
+      <div class="font-semibold text-sm">${esc(l.slip_number)} <span class="text-xs font-normal text-slate-500">${esc(l.supplier_name)}${_blocksText(l)}</span></div>
+      <div class="text-sm text-slate-600">${_crateText(l)} / ${Boord.fmtKg(l.total_kg)} - received ${Boord.fmtDateTime(l.received_at)} <span class="text-blue-700">· view / edit crates</span></div>
     </button>
   `).join("") || `<div class="p-3 text-sm text-slate-400">Nothing received in this period</div>`;
   // Rebuilt from scratch on every refresh, so bind after render - the
@@ -375,12 +375,26 @@ function closeLotCratesModal() {
   _lotCratesContext = null;
 }
 
+// "20 picked -> 8 sent" when crates were combined for transport, else "20 crates".
+function _crateText(l) {
+  const sent = l.transport_crates;
+  return sent != null && sent !== l.total_crates ? `${l.total_crates} picked → ${sent} sent` : `${l.total_crates} crates`;
+}
+
+function _blocksText(l) {
+  return l.blocks && l.blocks.length ? ` · Block ${l.blocks.join(", ")}` : "";
+}
+
+function blocksLabelFor(blocks) {
+  return blocks && blocks.length ? `Block ${blocks.join(", ")} - ` : "";
+}
+
 function renderLotCratesModal() {
   if (!_lotCratesContext) return;
   const { lot, crates } = _lotCratesContext;
   document.getElementById("lotCratesTitle").textContent = `Lot ${lot.slip_number}`;
   document.getElementById("lotCratesMeta").textContent =
-    `${lot.total_crates} crates / ${Boord.fmtKg(lot.total_kg)} - received ${Boord.fmtDateTime(lot.received_at)}`;
+    `${blocksLabelFor([...new Set(crates.map((c) => c.block_id).filter(Boolean))].sort())}${_crateText(lot)} / ${Boord.fmtKg(lot.total_kg)} - received ${Boord.fmtDateTime(lot.received_at)}`;
 
   document.getElementById("lotCratesRows").innerHTML = crates.map((c) => {
     const net = Boord.fmtNum(c.weight_kg - (c.deduction_kg || 0));

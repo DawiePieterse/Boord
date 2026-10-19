@@ -12,7 +12,7 @@ from excel_io import XLSX_MEDIA, rows_to_xlsx_bytes
 from models import Block, Device, HarvestRecord, Lot, \
     ReceivingRecord, Supplier, SystemSetting, Team, Worker
 from routers.dashboard import dashboard_summary
-from routers.lots import list_in_transit, list_pending, list_received
+from routers.lots import blocks_by_lot as _blocks_by_lot, list_in_transit, list_pending, list_received
 from routers.payments import harvest_records_between
 from security import require_admin_client
 from timeutil import day_bounds, local_str, to_local
@@ -74,16 +74,6 @@ def _receiving_by_lot(session: Session, lot_ids: list) -> dict:
     for rec in session.exec(select(ReceivingRecord).where(ReceivingRecord.lot_id.in_(lot_ids))).all():
         receiving_by_lot.setdefault(rec.lot_id, rec)
     return receiving_by_lot
-
-
-def _blocks_by_lot(session: Session, lot_ids: list) -> dict:
-    """A lot has no block field of its own - it's stamped per crate, so a
-    slip's block(s) are whatever its HarvestRecords were captured against."""
-    blocks_by_lot = {}
-    for c in session.exec(select(HarvestRecord).where(HarvestRecord.lot_id.in_(lot_ids))).all():
-        if c.block_id:
-            blocks_by_lot.setdefault(c.lot_id, set()).add(c.block_id)
-    return blocks_by_lot
 
 
 @router.get("/daily-harvest")

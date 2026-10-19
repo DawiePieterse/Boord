@@ -117,12 +117,23 @@ function renderCachedQueue() {
 // reads as missing data rather than as not-applicable.
 function lotSubtitleParts(lot) {
   const parts = [];
+  if (lot.blocks && lot.blocks.length) parts.push(blocksLabel(lot));
   if (lot.team_id) parts.push(`Team ${lot.team_id}`);
   if (lot.driver) parts.push(`Driver ${lot.driver}`);
   return parts;
 }
 
 // The same line for the queue card, where the supplier leads in bold.
+// Crates on the truck: the field combines light crates for transport, so this
+// can be fewer than the picking count (total_crates). Old slips have none.
+function sentCrates(lot) {
+  return lot.transport_crates ?? lot.total_crates;
+}
+
+function blocksLabel(lot) {
+  return lot.blocks && lot.blocks.length ? `Block ${lot.blocks.join(", ")}` : "";
+}
+
 function lotSubtitleHtml(lot) {
   const parts = lotSubtitleParts(lot);
   const lead = lot.supplier_name ? `<span class="font-semibold">${Boord.escapeHtml(lot.supplier_name)}</span>` : "";
@@ -144,7 +155,7 @@ function renderQueue(lots) {
           <div class="text-sm text-slate-600">${lotSubtitleHtml(lot)}</div>
         </div>
         <div class="text-right shrink-0 pl-2">
-          <div class="font-semibold whitespace-nowrap">${lot.total_crates} crates</div>
+          <div class="font-semibold whitespace-nowrap">${sentCrates(lot)} crates</div>
           <div class="font-semibold whitespace-nowrap">${Boord.fmtKg(lot.total_kg)}</div>
           <div class="text-xs text-slate-500 whitespace-nowrap">${lot.age_minutes} min ago</div>
         </div>
@@ -209,8 +220,8 @@ function openReceiveModal(lot) {
     ...lotSubtitleParts(lot),
     `dispatched ${lot.age_minutes} min ago`,
   ].filter(Boolean).join(" - ");
-  document.getElementById("expectedCrates").textContent = lot.total_crates;
-  document.getElementById("actualCrates").value = lot.total_crates;
+  document.getElementById("expectedCrates").textContent = sentCrates(lot);
+  document.getElementById("actualCrates").value = sentCrates(lot);
   document.getElementById("notes").value = "";
   document.getElementById("receivedBy").value = Boord.getLastReceivedBy();
   document.querySelectorAll("#conditionOptions input").forEach((cb) => { cb.checked = cb.value === "Good"; });
@@ -241,7 +252,7 @@ async function confirmReceipt() {
       body: {
         lot_id: selectedLot.id,
         timestamp: new Date().toISOString(),
-        expected_crates: selectedLot.total_crates,
+        expected_crates: sentCrates(selectedLot),
         actual_crates: actualCrates,
         condition,
         notes,

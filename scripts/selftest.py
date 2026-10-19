@@ -1125,6 +1125,43 @@ def test_the_empty_slip_cleanup_only_takes_emptied_slips():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_a_slip_sends_fewer_crates_than_were_picked_and_shows_its_blocks():
+    from datetime import timezone  # noqa: E402
+    from fastapi import HTTPException  # noqa: E402
+    from routers.lots import LotIn, list_in_transit, upsert_lot  # noqa: E402
+    from routers.sync import HarvestSyncBatch, sync_harvest  # noqa: E402
+
+    tmp = tempfile.mkdtemp()
+    try:
+        eng = create_engine(f"sqlite:///{os.path.join(tmp, 't.db')}")
+        run_migrations(eng, snapshot=False)
+        now = datetime.now(timezone.utc)
+        with Session(eng) as s:
+            s.add_all([Worker(id="001"), Block(id="15"), Block(id="8a")])
+            s.commit()
+            sync_harvest(HarvestSyncBatch(records=[
+                {"uuid": f"c{i}", "timestamp": now, "worker_id": "001", "block_id": b,
+                 "weight_kg": 10.0, "device_id": "dev1", "slip_number": "S1"}
+                for i, b in enumerate(("15", "15", "8a", "8a"))]), s)
+
+            def send(n):
+                return upsert_lot(LotIn(slip_number="S1", timestamp=now, device_id="dev1", total_crates=4,
+                                        total_kg=40, transport_crates=n, status="in_transit"), s)
+
+            for bad in (0, 5):
+                try:
+                    send(bad)
+                    raise AssertionError(f"transport_crates={bad} was accepted")
+                except HTTPException as e:
+                    assert e.status_code == 400
+            send(2)
+            row = list_in_transit(session=s)[0]
+            assert (row["total_crates"], row["transport_crates"]) == (4, 2), "picking count was overwritten"
+            assert row["blocks"] == ["15", "8a"], f"slip lost its blocks: {row['blocks']}"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _repo_file(relative):
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), relative)
 
@@ -1216,7 +1253,8 @@ def main():
 
     section("Deleted crates")
     for fn in (test_a_deleted_crate_stays_deleted,
-               test_the_empty_slip_cleanup_only_takes_emptied_slips):
+               test_the_empty_slip_cleanup_only_takes_emptied_slips,
+               test_a_slip_sends_fewer_crates_than_were_picked_and_shows_its_blocks):
         check(fn.__name__, fn)
 
     section("Backups")

@@ -26,6 +26,9 @@ class LotIn(SQLModel):
     driver: str = ""
     total_crates: int = 0
     total_kg: float = 0.0
+    # Crates physically sent: the field combines light crates up to ~20kg for
+    # transport, so this is <= total_crates (the picking count worker pay uses).
+    transport_crates: Optional[int] = None
     status: LotStatus = LotStatus.created
     notes: str = ""
 
@@ -44,6 +47,29 @@ class ExternalLotIn(SQLModel):
     total_crates: int
     total_kg: float
     notes: str = ""
+
+
+def blocks_by_lot(session: Session, lot_ids: list) -> dict:
+    """A lot has no block field of its own - it's stamped per crate, so a
+    slip's block(s) are whatever its HarvestRecords were captured against."""
+    result = {}
+    lot_ids = list(lot_ids)
+    if not lot_ids:
+        return result
+    for lot_id, block_id in session.exec(
+            select(HarvestRecord.lot_id, HarvestRecord.block_id)
+            .where(HarvestRecord.lot_id.in_(lot_ids)).distinct()).all():
+        if block_id:
+            result.setdefault(lot_id, set()).add(block_id)
+    return result
+
+
+def _attach_blocks(session: Session, rows: list) -> list:
+    """Adds a sorted `blocks` list to each enriched lot dict."""
+    found = blocks_by_lot(session, [r["id"] for r in rows])
+    for r in rows:
+        r["blocks"] = sorted(found.get(r["id"], ()))
+    return rows
 
 
 def _urgency(age_minutes: float, settings: SystemSetting) -> str:
@@ -209,7 +235,7 @@ def list_pending(supplier_id: Optional[int] = None, period_start: Optional[date]
         enriched["total_kg"] = round(total_kg, 1)
         result.append(enriched)
     result.sort(key=lambda r: r["age_minutes"], reverse=True)
-    return result
+    return _attach_blocks(session, result)
 
 
 @router.get("/in-transit")
@@ -243,7 +269,7 @@ def list_in_transit(supplier_id: Optional[int] = None, period_start: Optional[da
         e["related_lots"] = _related_lots(l, parents_by_slip, children_by_parent_slip, crate_totals)
         enriched.append(e)
     enriched.sort(key=lambda r: r["age_minutes"], reverse=True)
-    return enriched
+    return _attach_blocks(session, enriched)
 
 
 @router.get("/received")
@@ -264,7 +290,7 @@ def list_received(period_start: Optional[date] = None, period_end: Optional[date
     if supplier_id is not None:
         query = query.where(Lot.supplier_id == supplier_id)
     lots = session.exec(query.order_by(Lot.received_at.desc())).all()
-    return [_with_urgency(l, settings, suppliers) for l in lots]
+    return _attach_blocks(session, [_with_urgency(l, settings, suppliers) for l in lots])
 
 
 @router.get("")
@@ -289,7 +315,7 @@ def get_lot(lot_id: int, session: Session = Depends(get_session), _admin=Depends
     crates = session.exec(
         select(HarvestRecord).where(HarvestRecord.lot_id == lot_id).order_by(HarvestRecord.timestamp)
     ).all()
-    return {"lot": lot, "crates": crates}
+    return {"lot": lot, "crates": crates, "blocks": sorted({c.block_id for c in crates if c.block_id})}
 
 
 @router.post("")
@@ -307,6 +333,8 @@ def upsert_lot(lot_in: LotIn, session: Session = Depends(get_session)):
         # device replaying its queued dispatch. Answered 200 so the device
         # stops retrying; nothing is re-created.
         return {"slip_number": lot_in.slip_number, "deleted": True}
+    if lot_in.transport_crates is not None and not 1 <= lot_in.transport_crates <= max(lot_in.total_crates, 1):
+        raise HTTPException(400, "transport_crates must be between 1 and total_crates")
     data = lot_in.model_dump()
     data["total_kg"] = round(data.get("total_kg", 0.0), 1)
     if data.get("supplier_id") is None:
