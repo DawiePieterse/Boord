@@ -571,6 +571,34 @@ async function showOfflineStatus() {
   Boord.setOffline(true);
 }
 
+// Tell the server what this device is still holding unsent, so Boord
+// Monitor can show a tablet sitting on a morning of crates before it is
+// dropped, broken or left in a bakkie - the crates live only here until they
+// sync. Sent after a sync pass while the server is reachable, which includes
+// the worst case: online, but every sync failing. Skipped while offline (it
+// cannot arrive), and throttled to a change in the count or once a minute,
+// since the loop ticks every 10 s. Best effort: a failed report changes
+// nothing about syncing.
+let _lastQueueReport = { at: 0, key: "" };
+const QUEUE_REPORT_MS = 60000;
+async function reportQueue() {
+  const deviceId = Boord.getDeviceId();
+  if (!deviceId || Boord.isOffline() || !navigator.onLine) return;
+  try {
+    const unsynced = await IDB.getUnsynced();
+    const pending = unsynced.length + getPendingLots().length + getPendingUndos().length;
+    const oldest = unsynced.length
+      ? unsynced.reduce((min, c) => (c.timestamp < min ? c.timestamp : min), unsynced[0].timestamp)
+      : null;
+    const key = `${pending}|${oldest}`;
+    if (key === _lastQueueReport.key && Date.now() - _lastQueueReport.at < QUEUE_REPORT_MS) return;
+    await Boord.api(`/api/devices/${encodeURIComponent(deviceId)}/queue`, {
+      method: "POST", body: { pending, oldest },
+    });
+    _lastQueueReport = { at: Date.now(), key };
+  } catch (e) { /* the next pass tries again */ }
+}
+
 let _syncBusy = false;
 let _lastProbe = 0;
 // How stale a reachability check may be before an idle device asks again.
@@ -660,6 +688,8 @@ async function syncLoop() {
       setSyncStatus("pending", "Online - sync failed, retrying");
     }
   } finally {
+    // Inside the busy flag, so a report never overlaps the next pass.
+    await reportQueue();
     _syncBusy = false;
   }
 }
