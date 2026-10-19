@@ -28,7 +28,7 @@ param(
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $urlFile = Join-Path $here "heartbeat_url.txt"
 
-# The four servers that can share this PC. Aliases are what may appear on the
+# The servers that can share this PC. Aliases are what may appear on the
 # left of the "=" in heartbeat_url.txt; they are matched with spaces, hyphens
 # and underscores stripped and case ignored, so "Boord Owner", "boord-owner"
 # and "owner" are all the same key.
@@ -76,7 +76,7 @@ function Send-Ping($url, $body) {
 # The payload is built field by field, on purpose. It would be shorter to
 # forward the endpoint's JSON as-is, and then a field added to /api/version
 # next year would start leaving the farm without anyone deciding it should.
-# That matters more now than it did: this runs against four different
+# That matters more now than it did: this runs against several different
 # applications, and only two of them are ones whose version endpoint was
 # reviewed for what it exposes.
 #
@@ -133,7 +133,7 @@ foreach ($line in (Get-Content $urlFile)) {
         if ($app) {
             $urls[$app.Name] = $matches[2]
         } else {
-            $problems += "'$($matches[1].Trim())' is not an application this knows about, so that line does nothing. Use one of: boord, owner, notes, kudde, labour."
+            $problems += "'$($matches[1].Trim())' is not an application this knows about, so that line does nothing. Use one of: boord, owner, notes, kudde, labour, monitor."
         }
     } elseif ($t -match '^https?://') {
         $bare += $t
