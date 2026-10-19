@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import Field, Session, SQLModel, select
 
 from db import get_session, upsert
 from models import Device, DeviceRole, Team
@@ -61,6 +61,32 @@ def get_device(device_id: str, session: Session = Depends(get_session)):
         if team and team.induna:
             payload["induna"] = team.induna
     return payload
+
+
+class QueueIn(SQLModel):
+    pending: int = Field(ge=0, le=100000)
+    # Capture time of the oldest unsent crate, from the device's clock; None
+    # when nothing is waiting, or only lots/undos are.
+    oldest: Optional[datetime] = None
+
+
+@router.post("/{device_id}/queue")
+def report_queue(device_id: str, body: QueueIn, session: Session = Depends(get_session)):
+    """A device saying what it is still holding unsent. No auth, like
+    GET /{device_id}: devices identify themselves by the id chosen at setup,
+    and the worst a forged report can do is show a wrong count on the
+    monitor - it touches no crate, lot or wage. The field app sends this
+    after each sync pass that reached the server, so a count that stops
+    changing is itself a sign: the device has gone quiet."""
+    device = session.get(Device, device_id)
+    if not device:
+        raise HTTPException(404, "Unknown device id - check Settings > Device Setup")
+    device.queue_pending = body.pending
+    device.queue_oldest = body.oldest if body.pending else None
+    device.queue_reported_at = datetime.now(timezone.utc)
+    session.add(device)
+    session.commit()
+    return {"ok": True}
 
 
 @router.get("")

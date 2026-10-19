@@ -1541,6 +1541,14 @@ syncs anything not yet sent to the server. You do not need to do anything
 to make this happen, and a signal dropout mid-picking has no effect on
 capture.
 
+Until a crate syncs, the tablet holds the only copy. So after each sync
+attempt that reaches the server, the tablet also tells the server how many
+crates, slips and undos it is still holding, and when the oldest unsent
+crate was picked. This is what lets **Boord Monitor** show, on the owner's
+phone, a tablet that has been sitting on unsent crates, before anyone drops
+it, breaks it or leaves it in a bakkie. Nothing changes on the tablet's own
+screen.
+
 ### Sending the load: "Send Picking Slip"
 
 When a truck is ready to take the crates picked so far, tap **Send Picking

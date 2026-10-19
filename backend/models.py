@@ -79,6 +79,17 @@ class Device(SQLModel, table=True):
     data_capturer: str = ""
     active: bool = True
     last_seen: Optional[datetime] = None
+    # What the device last said about its own outbox - crates, lot dispatches
+    # and undos it has captured but the server has not yet accepted. Only the
+    # tablet knows this; the server sees a crate for the first time when it
+    # syncs. Reported by the field app (POST /api/devices/{id}/queue) so that
+    # a tablet sitting on a morning of unsent crates - out of signal, or with
+    # every sync failing - is visible before it is dropped, broken or left in
+    # a bakkie. Read by Boord Monitor. All three are None until the device
+    # first reports; queue_reported_at is the server's clock.
+    queue_pending: Optional[int] = None
+    queue_oldest: Optional[datetime] = None
+    queue_reported_at: Optional[datetime] = None
 
 
 class Supplier(SQLModel, table=True):
