@@ -49,6 +49,21 @@ function Get-PortListeners($port) {
     try {
         $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
         if ($null -eq $conns) { return @() }
+        # Tailscale is not a server that "outlived" its launcher. Kudde,
+        # Labour and the Monitor are published with `tailscale serve
+        # --https=<the same number as their local port>`, so tailscaled listens
+        # on this PC's tailnet address at that port while the app itself
+        # listens on 127.0.0.1. Counting that listener made the port look held
+        # forever: on 2026-10-19 the watchdog stopped Kudde, saw tailscaled.exe
+        # on 8030, called it "not ours" and refused to restart a Kudde that was
+        # down. Only tailscaled is skipped - any other process still counts.
+        $conns = @($conns | Where-Object {
+            $owner = $null
+            try { $owner = Get-Process -Id $_.OwningProcess -ErrorAction Stop } catch { }
+            # A process that cannot be looked up stays in the list: refusing
+            # is the safe direction for a script that runs as SYSTEM.
+            -not ($owner -and $owner.ProcessName -ieq "tailscaled")
+        })
         return @($conns)
     } catch {
         return @()
