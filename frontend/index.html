@@ -38,6 +38,21 @@
   <div id="setupError" class="text-red-600 text-sm mt-3 hidden"></div>
 </div>
 
+<!-- Shown instead of an automatic redirect for a device whose role is Admin.
+     That is the owner's own phone or laptop, and it is also where Field and
+     Packhouse need to be opened from. Field and Packhouse devices never see
+     this: they go straight to their screen, because a picker in the orchard
+     is a tap nobody wants and one more thing that needs the server. -->
+<div id="rolePicker" class="bg-white rounded-2xl shadow p-6 w-full max-w-sm hidden">
+  <div class="text-center mb-6">
+    <div class="text-2xl font-bold" style="color: var(--boord-blue)">Boord</div>
+    <div class="text-sm text-slate-500">Open as</div>
+  </div>
+  <button data-role="admin" class="role-btn w-full boord-btn-primary rounded-lg py-3 font-semibold mb-3">Admin</button>
+  <button data-role="field" class="role-btn w-full border border-slate-300 rounded-lg py-3 font-semibold mb-3">Field</button>
+  <button data-role="packhouse" class="role-btn w-full border border-slate-300 rounded-lg py-3 font-semibold">Packhouse</button>
+</div>
+
 <script>
 function destinationFor(config) {
   return {
@@ -47,10 +62,31 @@ function destinationFor(config) {
   }[config.role] || "admin/";
 }
 
+// Only an Admin device chooses. destinationFor() sends any role it does not
+// know to admin/, so "not field and not packhouse" is exactly the set of
+// devices that land on Admin today.
+function needsPicker(config) {
+  return config.role !== "field" && config.role !== "packhouse";
+}
+
+function showRolePicker() {
+  document.getElementById("setup").classList.add("hidden");
+  const picker = document.getElementById("rolePicker");
+  picker.classList.remove("hidden");
+  picker.querySelectorAll(".role-btn").forEach((btn) => {
+    btn.onclick = () => { location.href = destinationFor({ role: btn.dataset.role }); };
+  });
+}
+
+function openFor(config) {
+  if (needsPicker(config)) showRolePicker();
+  else location.href = destinationFor(config);
+}
+
 async function routeDevice(deviceId) {
   const config = await Boord.fetchDeviceConfig(deviceId);
   Boord.setDeviceId(deviceId);
-  location.href = destinationFor(config);
+  openFor(config);
 }
 
 // The list comes from the server so a device added in Settings -> Master Data can be
@@ -100,7 +136,7 @@ function chosenDeviceId() {
         // would strand a picker at a "type your device ID" prompt in the
         // middle of the orchard, with no way to reach the capture screen.
         const cached = Boord.getCachedDeviceConfig(existing);
-        if (cached) { location.href = destinationFor(cached); return; }
+        if (cached) { openFor(cached); return; }
       }
     }
   }
