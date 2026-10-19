@@ -999,7 +999,7 @@ problem.
 **Step 1 - Create a healthchecks.io check for each application.**
 1. Sign up free at [healthchecks.io](https://healthchecks.io).
 2. Create **one check per application you want watched** - Boord, Boord
-   Owner, Boord Notes, Kudde and Boord Labour can each have their own. Name them so you
+   Owner, Boord Notes, Kudde, Boord Labour and Boord Monitor can each have their own. Name them so you
    can tell them apart in an email at six in the morning ("Boord",
    "Kudde", and so on). Watching only Boord is a perfectly reasonable
    choice; the others are then simply not reported on.
@@ -1033,7 +1033,7 @@ with `#` is a comment. Leave out any application you don't want watched.
 If your file already contains a single URL on its own with no name in
 front of it - which is what installs before v3.8 were told to create -
 **leave it exactly as it is.** A bare URL means Boord, so that file keeps
-working untouched, and you can add the other three as named lines beneath
+working untouched, and you can add the others as named lines beneath
 it.
 
 > **One line may be bare, and it means Boord.** Adding a second
