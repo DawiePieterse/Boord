@@ -1554,7 +1554,7 @@ screen.
 When a truck is ready to take the crates picked so far, tap **Send Picking
 Slip**. You'll be asked for:
 
-- **Crates going now** - defaults to every crate captured so far, but can
+- **Crates harvested** - defaults to every crate captured so far, but can
   be reduced if the truck can't take everything (see "Splitting a load"
   below)
 - **Driver name** - required
@@ -1568,7 +1568,7 @@ screen.
 ### Splitting a load
 
 Sometimes a truck arrives before a picking round is finished. If you enter
-a **Crates going now** value lower than the total captured, the app splits
+a **Crates harvested** value lower than the total captured, the app splits
 the load: the crates going now are dispatched immediately under the
 current slip number, and the remaining crates are automatically rolled
 onto a **new** slip number, ready to combine with whatever gets picked
