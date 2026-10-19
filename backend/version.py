@@ -255,5 +255,14 @@ def version_info() -> dict:
         else current == info["alembic_head"]
     )
     info["backups"] = _backup_summary()
-    info["update"] = _update_status()
+    update = _update_status()
+    # The check file is written by a different process and goes stale the
+    # moment update_server.bat installs the release it found: it still says
+    # "v3.17 is available, server is on v3.15" while the server runs v3.17.
+    # What this process is running is the authority, not the file.
+    if update and info.get("tag") and update.get("latest") == info["tag"]:
+        update["available"] = False
+    if update and info.get("tag"):
+        update["current"] = info["tag"]
+    info["update"] = update
     return info
