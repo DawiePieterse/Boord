@@ -59,7 +59,8 @@ $Apps = @(
     @{ Name = "Boord Notes"; Port = 8020; Task = "Boord Notes Server"; Health = "/" },
     @{ Name = "Kudde";       Port = 8030; Task = "Kudde Server";       Health = "/healthz" },
     @{ Name = "Boord Labour"; Port = 8040; Task = "Boord Labour Server"; Health = "/" },
-    @{ Name = "Boord Monitor"; Port = 8050; Task = "Boord Monitor Server"; Health = "/api/version" }
+    @{ Name = "Boord Monitor"; Port = 8050; Task = "Boord Monitor Server"; Health = "/api/version" },
+    @{ Name = "Boord Packhouse"; Port = 8060; Task = "Boord Packhouse Server"; Health = "/api/version" }
 )
 
 $LogFile   = Join-Path (Join-Path $PSScriptRoot "data") "watchdog.log"
@@ -73,14 +74,15 @@ $PauseFile = Join-Path (Join-Path $PSScriptRoot "data") "watchdog.pause"
 # nothing writing to it (see the header of stop_server.ps1), and a watchdog
 # that helpfully starts it again puts a live server on top of a half-migrated
 # schema. The projects mostly name their scripts the same way, so one list
-# covers them all - but Owner, Labour and Monitor each have their own updater
-# name, and an updater missing here is one the watchdog restarts the server
-# in the middle of.
+# covers them all - but Owner, Labour, Monitor and Packhouse each have their
+# own updater name, and an updater missing here is one the watchdog restarts
+# the server in the middle of.
 $MaintenanceMarkers = @(
     "update_server.bat",
     "update_owner_server.bat",
     "update_labour_server.bat",
     "update_monitor_server.bat",
+    "update_packhouse_server.bat",
     "install.ps1",
     "uninstall.ps1",
     "stop_server.ps1",
@@ -325,7 +327,7 @@ foreach ($app in $Apps) {
 }
 
 if ($checked -eq 0) {
-    Write-Log "No Boord/Kudde/Labour server tasks are registered on this PC - nothing to watch."
+    Write-Log "No Boord suite server tasks are registered on this PC - nothing to watch."
     exit 0
 }
 
