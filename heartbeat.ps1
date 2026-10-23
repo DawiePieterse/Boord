@@ -46,7 +46,8 @@ $Apps = @(
     @{ Name = "Boord Notes"; Port = 8020; Aliases = @("notes","boordnotes"); Health = "/" },
     @{ Name = "Kudde";       Port = 8030; Aliases = @("kudde");             Health = "/healthz" },
     @{ Name = "Boord Labour"; Port = 8040; Aliases = @("labour","boordlabour"); Health = "/" },
-    @{ Name = "Boord Monitor"; Port = 8050; Aliases = @("monitor","boordmonitor"); Health = "/api/version" }
+    @{ Name = "Boord Monitor"; Port = 8050; Aliases = @("monitor","boordmonitor"); Health = "/api/version" },
+    @{ Name = "Boord Packhouse"; Port = 8060; Aliases = @("packhouse","boordpackhouse"); Health = "/" }
 )
 
 if (-not (Test-Path $urlFile)) {
