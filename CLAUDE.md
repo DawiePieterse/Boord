@@ -7,10 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Boord is the farm's harvest app. Field tablets log litchi crates per picker, the pack house checks loads in, and the admin office pays pickers per kg and runs reports. It runs on the farm PC on port **8000**, published by `tailscale serve --https=443`. `MANUAL.md` is the user and admin manual; read it for behaviour, setup and anything user-facing. `TRAINING_*.md` are the training guides, one per role, each with its PDF.
 
 Boord is the hub the sibling apps lean on:
-- **Boord Owner** (8010), **Boord Labour** (8040) and **Boord Monitor** (8050) open `data/boord.db` read-only.
+- **Boord Owner** (8010), **Boord Labour** (8040), **Boord Monitor** (8050) and **Boord Packhouse** (8060) open `data/boord.db` read-only.
 - **Boord Labour** vendors `frontend/shared/`, and its badge QR code holds exactly `worker.id`.
 
-So a schema change here can break a sibling. Labour and Owner refuse to boot if a column they read disappears.
+So a schema change here can break a sibling. Labour, Owner and Packhouse refuse to boot if a column they read disappears.
 
 ## The Boord suite
 
@@ -27,7 +27,7 @@ This app is one of seven that run together on the farm PC (`bekfontein-server`),
 | Boord Packhouse | `boord-packhouse` | After receiving to the truck: sulfur, acid, lines, pre-pack, cold store and PPECB, dispatch. | 8060 | `https://bekfontein-server.taile32cb0.ts.net:8060/` | `~/Documents/Projects/Boord-packhouse` | `C:\Boord-packhouse` |
 
 **How they depend on each other:**
-- **Boord is the hub.** Its `data/boord.db` is opened read-only by Owner (harvest, lots, blocks, suppliers), Labour (the worker register, and Boord's `data/photos` for faces), Monitor (tablet station, last sync and outbox) and, once its modules land, Packhouse (received lots, blocks, suppliers, workers).
+- **Boord is the hub.** Its `data/boord.db` is opened read-only by Owner (harvest, lots, blocks, suppliers), Labour (the worker register, and Boord's `data/photos` for faces), Monitor (tablet station, last sync and outbox) and Packhouse (received lots, blocks, suppliers, workers).
   - Boord is that database's only writer and migrates it at startup.
   - Owner, Labour and Packhouse refuse to boot if a column they read disappears. A Boord migration that drops or renames a column needs those apps updated in step.
 - **Labour's badges are Boord's.** The badge QR holds exactly `worker.id` (`Boord/frontend/admin/print-badge.html`), and Labour and Packhouse vendor Boord's `frontend/shared/`.
