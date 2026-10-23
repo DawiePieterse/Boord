@@ -245,23 +245,30 @@
       <div class="text-right">
         <div id="headerWeather" class="text-sm md:text-base font-semibold text-white/90"></div>
         <div id="appVersion" class="text-xs text-white/60 mt-1"></div>
+        <!-- Boord Labour is a separate app on this same server, port 8040;
+             app.js sets the href. Here rather than among the tabs: it opens
+             another app in a new tab, and in the tab row its long label was
+             what pushed the row past a phone's width. -->
+        <a id="labourLink" target="_blank" rel="noopener"
+           class="inline-flex items-center gap-1 mt-2 px-3 py-1.5 rounded-full bg-white/15 text-white text-xs font-semibold whitespace-nowrap">
+          <i class="fa-solid fa-user-clock"></i> Labour
+          <i class="fa-solid fa-arrow-up-right-from-square text-[0.6rem] opacity-70"></i></a>
       </div>
     </div>
   </div>
 
-  <div class="flex overflow-x-auto bg-white shadow sticky top-0 z-10">
-    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
-    <button class="tab-btn" data-tab="payments">Payments</button>
-    <button class="tab-btn" data-tab="reports">Reports</button>
-    <button class="tab-btn" data-tab="settings">Settings</button>
-    <!-- Not a .tab-btn: bindTabs() would treat it as a tab. Boord Labour is a
-         separate app on this same server, port 8040; app.js sets the href. -->
-    <a id="labourLink" target="_blank" rel="noopener"
-       class="flex-1 text-center py-[0.6rem] text-[0.8rem] text-slate-600 whitespace-nowrap px-2">
-      Packhouse labour <i class="fa-solid fa-arrow-up-right-from-square text-[0.65rem]"></i></a>
-  </div>
+  <!-- A row under the header on a wide screen, a bar along the bottom on a
+       phone (styles.css, .admin-tabs): four words in 0.8rem across a phone's
+       width were small to read and small to hit, and the bottom is where a
+       thumb already is. -->
+  <nav class="admin-tabs">
+    <button class="tab-btn active" data-tab="dashboard"><i class="fa-solid fa-gauge"></i><span>Dashboard</span></button>
+    <button class="tab-btn" data-tab="payments"><i class="fa-solid fa-money-bill-wave"></i><span>Payments</span></button>
+    <button class="tab-btn" data-tab="reports"><i class="fa-solid fa-chart-column"></i><span>Reports</span></button>
+    <button class="tab-btn" data-tab="settings"><i class="fa-solid fa-gear"></i><span>Settings</span></button>
+  </nav>
 
-  <div class="p-4 max-w-7xl mx-auto">
+  <div class="admin-main p-4 max-w-7xl mx-auto">
 
     <!-- DASHBOARD -->
     <div id="tab-dashboard" class="tab-content space-y-4">
@@ -373,26 +380,41 @@
     <div id="tab-settings" class="tab-content hidden space-y-4">
       <div id="masterdata-section" class="bg-white rounded-xl shadow p-4 space-y-4">
         <div class="font-semibold">Master Data</div>
-        <div class="flex overflow-x-auto gap-2">
-          <button class="subtab-btn active" data-subtab="workers">Workers</button>
-          <button class="subtab-btn" data-subtab="teams">Teams</button>
-          <button class="subtab-btn" data-subtab="blocks">Blocks</button>
-          <button class="subtab-btn" data-subtab="devices">Devices</button>
-          <button class="subtab-btn" data-subtab="suppliers">Suppliers</button>
+        <!-- Five equal buttons, icon over name, on a phone; a row of pills on a
+             wide screen (styles.css, .masterdata-tabs). A sideways-scrolling
+             row hid the last ones off the edge of a phone, and a wrapping one
+             left a ragged three-and-two. -->
+        <div class="masterdata-tabs">
+          <button class="subtab-btn active" data-subtab="workers"><i class="fa-solid fa-users"></i><span>Workers</span></button>
+          <button class="subtab-btn" data-subtab="teams"><i class="fa-solid fa-people-group"></i><span>Teams</span></button>
+          <button class="subtab-btn" data-subtab="blocks"><i class="fa-solid fa-tree"></i><span>Blocks</span></button>
+          <button class="subtab-btn" data-subtab="devices"><i class="fa-solid fa-tablet-screen-button"></i><span>Devices</span></button>
+          <button class="subtab-btn" data-subtab="suppliers"><i class="fa-solid fa-truck"></i><span>Suppliers</span></button>
         </div>
 
         <div id="subtab-workers" class="subtab-content space-y-3">
+          <!-- Grouped by what they do - the list, badges, the file - rather
+               than seven buttons of different widths wrapping wherever they
+               happened to fall on a phone. -->
           <div class="flex flex-wrap gap-2 items-end">
-            <button data-action="export-workers-xlsx" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Export .xlsx</button>
-            <label class="px-3 py-2 bg-slate-200 rounded-lg text-sm cursor-pointer">Import <input type="file" id="importWorkers" class="hidden" accept=".csv,.xlsx"></label>
-            <div>
+            <div class="flex-1 min-w-[10rem] md:flex-none md:w-64">
               <label class="text-xs text-slate-500 block">Filter by supplier</label>
-              <select id="workerSupplierFilter" class="border border-slate-300 rounded-lg p-2 text-sm"></select>
+              <select id="workerSupplierFilter" class="w-full border border-slate-300 rounded-lg p-2 text-sm"></select>
             </div>
-            <button data-action="print-filtered" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Print Badges (filtered)</button>
-            <button data-action="print-selected" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Print Badges (selected)</button>
-            <button data-action="print-all" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Print Badges (all)</button>
-            <button data-action="new-worker" class="px-3 py-2 boord-btn-primary rounded-lg text-sm ml-auto">+ Add Worker</button>
+            <button data-action="new-worker" class="md-btn boord-btn-primary"><i class="fa-solid fa-plus"></i> Add Worker</button>
+          </div>
+          <div class="md-actions">
+            <div class="md-group md-group-3">
+              <div class="md-group-label"><i class="fa-solid fa-print"></i> Print badges</div>
+              <button data-action="print-filtered" class="md-btn bg-slate-200">Filtered</button>
+              <button data-action="print-selected" class="md-btn bg-slate-200">Selected</button>
+              <button data-action="print-all" class="md-btn bg-slate-200">All</button>
+            </div>
+            <div class="md-group md-group-2">
+              <div class="md-group-label">Spreadsheet</div>
+              <button data-action="export-workers-xlsx" class="md-btn bg-slate-200"><i class="fa-solid fa-file-export"></i> Export</button>
+              <label class="md-btn bg-slate-200 cursor-pointer"><i class="fa-solid fa-file-import"></i> Import <input type="file" id="importWorkers" class="hidden" accept=".csv,.xlsx"></label>
+            </div>
           </div>
           <div class="bg-white rounded-xl shadow overflow-x-auto">
             <table class="w-full text-sm">
@@ -409,21 +431,25 @@
         </div>
 
         <div id="subtab-teams" class="subtab-content hidden space-y-3">
-          <button data-action="new-team" class="px-3 py-2 boord-btn-primary rounded-lg text-sm">+ Add Team</button>
+          <div class="flex"><button data-action="new-team" class="md-btn boord-btn-primary ml-auto"><i class="fa-solid fa-plus"></i> Add Team</button></div>
           <div class="bg-white rounded-xl shadow overflow-x-auto">
             <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="p-2">Id</th><th class="p-2">Name</th><th class="p-2">Induna</th><th class="p-2">Active</th><th></th></tr></thead><tbody id="teamsTable"></tbody></table>
           </div>
         </div>
 
         <div id="subtab-blocks" class="subtab-content hidden space-y-3">
-          <div class="flex flex-wrap gap-2">
-            <button data-action="export-blocks-xlsx" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Export .xlsx</button>
-            <label class="px-3 py-2 bg-slate-200 rounded-lg text-sm cursor-pointer">Import <input type="file" id="importBlocks" class="hidden" accept=".csv,.xlsx"></label>
-            <label class="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600">
-              <input type="checkbox" id="importBlocksReplace">
-              Replace all (deactivate blocks not in the file)
-            </label>
-            <button data-action="new-block" class="px-3 py-2 boord-btn-primary rounded-lg text-sm ml-auto">+ Add Block</button>
+          <div class="flex"><button data-action="new-block" class="md-btn boord-btn-primary ml-auto"><i class="fa-solid fa-plus"></i> Add Block</button></div>
+          <div class="md-actions">
+            <div class="md-group md-group-2">
+              <div class="md-group-label">Spreadsheet</div>
+              <button data-action="export-blocks-xlsx" class="md-btn bg-slate-200"><i class="fa-solid fa-file-export"></i> Export</button>
+              <label class="md-btn bg-slate-200 cursor-pointer"><i class="fa-solid fa-file-import"></i> Import <input type="file" id="importBlocks" class="hidden" accept=".csv,.xlsx"></label>
+              <!-- Under the Import button it changes, not off to one side. -->
+              <label class="col-span-2 flex items-center gap-1.5 text-sm text-slate-600">
+                <input type="checkbox" id="importBlocksReplace" class="w-4 h-4">
+                Import replaces all (deactivates blocks not in the file)
+              </label>
+            </div>
           </div>
           <div class="bg-white rounded-xl shadow overflow-x-auto">
             <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="p-2">Id</th><th class="p-2">Variety</th><th class="p-2">Trees</th><th class="p-2">Hectares</th><th class="p-2">Supplier</th><th class="p-2">Active</th><th></th></tr></thead><tbody id="blocksTable"></tbody></table>
@@ -431,7 +457,7 @@
         </div>
 
         <div id="subtab-devices" class="subtab-content hidden space-y-3">
-          <button data-action="new-device" class="px-3 py-2 boord-btn-primary rounded-lg text-sm">+ Add Device</button>
+          <div class="flex"><button data-action="new-device" class="md-btn boord-btn-primary ml-auto"><i class="fa-solid fa-plus"></i> Add Device</button></div>
           <div class="bg-white rounded-xl shadow overflow-x-auto">
             <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="p-2">Id</th><th class="p-2">Role</th><th class="p-2">Station</th><th class="p-2">Team</th><th class="p-2">Supplier</th><th class="p-2">Last Seen</th><th></th></tr></thead><tbody id="devicesTable"></tbody></table>
           </div>
@@ -442,7 +468,7 @@
             Growers who deliver fruit into this pack house. Each supplier's lots are
             kept separate from your own harvest everywhere in the dashboard and reports.
           </div>
-          <button data-action="new-supplier" class="px-3 py-2 boord-btn-primary rounded-lg text-sm">+ Add Supplier</button>
+          <div class="flex"><button data-action="new-supplier" class="md-btn boord-btn-primary ml-auto"><i class="fa-solid fa-plus"></i> Add Supplier</button></div>
           <div class="bg-white rounded-xl shadow overflow-x-auto">
             <table class="w-full text-sm">
               <thead><tr class="text-left border-b">
