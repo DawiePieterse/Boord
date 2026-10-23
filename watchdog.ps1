@@ -72,11 +72,15 @@ $PauseFile = Join-Path (Join-Path $PSScriptRoot "data") "watchdog.pause"
 # stops the server on purpose so Alembic can migrate the database with
 # nothing writing to it (see the header of stop_server.ps1), and a watchdog
 # that helpfully starts it again puts a live server on top of a half-migrated
-# schema. Every one of these projects names its scripts the same way, so one
-# list covers all four.
+# schema. The projects mostly name their scripts the same way, so one list
+# covers them all - but Owner, Labour and Monitor each have their own updater
+# name, and an updater missing here is one the watchdog restarts the server
+# in the middle of.
 $MaintenanceMarkers = @(
     "update_server.bat",
     "update_owner_server.bat",
+    "update_labour_server.bat",
+    "update_monitor_server.bat",
     "install.ps1",
     "uninstall.ps1",
     "stop_server.ps1",

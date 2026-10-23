@@ -49,7 +49,17 @@ function Get-PortListeners($port) {
     try {
         $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
         if ($null -eq $conns) { return @() }
-        return @($conns)
+        # `tailscale serve --https=<port>` makes tailscaled listen on the same
+        # port, bound to the PC's Tailscale address. Kudde, Labour and Monitor
+        # are served that way (MANUAL.md), and watchdog.ps1 stops them with
+        # this script. That listener is the app's front door, not a competing
+        # server, and it stays up while the app restarts - counted here, the
+        # port never read as free, the "is it ours?" check below refused it,
+        # and the watchdog could never restart those apps. Every app binds
+        # loopback or all interfaces, so only those listeners can be its own.
+        # (Kudde's own copy found this first.)
+        $own = @('0.0.0.0', '::', '127.0.0.1', '::1')
+        return @($conns | Where-Object { $own -contains $_.LocalAddress })
     } catch {
         return @()
     }
