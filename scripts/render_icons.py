@@ -12,6 +12,7 @@ so their icons are only rendered when you say where to put them:
     python3 scripts/render_icons.py --owner ../BoordOwner/frontend/icons
     python3 scripts/render_icons.py --notes ../BoordNotes/frontend/app/icons
     python3 scripts/render_icons.py --labour ../Boord-labour/frontend/icons
+    python3 scripts/render_icons.py --packhouse ../Boord-packhouse/frontend/icons
 
 Needs Pillow. The mark is drawn at 4x and downsampled, so no vector tooling
 is required on the machine that builds it.
@@ -30,6 +31,7 @@ GREEN = (22, 163, 74, 255)    # --boord-green  #16a34a
 YELLOW = (234, 179, 8, 255)   # --boord-yellow #eab308
 SKY = (56, 189, 248, 255)     # --boord-sky    #38bdf8
 VIOLET = (192, 132, 252, 255) # Labour's leaf  #c084fc
+ORANGE = (251, 146, 60, 255)  # Packhouse's leaf #fb923c
 WHITE = (255, 255, 255, 255)
 
 # Same crate for every app; the leaf colour tells them apart on a home
@@ -51,6 +53,11 @@ NOTES_LEAF = SKY
 # left that doesn't sit next to an existing leaf - orange or pink would read
 # as Field's red or Admin's yellow at 48px, teal as Notes' sky.
 LABOUR_LEAF = VIOLET
+# Packhouse (the app, not Boord's in-repo receiving screen) came after Labour,
+# with no clear hue left. Orange sits between Field's red and Admin's yellow,
+# but nobody has those three on one home screen: Packhouse's own tablets
+# don't run Boord's Field or Admin.
+PACKHOUSE_LEAF = ORANGE
 
 SIZES = (512, 192, 180)
 SS = 4          # supersampling factor
@@ -221,6 +228,9 @@ def main():
     ap.add_argument("--labour", metavar="DIR",
                     help="also render the Labour icon into DIR "
                          "(Boord-labour's frontend/icons)")
+    ap.add_argument("--packhouse", metavar="DIR",
+                    help="also render the Packhouse icon into DIR "
+                         "(Boord-packhouse's frontend/icons)")
     args = ap.parse_args()
 
     for app, leaf_colour in APPS.items():
@@ -234,6 +244,9 @@ def main():
 
     if args.labour:
         write(render(LABOUR_LEAF), args.labour)
+
+    if args.packhouse:
+        write(render(PACKHOUSE_LEAF), args.packhouse)
 
 
 if __name__ == "__main__":

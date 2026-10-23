@@ -46,7 +46,8 @@ $Apps = @(
     @{ Name = "Boord Notes"; Port = 8020; Aliases = @("notes","boordnotes"); Health = "/" },
     @{ Name = "Kudde";       Port = 8030; Aliases = @("kudde");             Health = "/healthz" },
     @{ Name = "Boord Labour"; Port = 8040; Aliases = @("labour","boordlabour"); Health = "/" },
-    @{ Name = "Boord Monitor"; Port = 8050; Aliases = @("monitor","boordmonitor"); Health = "/api/version" }
+    @{ Name = "Boord Monitor"; Port = 8050; Aliases = @("monitor","boordmonitor"); Health = "/api/version" },
+    @{ Name = "Boord Packhouse"; Port = 8060; Aliases = @("packhouse","boordpackhouse"); Health = "/api/version" }
 )
 
 if (-not (Test-Path $urlFile)) {
@@ -133,7 +134,7 @@ foreach ($line in (Get-Content $urlFile)) {
         if ($app) {
             $urls[$app.Name] = $matches[2]
         } else {
-            $problems += "'$($matches[1].Trim())' is not an application this knows about, so that line does nothing. Use one of: boord, owner, notes, kudde, labour, monitor."
+            $problems += "'$($matches[1].Trim())' is not an application this knows about, so that line does nothing. Use one of: boord, owner, notes, kudde, labour, monitor, packhouse."
         }
     } elseif ($t -match '^https?://') {
         $bare += $t
