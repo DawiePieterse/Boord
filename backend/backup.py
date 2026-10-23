@@ -53,8 +53,8 @@ STATE_PATH = os.path.join(BACKUPS_DIR, "last_backup.json")
 # unauthenticated device and round-tripped whole by PUT /api/system-settings,
 # which blanks any field the form does not know about - see models.py.
 #
-# The same one-line-in-data\ idiom as data/release_key.fpr and
-# heartbeat_url.txt. No file means the feature is off.
+# The same one-line-in-data\ idiom as data/release_key.fpr. No file means
+# the feature is off.
 COPY_DEST_FILE = os.path.join(DATA_DIR, "backup_copy_to.txt")
 OFFSITE_STATE_PATH = os.path.join(BACKUPS_DIR, "last_offsite_copy.json")
 REPO_ROOT = os.path.abspath(os.path.join(DATA_DIR, ".."))

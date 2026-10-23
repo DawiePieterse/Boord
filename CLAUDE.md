@@ -8,10 +8,9 @@ Boord is the farm's harvest app. Field tablets log litchi crates per picker, the
 
 Boord is the hub the sibling apps lean on:
 - **Boord Owner** (8010), **Boord Labour** (8040), **Boord Monitor** (8050) and **Boord Packhouse** (8060) open `data/boord.db` read-only.
-- **Boord Monitor** also reads `data/watchdog.log` and runs `watchdog.ps1 -Restart "<Name>"`.
 - **Boord Labour** vendors `frontend/shared/`, and its badge QR code holds exactly `worker.id`.
 
-So a schema change here can break a sibling. Labour and Owner refuse to boot if a column they read disappears.
+So a schema change here can break a sibling. Labour, Owner and Packhouse refuse to boot if a column they read disappears.
 
 ## The Boord suite
 
@@ -24,19 +23,19 @@ This app is one of seven that run together on the farm PC (`bekfontein-server`),
 | Boord Notes | `boord-notes` | Private farm notebook for Andre and his son, offline-first, optional AI. | 8020 | `https://bekfontein-server.taile32cb0.ts.net:9443/` | `~/Documents/Projects/BoordNotes` | `C:\bekfontein-farm-notebook` |
 | Kudde | `Kudde` | Cattle records: animals and their events. | 8030 | `https://bekfontein-server.taile32cb0.ts.net:8030/` | `~/Documents/Projects/Kudde` | `C:\Kudde` |
 | Boord Labour | `Boord-labour` | Packhouse time clock: badge scans at the door, hourly pay with overtime. | 8040 | `https://bekfontein-server.taile32cb0.ts.net:8040/` | `~/Documents/Projects/Boord-labour` | `C:\Boord-labour` |
-| Boord Monitor | `Boord-monitor` | Watches the PC and the other six apps; Web Push alerts and a Restart button. | 8050 | `https://bekfontein-server.taile32cb0.ts.net:8050/` | `~/Documents/Projects/Boord-monitor` | `C:\boord-monitor` |
+| Boord Monitor | `Boord-monitor` | Watches the PC and the other apps: status page, SLOs, incidents, Web Push alerts, a Restart button; runs the watchdog and heartbeat. | 8050 | `https://bekfontein-server.taile32cb0.ts.net:8050/` | `~/Documents/Projects/Boord-monitor` | `C:\boord-monitor` |
 | Boord Packhouse | `boord-packhouse` | After receiving to the truck: sulfur, acid, lines, pre-pack, cold store and PPECB, dispatch. | 8060 | `https://bekfontein-server.taile32cb0.ts.net:8060/` | `~/Documents/Projects/Boord-packhouse` | `C:\Boord-packhouse` |
 
 **How they depend on each other:**
 - **Boord is the hub.** Its `data/boord.db` is opened read-only by Owner (harvest, lots, blocks, suppliers), Labour (the worker register, and Boord's `data/photos` for faces), Monitor (tablet station, last sync and outbox) and Packhouse (received lots, blocks, suppliers, workers).
   - Boord is that database's only writer and migrates it at startup.
-  - Owner and Labour refuse to boot if a column they read disappears. A Boord migration that drops or renames a column needs those apps updated in step.
-- **Labour's badges are Boord's.** The badge QR holds exactly `worker.id` (`Boord/frontend/admin/print-badge.html`), and Labour vendors Boord's `frontend/shared/`.
+  - Owner, Labour and Packhouse refuse to boot if a column they read disappears. A Boord migration that drops or renames a column needs those apps updated in step.
+- **Labour's badges are Boord's.** The badge QR holds exactly `worker.id` (`Boord/frontend/admin/print-badge.html`), and Labour and Packhouse vendor Boord's `frontend/shared/`.
 - **Owner asks Notes.** The "Ask the farm notes" bridge calls Notes' `/api/ai/ask` at `OWNER_NOTES_URL` (`http://127.0.0.1:8020`) and can share Notes' `data/anthropic_key.txt`.
-- **Boord keeps the others running.** Boord's `watchdog.ps1` (restarts an app that stops answering) and `heartbeat.ps1` cover all seven.
-  - Their app table (name, port, task, health path) must match Monitor's `backend/apps.py` and the port table above. Change them together.
-  - Monitor reads Boord's `data/watchdog.log`, and its Restart button runs Boord's `watchdog.ps1 -Restart "<Name>"`.
-- **Monitor watches everything.** It shows each app's up/down state and `/api/version`, Tailscale and the PC, and pushes an alert after three failed checks in a row.
+- **Monitor keeps the others running.** Since Monitor 2.0 its `watchdog.ps1` (restarts an app that stops answering) and `heartbeat.ps1` (pings healthchecks.io) cover all seven, as the scheduled tasks "Boord Watchdog" and "Boord Heartbeat". Until then they lived in Boord's repo; Boord's copies are now forwarders to Monitor's.
+  - **The app table is Monitor's `apps.json`, the one copy.** Monitor's `backend/apps.py`, `watchdog.ps1` and `heartbeat.ps1` all read it. Adding or moving an app is one line there plus the port table above; the `tailscale serve` ports are also in Boord's MANUAL.md.
+  - The watchdog stands down while any app's updater (its `updater` in `apps.json`) or an installer runs, and its `-Restart "<Name>"` is what Monitor's Restart button runs. It exits 2 when it stands down.
+- **Monitor watches everything.** It shows each app's up/down state and `/api/version`, Tailscale and the PC, keeps uptime history, SLOs and incidents, and pushes an alert after three failed checks in a row.
   - Every app's `/api/version` keeps the same field names (`tag`, `state`, `frontend_version`), because Monitor and the heartbeat read them all.
   - An off-site copy of the monitor on the owner's Mac alerts when the whole farm PC is unreachable.
 - **Kudde and Notes stand alone.** No other app reads their data. They are only watched and restarted.
@@ -87,7 +86,7 @@ There is no pytest and no CI. `scripts/selftest.py` is the test suite on purpose
 - **Backups** (`backup.py`): a nightly 02:00 zip of the database and worker photos, written only when the data changed. "Backup Now" in Settings is always unconditional.
 - **`/api/version`** (`version.py`) reports the release tag, the frontend `VERSION`, the migration head versus current revision, backups and the update check.
   - Its states are `release`, `ahead`, `reported` and `unknown`.
-  - Boord Monitor, `heartbeat.ps1` and anyone at a tablet read it, so keep the field names stable.
+  - Boord Monitor, its `heartbeat.ps1` and anyone at a tablet read it, so keep the field names stable.
 
 ## The farm PC
 
@@ -100,10 +99,11 @@ There is no pytest and no CI. `scripts/selftest.py` is the test suite on purpose
   - Ending the task ends only the launcher. The uvicorn it started keeps the port, so the new release can't bind it and the old one keeps serving.
   - `stop_server.ps1` waits for the port to come free and stops a leftover only if it runs from this repo's `.venv`.
   - It counts only loopback and all-interface listeners, because `tailscale serve --https=<port>` makes tailscaled listen on the app's own port. That is how Kudde, Labour and Monitor are published.
-- **`watchdog.ps1` and `heartbeat.ps1` cover every app on the PC.**
-  - Their app table (name, port, task, health path) must match Boord Monitor's `backend/apps.py` and the `tailscale serve` port table in MANUAL.md. Change all of them together.
-  - The watchdog stands down while any app's updater or installer runs.
-  - `watchdog.ps1 -Restart "<Name>"` is what Boord Monitor's Restart button runs. It exits 2 when it stands down.
+- **The watchdog and heartbeat moved to Boord Monitor** (its 2.0), with the one app table (`apps.json`) they read.
+  - `watchdog.ps1` and `heartbeat.ps1` here are only forwarders: a "Boord Watchdog" or "Boord Heartbeat" task registered before the move still runs them, and they hand every argument to Monitor's copies (found from the "Boord Monitor Server" task), passing the exit code back. The heartbeat forwarder also copies `heartbeat_url.txt` to Monitor's `data\`. Monitor's `install.bat` re-points both tasks, after which nothing runs them. Delete them once every farm has done that.
+  - So Monitor 2.0 must be on the PC before a Boord release with the forwarders is installed. Without it the watchdog forwarder writes a FAILED line to `data\watchdog.log` and does nothing.
+  - `uninstall.ps1` no longer removes the heartbeat task: it covers every app, not just Boord.
+  - The `tailscale serve` port table in MANUAL.md must still match Monitor's `apps.json`.
 
 ## Frontend
 
@@ -140,7 +140,7 @@ Only for a new PC or a reinstall. An app that is already running is updated, not
    ```bat
    >data\release_key.fpr echo 67C64CFDD584DD140E58AF6E329C9B9DD0562A9D
    ```
-4. Then, once each, double-click `setup_watchdog.bat` (restarts any app on the PC that stops answering), `setup_heartbeat.bat` (the heartbeat) and `setup_update_check.bat` (a daily check that only reports new releases).
+4. Then double-click `setup_update_check.bat` once (a daily check that only reports new releases). The watchdog and the heartbeat are set up by Boord Monitor's `install.bat`.
 5. Publish it on the tailnet, in a Command Prompt opened as administrator:
    ```bat
    tailscale serve --bg --https=443 http://localhost:8000
