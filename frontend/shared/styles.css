@@ -84,12 +84,93 @@ body.pb-20 { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
 
 .tab-btn { flex: 1; text-align: center; padding: 0.6rem 0; font-size: 0.8rem; }
 .tab-btn.active { color: var(--boord-blue); font-weight: 600; border-bottom: 3px solid var(--boord-blue); }
+
+/* Admin's tabs. On a wide screen: the row under the header, each tab an
+   icon beside its name. On a phone: a bar fixed along the bottom, each tab
+   an icon above its name with a thumb-sized target - the row of small words
+   across the top was cramped to read and to hit. The page is padded at the
+   bottom by the bar's height so the last card can be scrolled clear of it.
+   The toast sits at bottom: 5rem, above the bar, so nothing it says is
+   hidden behind it. */
+.admin-tabs {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+.admin-tabs .tab-btn {
+  display: flex; align-items: center; justify-content: center; gap: 0.45rem;
+  color: #475569; font-size: 0.85rem; padding: 0.7rem 0;
+}
+@media (max-width: 767px) {
+  .admin-tabs {
+    position: fixed; top: auto; bottom: 0; left: 0; right: 0;
+    border-top: 1px solid #e2e8f0;
+    box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.08);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .admin-tabs .tab-btn {
+    flex-direction: column; gap: 0.2rem;
+    min-height: 3.5rem; padding: 0.45rem 0 0.35rem;
+    font-size: 0.72rem;
+    border-top: 3px solid transparent;
+  }
+  .admin-tabs .tab-btn i { font-size: 1.25rem; }
+  .admin-tabs .tab-btn.active {
+    border-bottom: none; border-top-color: var(--boord-blue);
+    background: #eff6ff;
+  }
+  /* #app for specificity: Tailwind's p-4 on the same element is injected
+     after this file and would otherwise win. */
+  #app .admin-main { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+}
 /* The current tab of a bottom tab bar, in the brand blue rather than a
    Tailwind blue that is close to it but not the same. */
 .tab-active { color: var(--boord-blue); font-weight: 600; }
 
 .subtab-btn { padding: 0.4rem 1rem; border-radius: 999px; font-size: 0.85rem; background: #e2e8f0; color: #334155; }
 .subtab-btn.active { background: var(--boord-blue); color: white; font-weight: 600; }
+
+/* Admin's Master Data. The subtabs are five equal buttons, icon over name,
+   on a phone - all five in one row at a size a thumb can hit - and the usual
+   pills on a wide screen. */
+.masterdata-tabs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.375rem; }
+.masterdata-tabs .subtab-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+  padding: 0.55rem 0 0.45rem; border-radius: 0.75rem; font-size: 0.72rem;
+}
+.masterdata-tabs .subtab-btn i { font-size: 1.1rem; }
+@media (min-width: 768px) {
+  .masterdata-tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .masterdata-tabs .subtab-btn {
+    flex-direction: row; gap: 0.4rem; padding: 0.4rem 1rem;
+    border-radius: 999px; font-size: 0.85rem;
+  }
+  .masterdata-tabs .subtab-btn i { font-size: 0.85rem; }
+}
+
+/* Master Data's action buttons, grouped by what they act on. A group is a
+   small label over equal-width buttons, so on a phone they line up instead
+   of wrapping at whatever width each label happened to be. On a wide screen
+   the groups sit side by side. */
+.md-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+  padding: 0.55rem 0.9rem; border-radius: 0.5rem; font-size: 0.875rem;
+  white-space: nowrap;
+}
+.md-actions { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; }
+.md-group { display: grid; gap: 0.375rem; flex: 1 1 100%; }
+.md-group-2 { grid-template-columns: repeat(2, 1fr); }
+.md-group-3 { grid-template-columns: repeat(3, 1fr); }
+.md-group-label {
+  grid-column: 1 / -1;
+  font-size: 0.75rem; color: #64748b;
+  display: flex; align-items: center; gap: 0.35rem;
+}
+@media (min-width: 768px) {
+  .md-group { flex: 0 1 auto; grid-auto-columns: max-content; }
+  .md-group-2 { grid-template-columns: repeat(2, max-content); }
+  .md-group-3 { grid-template-columns: repeat(3, max-content); }
+}
 
 .date-preset-btn.active { background: var(--boord-blue); color: white; font-weight: 600; }
 

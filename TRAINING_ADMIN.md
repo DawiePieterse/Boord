@@ -27,8 +27,12 @@ screens. Their own Field and Pack House apps are unaffected and keep
 working on the Wi-Fi exactly as before.
 
 The top bar shows the farm name, today's date/time, and
-current weather. Five tabs run across the top: **Dashboard**,
-**Master Data**, **Payments**, **Reports**, **Settings**.
+current weather, and a **Labour** button that opens Boord Labour (the
+packhouse time clock) in a new tab. There are four tabs: **Dashboard**,
+**Payments**, **Reports**, **Settings**. On a phone they sit along the
+bottom of the screen, each an icon with its name under it; on a computer
+they run across the top, under the top bar. Master Data is inside
+**Settings**.
 
 ---
 
@@ -129,7 +133,7 @@ Five subtabs: **Workers**, **Teams**, **Blocks**, **Devices**,
 
 ### Adding a worker
 
-1. Master Data → Workers → **+ Add Worker**.
+1. Master Data → Workers → **Add Worker**.
 2. Fill in Employee Number, First Name, Last Name, WhatsApp Number, and
    which Farm/Supplier they belong to (leave as "(none)" for your own
    farm's workers).
@@ -142,9 +146,9 @@ Workers scan a QR badge to identify themselves in the Field app — there's
 no other way to select a worker, so every active picker needs one.
 
 1. Master Data → Workers.
-2. Use **Print Badges (filtered)** to print everyone currently shown in
-   the table, **Print Badges (selected)** for just the ones you've
-   ticked, or **Print Badges (all)** for the whole list.
+2. Under **Print badges**, tap **Filtered** to print everyone currently
+   shown in the table, **Selected** for just the ones you've ticked, or
+   **All** for the whole list.
 
 Badges come out 60 × 80 mm, nine to a page — cut along the dashed lines
 and each one fits an ID card holder as-is. **Check the print dialog's
@@ -159,9 +163,9 @@ joins.
 - **Teams** — ID (e.g. "A"), name, induna. Add/edit with the same
   pattern as Workers.
 - **Blocks** — each block's variety, tree count, hectares, and
-  active/inactive. Use **Export .xlsx** / **Import** to bulk-edit many
+  active/inactive. Use **Export** / **Import** (under **Spreadsheet**) to bulk-edit many
   blocks at once from a spreadsheet rather than one at a time. Tick
-  **"Replace all"** before importing only when the file is meant to
+  **"Import replaces all"** before importing only when the file is meant to
   completely replace the block list (e.g. after re-dividing a block) —
   it retires any block not in the file instead of leaving it behind.
 - **Devices** — every phone/tablet/PC that can access the app must be

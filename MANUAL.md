@@ -1590,13 +1590,12 @@ same picking session may arrive separately (see
 
 Badges are what a field device scans to identify a worker (see
 [chapter 4](#4-field-app---capturing-the-harvest)). An admin generates and
-prints them from **Master Data → Workers**:
+prints them from **Master Data → Workers**, with the three buttons under
+**Print badges**:
 
-- **Print Badges (filtered)** - only the workers currently matching the
-  Farm/Supplier filter
-- **Print Badges (selected)** - only the workers with their row checkbox
-  ticked
-- **Print Badges (all)** - every active worker
+- **Filtered** - only the workers currently matching the supplier filter
+- **Selected** - only the workers with their row checkbox ticked
+- **All** - every active worker
 
 Each badge shows the pack house name, the worker's photo (if one's been
 captured - see [chapter 8](#8-admin---master-data)), their name, their
@@ -1817,8 +1816,8 @@ re-divided by variety).
 
 **Import** always adds new block IDs and updates existing ones from the
 file, but never removes anything on its own - a block ID that used to
-exist but isn't in the file just stays as it was. Tick **"Replace all
-(deactivate blocks not in the file)"** before importing when the file is
+exist but isn't in the file just stays as it was. Tick **"Import replaces
+all (deactivates blocks not in the file)"** before importing when the file is
 a complete replacement for the block list (e.g. after re-dividing a block
 into smaller ones by variety) - any currently-active block whose ID isn't
 in the file gets deactivated, not deleted, so historical harvest records
