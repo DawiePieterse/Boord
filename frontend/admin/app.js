@@ -381,8 +381,12 @@ function _crateText(l) {
   return sent != null && sent !== l.total_crates ? `${l.total_crates} picked → ${sent} sent` : `${l.total_crates} crates`;
 }
 
+// "· Block 7, 8a" from the slip's crates. A delivery logged from an outside
+// grower (POST /api/lots/external, slip "EXT-...") has no crates and so no
+// block: say what it is instead, so the gap doesn't read as missing data.
 function _blocksText(l) {
-  return l.blocks && l.blocks.length ? ` · Block ${l.blocks.join(", ")}` : "";
+  if (l.blocks && l.blocks.length) return ` · Block ${esc(l.blocks.join(", "))}`;
+  return String(l.slip_number || "").startsWith("EXT-") ? " · External delivery" : "";
 }
 
 function blocksLabelFor(blocks) {
