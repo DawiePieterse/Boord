@@ -24,7 +24,6 @@ $DataDir = Join-Path $RepoRoot "data"
 $LauncherPath = Join-Path $RepoRoot "start_server.bat"
 $Port = 8000
 $TaskName = "Boord Server"
-$HeartbeatTaskName = "Boord Heartbeat"
 $UpdateCheckTaskName = "Boord Update Check"
 $FirewallRuleName = "Boord Server"
 
@@ -77,14 +76,11 @@ try {
         Write-Ok "No '$TaskName' task registered - nothing to remove"
     }
 
-    Write-Step "Removing the heartbeat task (if it was ever set up)..."
-    cmd /c "schtasks /query /tn ""$HeartbeatTaskName"" >nul 2>&1"
-    if ($LASTEXITCODE -eq 0) {
-        cmd /c "schtasks /delete /tn ""$HeartbeatTaskName"" /f >nul 2>&1"
-        Write-Ok "Removed the '$HeartbeatTaskName' scheduled task"
-    } else {
-        Write-Ok "No heartbeat task registered"
-    }
+    # The "Boord Heartbeat" and "Boord Watchdog" tasks are left alone. They
+    # belong to Boord Monitor since its 2.0 and cover every app on the PC,
+    # not just this one - removing Boord must not stop the others being
+    # watched. Boord Monitor's checks show them; its MANUAL says how to
+    # remove them.
 
     Write-Step "Removing the update-check task (if it was ever set up)..."
     cmd /c "schtasks /query /tn ""$UpdateCheckTaskName"" >nul 2>&1"

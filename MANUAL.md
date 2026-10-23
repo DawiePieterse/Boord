@@ -335,7 +335,7 @@ installing it stays a double-click of `update_server.bat` at a time that
 suits the pack house.
 
 That task deliberately runs as **you**, not as SYSTEM, unlike the server
-and the heartbeat. Fetching from GitHub uses the deploy key in your own
+and Boord Monitor's heartbeat. Fetching from GitHub uses the deploy key in your own
 `%USERPROFILE%\.ssh`, and SYSTEM has a different profile with no key in
 it - a check running as SYSTEM would fail `Permission denied (publickey)`
 every morning, silently, forever. The trade is that the check only runs
@@ -439,7 +439,7 @@ full close-and-reopen afterward to pick up the update - see
 ### Removing Boord from a PC
 
 Double-click **`uninstall.bat`**. It stops and unregisters the auto-start
-Scheduled Task, removes the heartbeat task and the firewall rule, deletes
+Scheduled Task, removes the firewall rule, deletes
 the generated `start_server.bat`, and removes the Python virtual
 environment. It then prints what is still on the machine.
 
@@ -925,6 +925,7 @@ address has to land here. Everything else gets its own port:
 | Kudde | 8030 | `localhost:8030` | `...ts.net:8030/` |
 | Boord Labour | 8040 | `localhost:8040` | `...ts.net:8040/` |
 | Boord Monitor | 8050 | `localhost:8050` | `...ts.net:8050/` |
+| Boord Packhouse | 8060 | `localhost:8060` | `...ts.net:8060/` |
 
 Set every app this PC runs in one go. `tailscale serve status` should then
 list exactly those:
@@ -937,6 +938,7 @@ tailscale serve --bg --https=9443 http://localhost:8020
 tailscale serve --bg --https=8030 http://localhost:8030
 tailscale serve --bg --https=8040 http://localhost:8040
 tailscale serve --bg --https=8050 http://localhost:8050
+tailscale serve --bg --https=8060 http://localhost:8060
 ```
 
 > **`tailscale serve reset` clears every mapping on the machine, including
@@ -987,121 +989,16 @@ this server's access code, and provide the password when prompted.
 
 ### Uptime alerting (email if the server goes down)
 
-Gets you an email if a server is unreachable for more than an hour.
-This can't be done by anything running only on the server PC itself - if
-that PC loses power or its internet entirely, nothing on it can send you
-anything. Instead it uses a **"dead man's switch"**: the server pings an
-outside monitoring service every 10 minutes to say "still alive," and
-that outside service is the one that notices when the pings stop and
-emails you - it's watching for silence, not waiting to be told about a
-problem.
+**This moved to Boord Monitor.** The heartbeat - the scheduled task that
+pings healthchecks.io for each app, so you are emailed when this PC is off
+or off the internet - now runs from Boord Monitor's folder, and its ping
+URLs live in Boord Monitor's `data\heartbeat_url.txt`. Boord Monitor's
+MANUAL.md, chapter "Keeping the apps running", covers setting it up.
 
-**Step 1 - Create a healthchecks.io check for each application.**
-1. Sign up free at [healthchecks.io](https://healthchecks.io).
-2. Create **one check per application you want watched** - Boord, Boord
-   Owner, Boord Notes, Kudde, Boord Labour and Boord Monitor can each have their own. Name them so you
-   can tell them apart in an email at six in the morning ("Boord",
-   "Kudde", and so on). Watching only Boord is a perfectly reasonable
-   choice; the others are then simply not reported on.
-3. On each check, click **Edit** and set **Period** to **10 minutes** and
-   **Grace Time** to **1 hour** - an isolated missed ping (a brief
-   network blip) is tolerated, but if pings stop entirely for over an
-   hour, it emails the account's address.
-4. Copy the ping URL from each check's page (each starts with
-   `https://hc-ping.com/...`). They are different URLs; keep track of
-   which belongs to which.
-
-**Step 2 - Save the ping URLs on the server.**
-Create a text file at `heartbeat_url.txt`, in the same folder as
-`heartbeat.ps1` (the top of the project folder), naming one application
-per line:
-
-```
-boord = https://hc-ping.com/aaaaaaaa-...
-owner = https://hc-ping.com/bbbbbbbb-...
-notes = https://hc-ping.com/cccccccc-...
-kudde = https://hc-ping.com/dddddddd-...
-labour = https://hc-ping.com/eeeeeeee-...
-monitor = https://hc-ping.com/ffffffff-...
-```
-
-The names on the left are `boord`, `owner`, `notes`, `kudde`, `labour` and `monitor`. Case
-doesn't matter and neither do spaces or hyphens, so `Boord Owner` and
-`boord-owner` both work. Blank lines are ignored, and a line starting
-with `#` is a comment. Leave out any application you don't want watched.
-
-If your file already contains a single URL on its own with no name in
-front of it - which is what installs before v3.8 were told to create -
-**leave it exactly as it is.** A bare URL means Boord, so that file keeps
-working untouched, and you can add the others as named lines beneath
-it.
-
-> **One line may be bare, and it means Boord.** Adding a second
-> application by pasting its URL on a line of its own does not work, and
-> the setup script says so rather than letting it silently take over
-> Boord's alerting. Give every URL after the first a name.
-
-This file is deliberately **not** committed to git - like a password,
-each URL is account-specific and shouldn't live in version control
-(`.gitignore` already excludes it). Anyone holding one of these URLs can
-post to your check.
-
-**Step 3 - Register the heartbeat task.**
-Double-click **`setup_heartbeat.bat`**. It registers a Scheduled Task
-("Boord Heartbeat") that runs `heartbeat.ps1` every 10 minutes. For each
-application you listed, it pings that application's check only when the
-app itself actually answers on its own port - so a crashed or hung
-server (not just a powered-off PC) also triggers the alert, since the
-ping is contingent on the app working, not just the PC being on.
-
-The script finishes by reading `heartbeat_url.txt` back and printing
-which applications it will report on. **Read that list.** A mistyped name
-is otherwise completely silent: the line does nothing, that application
-is never reported on, and the absence of alerts looks exactly like an
-application that has been fine all along. To see the same list again at
-any time:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File heartbeat.ps1 -DryRun
-```
-
-That reads the file and pings nothing.
-
-That's it - as long as a check on healthchecks.io keeps receiving pings,
-nothing happens. If that application goes down and stays down past the
-1-hour grace period, healthchecks.io emails the account used to sign up,
-naming the check - which is why it is worth naming them properly in step
-1. The applications are independent: Boord going down does not silence
-Kudde's check or vice versa.
-
-Note that an application listed in `heartbeat_url.txt` but **not
-installed** on this PC will be reported as down, because it genuinely
-isn't answering. If you remove an application from the PC, remove its
-line from the file too.
-
-**What the ping carries.** Each successful ping sends a short line of text
-with it, visible in the check's log on healthchecks.io. It is there so the
-release a site is running can be read from the monitoring account instead
-of phoning someone and asking them to read a screen. Boord, Kudde and
-Boord Labour send it; Boord Owner and Boord Notes have no version endpoint
-and simply ping with nothing attached. It contains exactly:
-
-- the release tag and whether it is a release, a checkout between releases,
-  or unknown
-- the version the app screens display
-- the database schema revision the code expects, and the one the database
-  is actually at - so a farm that never ran its migrations is visible
-- the date of the last backup, and how many are kept
-
-**It contains nothing about any person** - no worker names, WhatsApp
-numbers, photographs or counts, no supplier or block names, no
-crate or lot figures, no coordinates, no file paths and no usernames. The
-pack house's own name is deliberately left out too: the check already
-carries whatever name you gave it in your own account.
-
-> **healthchecks.io is a third party.** Anyone with access to that account
-> can read these lines. The ping URL in `heartbeat_url.txt` is a password
-> in every practical sense - anyone holding it can post to your check.
+If this PC was set up before the move, your `heartbeat_url.txt` in the
+Boord folder is copied across the first time Boord Monitor's `install.bat`
+runs (or the first time the old heartbeat task runs after updating Boord).
+Nothing needs retyping.
 
 ### Keeping the server running
 
@@ -1115,91 +1012,21 @@ adds no backup - that's normal, not a fault.)
 
 **But "leave it running" is not a plan on its own.** Each server on this
 PC is registered to start when Windows starts, and after that nothing
-looks at it again. If the app stops at eleven in the morning - an
-unhandled error, a bad update, Windows reclaiming memory under pressure -
-the scheduled task simply ends, and nothing brings it back until somebody
-reboots the PC. On a pack house floor that is a morning of paper.
+looks at it again. The **watchdog** is what notices an app that has
+stopped and starts it again - every 5 minutes, for every app on the PC.
 
-**The watchdog fixes that.** Double-click **`setup_watchdog.bat`** once.
-It registers a Scheduled Task ("Boord Watchdog") that runs every 5
-minutes and, for each of the servers installed on this PC, checks that
-the port actually answers. Anything that has stopped answering is
-stopped properly and started again. It covers all six applications that
-can share this machine, not only Boord:
+**The watchdog moved to Boord Monitor** too, together with the one table
+of the farm's apps that it, the heartbeat and the monitor all read. Boord
+Monitor's `install.bat` registers it ("Boord Watchdog"), its MANUAL.md
+explains what it does and doesn't do, and its log is Boord Monitor's
+`data\watchdog.log`. To pause it while you work on a server by hand,
+create `data\watchdog.pause` in **Boord Monitor's** folder.
 
-| Application | Port | Scheduled task |
-| --- | --- | --- |
-| Boord | 8000 | Boord Server |
-| Boord Owner | 8010 | Boord Owner Server |
-| Boord Notes | 8020 | Boord Notes Server |
-| Kudde | 8030 | Kudde Server |
-| Boord Labour | 8040 | Boord Labour Server |
-| Boord Monitor | 8050 | Boord Monitor Server |
-
-An application that isn't installed here is skipped, not reported as
-down, so the same file suits a PC running two of them and a PC running
-all four. What it found and what it did is written to
-`data\watchdog.log`.
-
-**Register the watchdog *and* the heartbeat above - they do opposite
-halves of the job.** The watchdog runs on the server PC, so it can fix
-things but can tell you nothing when that PC is off, asleep or off the
-internet. The heartbeat can't fix anything, but it is the only one of the
-two that reaches you when the PC itself is the problem. Neither replaces
-the other.
-
-**What it deliberately won't do.**
-
-- **It won't restart a server over a slow moment.** A single missed check
-  is not an outage - a virus scan can stall a request past ten seconds.
-  It probes three times, fifteen seconds apart, and only acts if all
-  three fail.
-- **It won't restart anything for the first five minutes after a
-  reboot**, while the servers are still starting.
-- **It won't restart anything while an update or an install is
-  running.** `update_server.bat` stops the server *on purpose* so the
-  database migration runs with nothing writing to it; a watchdog that
-  helpfully started it again would put a live server on top of a
-  half-migrated database. It notices those scripts running and stands
-  down.
-- **It won't kill a process it can't prove is ours.** If something else
-  on the PC has taken one of these ports, it refuses to restart and says
-  so in the log, rather than killing an unrelated program with system
-  rights.
-- **It won't restart a server that is merely erroring.** Any HTTP
-  answer - including a 500 - counts as up. Only a refused connection or
-  a timeout counts as down, because a restart cannot fix a bug and taking
-  a working pack house offline to try is the worse trade.
-
-**Pausing it.** If you're working on a server by hand and want it to stay
-down, create an empty file at `data\watchdog.pause` in the Boord folder.
-The watchdog leaves everything alone while that file exists. Delete it
-when you're done - and if you forget, it's ignored after 12 hours and
-normal restarts resume, so a forgotten pause file can't quietly disable
-the thing for a season.
-
-**Checking on it.** To see the current state of all four without waiting
-for the next run, open a terminal in the Boord folder and run:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File watchdog.ps1 -CheckOnly
-```
-
-That reports what is up and what is down and changes nothing.
-
-**Restarting one app on purpose.** Boord Monitor's Restart button runs
-the watchdog with `-Restart`, so a restart asked for from a phone takes
-the same care as an automatic one: it stands down while an update is
-running, and refuses to kill a process it can't prove is that app's. The
-same works from a terminal in the Boord folder:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File watchdog.ps1 -Restart "Boord Owner"
-```
-
-The name is the one in the table above. It exits 0 once the app answers
-again, 2 if it refused because an update or install is running, and 1
-otherwise. Either way it says what it did in `data\watchdog.log`.
+> **Order matters when updating a farm set up before the move:** update
+> Boord Monitor to 2.0 and run its `install.bat` first, then update Boord.
+> Boord's `watchdog.ps1` and `heartbeat.ps1` are now only forwarders to
+> Boord Monitor's copies, so a task still pointing at them keeps working -
+> but only once Boord Monitor 2.0 is on the PC.
 
 ### What happens on first startup
 

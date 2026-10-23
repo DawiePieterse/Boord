@@ -22,7 +22,9 @@ data/update_available.tmp
 # only named paths under data/ are ignored, not data/ itself: without it that
 # password sits one `git add -A` away from being pushed to GitHub.
 data/initial_admin_password.txt
-# Written by watchdog.ps1 - what it found and restarted on this one PC.
+# Written by watchdog.ps1 - what it found and restarted on this one PC. The
+# watchdog moved to Boord Monitor in its 2.0 (its log is in that folder now);
+# these stay ignored because a farm's old files are still here.
 data/watchdog.log
 data/watchdog.log.1
 # Hand-made to tell the watchdog to leave the servers alone while somebody
@@ -34,6 +36,8 @@ data/backups/
 data/reports/
 .DS_Store
 *.pyc
+# The heartbeat's ping URLs, before the heartbeat moved to Boord Monitor
+# (its data\heartbeat_url.txt now). A credential: keep it ignored.
 heartbeat_url.txt
 NEXT_STEPS.md
 # Working file for the admin training deck - the PDFs are what ship.
