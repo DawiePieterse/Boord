@@ -274,8 +274,7 @@ def list_in_transit(supplier_id: Optional[int] = None, period_start: Optional[da
 
 @router.get("/received")
 def list_received(period_start: Optional[date] = None, period_end: Optional[date] = None,
-                   supplier_id: Optional[int] = None, limit: Optional[int] = None,
-                   session: Session = Depends(get_session)):
+                   supplier_id: Optional[int] = None, session: Session = Depends(get_session)):
     """Recently received lots for the dashboard, newest-received first.
 
     period_start/period_end are optional and only applied when both are
@@ -290,10 +289,7 @@ def list_received(period_start: Optional[date] = None, period_end: Optional[date
         query = query.where(Lot.received_at >= start_dt, Lot.received_at <= end_dt)
     if supplier_id is not None:
         query = query.where(Lot.supplier_id == supplier_id)
-    query = query.order_by(Lot.received_at.desc())
-    if limit:
-        query = query.limit(limit)  # the pack house screen only shows the last few
-    lots = session.exec(query).all()
+    lots = session.exec(query.order_by(Lot.received_at.desc())).all()
     return _attach_blocks(session, [_with_urgency(l, settings, suppliers) for l in lots])
 
 
