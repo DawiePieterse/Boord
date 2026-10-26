@@ -105,6 +105,7 @@ async function loadAccepted() {
   let lots;
   const today = Boord.localDateStr();
   try { lots = await Boord.api(`/api/lots/received?period_start=${today}&period_end=${today}`); } catch (e) { return; }
+  document.getElementById("acceptedCount").textContent = `(${lots.length} slip${lots.length === 1 ? "" : "s"})`;
   document.getElementById("acceptedList").innerHTML = lots.map((lot) => `
     <div class="rounded-xl p-3 bg-white shadow flex justify-between items-center">
       <div>
