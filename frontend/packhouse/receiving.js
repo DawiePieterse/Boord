@@ -98,12 +98,13 @@ async function refresh() {
   updateLastUpdatedLabel();
 }
 
-// The last few accepted loads, newest first, so the receiver can see a load
+// Today's accepted loads, newest first, so the receiver can see a load
 // went through after it leaves the queue. Display only: offline it keeps
 // whatever is on screen rather than erroring.
 async function loadAccepted() {
   let lots;
-  try { lots = await Boord.api("/api/lots/received?limit=10"); } catch (e) { return; }
+  const today = Boord.localDateStr();
+  try { lots = await Boord.api(`/api/lots/received?period_start=${today}&period_end=${today}`); } catch (e) { return; }
   document.getElementById("acceptedList").innerHTML = lots.map((lot) => `
     <div class="rounded-xl p-3 bg-white shadow flex justify-between items-center">
       <div>
