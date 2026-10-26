@@ -93,8 +93,29 @@ async function refresh() {
     return;
   }
   renderQueue(lots);
+  loadAccepted();
   _lastRefreshed = Date.now();
   updateLastUpdatedLabel();
+}
+
+// The last few accepted loads, newest first, so the receiver can see a load
+// went through after it leaves the queue. Display only: offline it keeps
+// whatever is on screen rather than erroring.
+async function loadAccepted() {
+  let lots;
+  try { lots = await Boord.api("/api/lots/received?limit=10"); } catch (e) { return; }
+  document.getElementById("acceptedList").innerHTML = lots.map((lot) => `
+    <div class="rounded-xl p-3 bg-white shadow flex justify-between items-center">
+      <div>
+        <div class="font-bold">${Boord.escapeHtml(lot.slip_number)}</div>
+        <div class="text-sm text-slate-600">${lotSubtitleHtml(lot)}</div>
+      </div>
+      <div class="text-right shrink-0 pl-2">
+        <div class="font-semibold whitespace-nowrap">${sentCrates(lot)} crates - ${Boord.fmtKg(lot.total_kg)}</div>
+        <div class="text-xs text-slate-500 whitespace-nowrap">${Boord.fmtTime(lot.received_at)}</div>
+      </div>
+    </div>
+  `).join("");
 }
 
 // Draws the last in-transit queue this device saw. Used at startup and
