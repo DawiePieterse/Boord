@@ -374,6 +374,38 @@
         <button id="setSeasonDatesBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">Season</button>
       </div>
       <div class="grid md:grid-cols-2 gap-3" id="reportsGrid"></div>
+
+      <!-- Markets & Transport: Packhouse's delivery notes, with the market
+           statements and transport invoices the office types against them. -->
+      <h2 class="font-bold text-lg pt-2">Markets &amp; Transport</h2>
+      <div class="grid md:grid-cols-2 gap-3" id="marketReportsGrid"></div>
+      <div class="bg-white rounded-xl shadow overflow-x-auto">
+        <div class="p-3 border-b text-xs text-slate-500">Delivery notes loaded in the period, from Boord Packhouse. Open one to type in the market's statement and the transporter's invoice.</div>
+        <table class="w-full text-sm">
+          <thead><tr class="text-left border-b">
+            <th class="p-2">Loaded</th><th class="p-2">Note</th><th class="p-2">Receiver</th><th class="p-2">Market</th>
+            <th class="p-2">Transporter</th><th class="p-2">Pallets</th><th class="p-2">Cartons</th>
+            <th class="p-2">Net Paid</th><th class="p-2">Transport</th><th></th>
+          </tr></thead>
+          <tbody id="marketNotesRows"></tbody>
+        </table>
+      </div>
+      <!-- The agents' invoices, read from the farm Gmail (market_mail.py). -->
+      <div class="bg-white rounded-xl shadow p-4 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div class="font-semibold text-sm"><i class="fa-solid fa-envelope mr-1 text-slate-400"></i>Market invoices by email</div>
+            <div class="text-xs text-slate-500" id="marketMailState"></div>
+          </div>
+          <button id="marketMailFetchBtn" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">Fetch now</button>
+        </div>
+        <div id="marketMailError" class="hidden p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800"></div>
+        <div id="marketProducts"></div>
+        <details>
+          <summary class="text-xs text-slate-500 cursor-pointer">Recent activity</summary>
+          <ul id="marketMailLog" class="text-xs text-slate-600 mt-2 space-y-1"></ul>
+        </details>
+      </div>
     </div>
 
     <!-- SETTINGS -->
@@ -595,6 +627,42 @@
         </tr></thead>
         <tbody id="lotCratesRows"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- Market statement modal (Reports -> Markets & Transport) -->
+<div id="marketModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-40">
+  <div class="bg-white rounded-xl p-5 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+    <div class="flex justify-between items-start mb-1">
+      <div>
+        <div class="font-bold text-lg" id="marketModalTitle">Delivery note</div>
+        <div class="text-xs text-slate-500" id="marketModalMeta"></div>
+      </div>
+      <button id="marketModalClose" class="text-slate-400 text-xl leading-none">&times;</button>
+    </div>
+    <div id="marketInvoices" class="hidden mt-3 p-3 rounded-lg bg-slate-50 border border-slate-200 text-sm"></div>
+    <div class="font-semibold text-sm mt-3">Market statement</div>
+    <table class="w-full text-sm">
+      <thead><tr class="text-left border-b"><th class="p-1">Pack</th><th class="p-1">Sent</th><th class="p-1">Sold</th><th class="p-1">Price / carton (R)</th></tr></thead>
+      <tbody id="marketPackRows"></tbody>
+    </table>
+    <div class="grid grid-cols-3 gap-2 mt-2 items-end">
+      <div><label class="text-xs text-slate-500 block">Commission (R)</label><input id="mkCommission" type="number" min="0" step="0.01" class="w-full border border-slate-300 rounded-lg p-2"></div>
+      <div><label class="text-xs text-slate-500 block">Deductions (R)</label><input id="mkDeductions" type="number" min="0" step="0.01" class="w-full border border-slate-300 rounded-lg p-2"></div>
+      <div><label class="text-xs text-slate-500 block">Bank cost (R)</label><input id="mkBankCost" type="number" min="0" step="0.01" class="w-full border border-slate-300 rounded-lg p-2"></div>
+    </div>
+    <div class="text-sm mt-2 text-slate-600" id="marketNetLine"></div>
+    <div class="font-semibold text-sm mt-4">Transport invoice</div>
+    <div class="grid grid-cols-3 gap-2 items-end">
+      <div><label class="text-xs text-slate-500 block">Waybill no</label><input id="mkWaybill" class="w-full border border-slate-300 rounded-lg p-2"></div>
+      <div><label class="text-xs text-slate-500 block">Invoice no</label><input id="mkInvoice" class="w-full border border-slate-300 rounded-lg p-2"></div>
+      <div><label class="text-xs text-slate-500 block">Cost excl VAT (R)</label><input id="mkTransport" type="number" min="0" step="0.01" class="w-full border border-slate-300 rounded-lg p-2"></div>
+    </div>
+    <div class="mt-3"><label class="text-xs text-slate-500 block">Notes</label><input id="mkNotes" class="w-full border border-slate-300 rounded-lg p-2"></div>
+    <div class="flex gap-2 mt-4">
+      <button id="marketModalCancel" class="flex-1 rounded-lg py-3 bg-slate-100">Cancel</button>
+      <button id="marketModalSave" class="flex-1 boord-btn-primary rounded-lg py-3 font-semibold">Save</button>
     </div>
   </div>
 </div>

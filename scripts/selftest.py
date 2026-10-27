@@ -773,6 +773,7 @@ ADMIN_ONLY_ROUTES = {
     ("DELETE", "/api/blocks/{block_id}"),
     ("DELETE", "/api/devices/{device_id}"),
     ("DELETE", "/api/harvest-records/{record_uuid}"),
+    ("DELETE", "/api/reports/market-invoices"),
     ("DELETE", "/api/suppliers/{supplier_id}"),
     ("DELETE", "/api/teams/{team_id}"),
     ("DELETE", "/api/workers/{worker_id}"),
@@ -793,11 +794,17 @@ ADMIN_ONLY_ROUTES = {
     ("GET", "/api/reports/in-transit-list"),
     ("GET", "/api/reports/delivery-notes"),
     ("GET", "/api/reports/litchi-wages"),
+    ("GET", "/api/reports/market-mail"),
+    ("GET", "/api/reports/market-notes"),
+    ("GET", "/api/reports/market-packs"),
+    ("GET", "/api/reports/market-sales"),
+    ("GET", "/api/reports/market-summary"),
     ("GET", "/api/reports/pallets-stacked"),
     ("GET", "/api/reports/lot-receiving"),
     ("GET", "/api/reports/picking-notes"),
     ("GET", "/api/reports/received-list"),
     ("GET", "/api/reports/team-picking-list"),
+    ("GET", "/api/reports/transport-summary"),
     ("GET", "/api/reports/worker-harvest"),
     ("GET", "/api/setup/state"),
     ("GET", "/api/suppliers/{supplier_id}/billing"),
@@ -809,6 +816,7 @@ ADMIN_ONLY_ROUTES = {
     ("POST", "/api/devices"),
     ("POST", "/api/payments/calculate"),
     ("POST", "/api/rate-settings"),
+    ("POST", "/api/reports/market-mail/fetch"),
     ("POST", "/api/setup/complete"),
     ("POST", "/api/setup/start"),
     ("POST", "/api/suppliers"),
@@ -816,6 +824,8 @@ ADMIN_ONLY_ROUTES = {
     ("POST", "/api/workers"),
     ("POST", "/api/workers/import"),
     ("POST", "/api/workers/{worker_id}/photo"),
+    ("PUT", "/api/reports/market-notes/{note_uuid}"),
+    ("PUT", "/api/reports/market-products"),
     ("PUT", "/api/system-settings"),
 }
 
@@ -1174,6 +1184,135 @@ def test_a_slip_sends_fewer_crates_than_were_picked_and_shows_its_blocks():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# Markets & Transport
+#
+# What a market paid is money the farm reports on: the sums from a typed-in
+# statement must come out the same as the paper ones. A throwaway boord.db
+# and a throwaway packhouse.db with one delivery note.
+# ---------------------------------------------------------------------------
+def test_a_market_statement_sums_to_what_the_market_paid():
+    import json  # noqa: E402
+    from routers import reports  # noqa: E402
+
+    tmp = tempfile.mkdtemp()
+    saved_path = reports.PACKHOUSE_DB_PATH
+    try:
+        ph = sqlite3.connect(os.path.join(tmp, "packhouse.db"))
+        ph.execute("CREATE TABLE deliverynote (uuid TEXT, note_no INTEGER, receiver TEXT, transporter TEXT, "
+                   "loaded_on TEXT, pallets TEXT, removed INTEGER)")
+        pallet = {"market_name": "Local", "lines": [{"packaging_name": "Pre-pac", "carton_kg": 2.0, "cartons": 10},
+                                                    {"packaging_name": "4.5kg XL", "carton_kg": 4.5, "cartons": 4}]}
+        ph.execute("INSERT INTO deliverynote VALUES ('n1', 7, 'Dapper\nJoburg', 'HFR', '2026-10-20', ?, 0)",
+                   (json.dumps([pallet, pallet]),))
+        ph.commit()
+        ph.close()
+        reports.PACKHOUSE_DB_PATH = os.path.join(tmp, "packhouse.db")
+
+        eng = create_engine(f"sqlite:///{os.path.join(tmp, 't.db')}")
+        run_migrations(eng, snapshot=False)
+        with Session(eng) as s:
+            day = datetime(2026, 10, 20).date()
+            note = reports._market_notes(day, day, s)[0]
+            assert (note["receiver"], note["market"], note["pallets"], note["sent"]) == ("Dapper", "Local", 2, 28)
+            assert not note["entered"] and note["net"] == 0
+
+            reports.save_market_statement("n1", reports.MarketStatementIn(
+                lines=[{"pack": "Pre-pac", "sold": 18, "price": 100}, {"pack": "4.5kg XL", "sold": None, "price": 300}],
+                commission=150, deductions=20, bank_cost=30, transport_cost=1000), s)
+            note = reports._market_notes(day, day, s)[0]
+            # 18 x R100 sold; the 4.5kg line has a price but no sales yet.
+            assert note["gross"] == 1800 and note["net"] == 1600 and note["sold"] == 18, note
+            assert note["kg_sold"] == 36 and note["kg_sent"] == 76, note
+            assert reports._money(note)[5:] == [88.89, 44.44], "net R/carton and R/kg"
+    finally:
+        reports.PACKHOUSE_DB_PATH = saved_path
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# An invoice as pypdf's layout mode reads a Johannesburg market pps_invoice:
+# the same labels and spacing, made-up figures. {paid} and {nett} let a test
+# make a part-payment or break the arithmetic.
+_INVOICE = """   DAPPER AGENCIES (PTY) LTD
+BEKFONTEIN BOERDERY (EDMS) BPK (25142)
+   TAX INVOICE
+   {invoice}
+DATE: 21-OCT-26   PRODUCER D/NOTE: 7
+{payment}   ARRIVE DATE: 20/OCT/2026 01:33
+GRN NO: 15708492   SALESPERSON: SOMEONE (433)
+PRODUCT: LICH, BX020, THREE MONTH RED, CL 1, XL, *, *   AGENT COMMISSION: 7.5%
+QTY DESTR:   0   QTY D/GRADED:   0   QTY PAID/SOLD:   -{paid}   QTY C/F:   0
+MKT COMM EXCL:   50.00   AGT COMM EXCL:   75.00   COMM VAT:   18.75   GRN INCOME:   1,000.00
+GRN NO: 15708500   SALESPERSON: SOMEONE (433)
+PRODUCT: LICH, PTB005, THREE MONTH RED, CL 1, *, 4, *   AGENT COMMISSION: 7.5%
+QTY DESTR:   0   QTY D/GRADED:   0   QTY PAID/SOLD:   -2   QTY C/F:   0
+MKT COMM EXCL:   55.00   AGT COMM EXCL:   82.50   COMM VAT:   20.63   GRN INCOME:   1,100.00
+DEDUCTION DETAILS   AMOUNT   VAT   TOTAL
+Market Commission   -105.00   -15.75   -120.75
+Agent Commission   -157.50   -23.63   -181.13
+Bank Charges   -22.80   -3.42   -26.22
+DEDUCTION TOTAL:   -285.30   -42.80   -328.10
+   SUM TOTAL SALES:   2,100.00
+   SUM TOTAL DEDUCTIONS:   -328.10
+   NETT INCOME:   {nett}
+ Printed On 23/10/2026 09:31   Batch Page pps_invoice | Version 1.31 of 2
+"""
+
+
+def test_an_emailed_market_invoice_is_read_checked_and_added_up():
+    import json  # noqa: E402
+    import market_mail  # noqa: E402
+    from routers import reports  # noqa: E402
+
+    def invoice(no, payment="Final Payment", paid=10, nett="1,771.90"):
+        return _INVOICE.format(invoice=no, payment=payment, paid=paid, nett=nett)
+
+    inv = market_mail.parse_invoice(invoice("1/1", "Partial Payment #1"))
+    assert (inv["invoice_no"], inv["note_no"], inv["payment"]) == ("1/1", "7", "Partial Payment #1"), inv
+    assert inv["agent"] == "DAPPER AGENCIES (PTY) LTD" and str(inv["invoice_date"]) == "2026-10-21", inv
+    assert (inv["commission"], inv["bank_cost"], inv["gross"], inv["net"]) == (301.88, 26.22, 2100.0, 1771.9), inv
+    assert [ln["sold"] for ln in inv["lines"]] == [10, 2], inv["lines"]
+    try:
+        market_mail.parse_invoice(invoice("1/2", nett="1,871.90"))
+        raise AssertionError("an invoice that doesn't add up was read")
+    except ValueError:
+        pass
+
+    tmp = tempfile.mkdtemp()
+    saved_path = reports.PACKHOUSE_DB_PATH
+    try:
+        ph = sqlite3.connect(os.path.join(tmp, "packhouse.db"))
+        ph.execute("CREATE TABLE deliverynote (uuid TEXT, note_no INTEGER, receiver TEXT, transporter TEXT, "
+                   "loaded_on TEXT, pallets TEXT, removed INTEGER)")
+        pallet = {"market_name": "Local", "lines": [{"packaging_name": "2kg XL", "carton_kg": 2.0, "cartons": 30}]}
+        ph.execute("INSERT INTO deliverynote VALUES ('n7', 7, 'Dapper', 'HFR', '2026-10-20', ?, 0)",
+                   (json.dumps([pallet]),))
+        ph.commit()
+        ph.close()
+        reports.PACKHOUSE_DB_PATH = os.path.join(tmp, "packhouse.db")
+
+        eng = create_engine(f"sqlite:///{os.path.join(tmp, 't.db')}")
+        run_migrations(eng, snapshot=False)
+        with Session(eng) as s:
+            assert market_mail.save_invoice(inv, s)
+            assert not market_mail.save_invoice(inv, s), "the same invoice was filed twice"
+            market_mail.save_invoice(market_mail.parse_invoice(invoice("1/2")), s)
+            reports.save_market_product(reports.MarketProductIn(
+                product="LICH, BX020, THREE MONTH RED, CL 1, XL, *, *", pack="2kg XL"), s)
+            day = datetime(2026, 10, 20).date()
+            note = reports._market_notes(day, day, s)[0]
+            # Two part-payments, one product matched to the pack on the
+            # pallet and one not: it still counts, on a line of its own.
+            assert (note["gross"], note["net"], note["commission"]) == (4200.0, 3543.8, 603.76), note
+            xl = [pk for pk in note["packs"] if pk["pack"] == "2kg XL"][0]
+            assert (xl["sent"], xl["sold"], xl["price"]) == (30, 20, 100.0), xl
+            assert any(pk.get("unmapped") and pk["sold"] == 4 for pk in note["packs"]), note["packs"]
+            assert len(note["invoices"]) == 2
+    finally:
+        reports.PACKHOUSE_DB_PATH = saved_path
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _repo_file(relative):
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), relative)
 
@@ -1267,6 +1406,11 @@ def main():
     for fn in (test_a_deleted_crate_stays_deleted,
                test_the_empty_slip_cleanup_only_takes_emptied_slips,
                test_a_slip_sends_fewer_crates_than_were_picked_and_shows_its_blocks):
+        check(fn.__name__, fn)
+
+    section("Markets & Transport")
+    for fn in (test_a_market_statement_sums_to_what_the_market_paid,
+               test_an_emailed_market_invoice_is_read_checked_and_added_up):
         check(fn.__name__, fn)
 
     section("Backups")

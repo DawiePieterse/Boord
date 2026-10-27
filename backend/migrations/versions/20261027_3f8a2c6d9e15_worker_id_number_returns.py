@@ -18,7 +18,7 @@ The downgrade copies id_number back into an empty whatsapp_number before
 dropping the column, so rolling back loses nothing that was moved.
 
 Revision ID: 3f8a2c6d9e15
-Revises: e4b19c6d0a52
+Revises: 3f6a9c2e1d85
 Created: 2026-10-27
 
 """
@@ -30,7 +30,7 @@ import sqlmodel  # noqa: F401 - autogenerate renders sqlmodel.sql.sqltypes.AutoS
 
 
 revision = '3f8a2c6d9e15'
-down_revision = 'e4b19c6d0a52'
+down_revision = '3f6a9c2e1d85'
 branch_labels = None
 depends_on = None
 

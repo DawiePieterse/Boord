@@ -101,6 +101,7 @@ async function showApp() {
     bindMasterData();
     bindPayments();
     bindReports();
+    bindMarketModal();
     bindSettings();
     bindSuppliers();
 
@@ -268,6 +269,7 @@ function renderDashboardKpis(harvesting, inTransit, received, summary) {
     ["Harvesting", `${h.crates} crates / ${Boord.fmtKg(h.kg)}`],
     ["In Transit", `${t.crates} crates / ${Boord.fmtKg(t.kg)}`],
     ["Received", `${r.crates} crates / ${Boord.fmtKg(r.kg)}`],
+    ["Delivered vs Picked", _deliveredVsPicked(summary.delivered_kg, totalKg)],
   ];
   document.getElementById("dashKpiGrid").innerHTML = cards.map(([label, value]) => `
     <div class="bg-white rounded-xl shadow p-4">
@@ -275,6 +277,20 @@ function renderDashboardKpis(harvesting, inTransit, received, summary) {
       <div class="text-xl font-bold">${value}</div>
     </div>
   `).join("");
+}
+
+// Kg on the period's delivery notes less kg picked, and that as a % of
+// picked: negative is fruit picked that never went out (culls, packing
+// loss, or still in the cold store). Delivery notes can't be split by
+// supplier, so with one picked the card says so rather than mislead.
+function _deliveredVsPicked(deliveredKg, pickedKg) {
+  if (deliveredKg == null) {
+    return document.getElementById("dashSupplierFilter").value ? "All suppliers only" : "No Packhouse data";
+  }
+  const diff = deliveredKg - pickedKg;
+  const sign = diff > 0 ? "+" : "";
+  const pct = pickedKg ? ` (${sign}${Boord.fmtNum(diff / pickedKg * 100)}%)` : "";
+  return `${sign}${Boord.fmtKg(diff)}${pct}`;
 }
 
 function renderDashboardLists(harvesting, inTransit, received, summary) {
@@ -1175,6 +1191,16 @@ const REPORTS = [
     desc: "One row per worker with crates broken out per day worked, plus a total - a whole pay period on a single line." },
   { key: "block-harvest", label: "Block Harvest Report", icon: "fa-tree",
     desc: "Per-block crates, kg, average kg per crate and average kg per tree over the range." },
+  // The Markets & Transport section, below the list of delivery notes they
+  // are built from. By the date each note was loaded; never by supplier.
+  { key: "market-summary", label: "Markte Opsomming / Market Summary", icon: "fa-store", group: "markets",
+    desc: "One row per receiver and market - notes, pallets, cartons sent and sold, kg, gross, commission, deductions, net paid, R/carton, R/kg and transport, with a total." },
+  { key: "market-packs", label: "Market Sales by Pack", icon: "fa-boxes-stacked", group: "markets",
+    desc: "Per receiver, market and pack - cartons sent, sold and outstanding, average price per carton and gross R/kg." },
+  { key: "market-sales", label: "Consignment Sales", icon: "fa-file-invoice-dollar", group: "markets",
+    desc: "One row per delivery note - what went, what sold at what price, and what the market paid after costs." },
+  { key: "transport-summary", label: "Vervoer Opsomming / Transport Summary", icon: "fa-truck-moving", group: "markets",
+    desc: "One row per delivery note - transporter, waybill, invoice, pallets, R/pallet and cost excluding and including VAT, with a total." },
 ];
 
 // The query string for one report. Every report takes the same
@@ -1194,7 +1220,7 @@ function renderReportsGrid() {
   const d2 = document.getElementById("reportDate2").value;
   const isRange = d1 && d2 && d1 !== d2;
 
-  document.getElementById("reportsGrid").innerHTML = REPORTS.map((r) => {
+  const card = (r) => {
     const flagDailyOnly = isRange && r.single_day;
     const note = flagDailyOnly
       ? `<div class="text-xs text-amber-600 font-medium mt-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Daily report only - uses ${d1} (period start)</div>`
@@ -1209,10 +1235,14 @@ function renderReportsGrid() {
       </div>
     </button>
   `;
-  }).join("");
+  };
+  document.getElementById("reportsGrid").innerHTML = REPORTS.filter((r) => !r.group).map(card).join("");
+  document.getElementById("marketReportsGrid").innerHTML = REPORTS.filter((r) => r.group === "markets").map(card).join("");
   document.querySelectorAll("[data-report]").forEach((btn) => {
     btn.addEventListener("click", () => downloadReport(btn.dataset.report));
   });
+  loadMarketNotes();
+  loadMarketMail();
 }
 
 function bindReports() {
@@ -1255,6 +1285,236 @@ async function downloadReport(key) {
       Boord.toast("Could not generate report - see browser console for details");
     }
   }
+}
+
+// ---------------------------------------------------------------------
+// Markets & Transport: the delivery notes Boord Packhouse loaded in the
+// report period, each with the market statement and transport invoice the
+// office types against it (what the season "Markte" workbook held).
+// ---------------------------------------------------------------------
+let _marketNotes = [];
+let _marketNote = null;
+
+async function loadMarketNotes() {
+  const d1 = document.getElementById("reportDate1").value;
+  const d2 = document.getElementById("reportDate2").value;
+  const tbody = document.getElementById("marketNotesRows");
+  if (!d1 || !d2) return;
+  try {
+    _marketNotes = await Boord.api(`/api/reports/market-notes?period_start=${d1}&period_end=${d2}`);
+  } catch (e) {
+    // Most often Packhouse isn't on this server; the 503 says so in words.
+    tbody.innerHTML = `<tr><td colspan="10" class="p-3 text-sm text-slate-500">${esc(e.detail || e.message)}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = _marketNotes.length ? _marketNotes.map((n) => `
+    <tr class="border-b">
+      <td class="p-2 whitespace-nowrap">${esc(n.loaded_on)}</td>
+      <td class="p-2">${esc(n.note_no)}</td>
+      <td class="p-2">${esc(n.receiver)}</td>
+      <td class="p-2">${esc(n.market)}</td>
+      <td class="p-2">${esc(n.transporter)}</td>
+      <td class="p-2">${n.pallets}</td>
+      <td class="p-2">${n.sent}</td>
+      <td class="p-2">${n.entered ? Boord.fmtRand(n.net) : '<span class="text-amber-600">Not entered</span>'}${n.invoices.length ? ` <i class="fa-solid fa-envelope text-slate-400" title="From ${n.invoices.length} emailed invoice(s)"></i>` : ""}</td>
+      <td class="p-2">${n.transport_cost ? Boord.fmtRand(n.transport_cost) : "-"}</td>
+      <td class="p-2"><button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-note="${esc(n.uuid)}">${n.entered ? "Edit" : "Enter"}</button></td>
+    </tr>
+  `).join("") : `<tr><td colspan="10" class="p-3 text-sm text-slate-500">No delivery notes loaded in this period.</td></tr>`;
+  tbody.querySelectorAll("[data-market-note]").forEach((btn) => {
+    btn.addEventListener("click", () => openMarketModal(_marketNotes.find((n) => n.uuid === btn.dataset.marketNote)));
+  });
+}
+
+// A blank box is "not on the statement yet", not zero.
+function numOrNull(el) {
+  return el.value.trim() === "" ? null : Number(el.value);
+}
+
+function updateMarketNet() {
+  // An invoiced note's figures are the invoices' own: multiplying the
+  // averaged price back out would be a few rand off what was paid.
+  if (_marketNote && _marketNote.invoices.length) {
+    const n = _marketNote;
+    document.getElementById("marketNetLine").textContent =
+      `Gross ${Boord.fmtRand(n.gross)} - costs ${Boord.fmtRand(n.commission + n.deductions + n.bank_cost)} = net ${Boord.fmtRand(n.net)}`;
+    return;
+  }
+  let gross = 0;
+  document.querySelectorAll("#marketPackRows tr").forEach((tr) => {
+    gross += (numOrNull(tr.querySelector(".mk-sold")) || 0) * (numOrNull(tr.querySelector(".mk-price")) || 0);
+  });
+  const costs = ["mkCommission", "mkDeductions", "mkBankCost"]
+    .reduce((sum, id) => sum + (numOrNull(document.getElementById(id)) || 0), 0);
+  document.getElementById("marketNetLine").textContent =
+    `Gross ${Boord.fmtRand(gross)} - costs ${Boord.fmtRand(costs)} = net ${Boord.fmtRand(gross - costs)}`;
+}
+
+function openMarketModal(note) {
+  _marketNote = note;
+  document.getElementById("marketModalTitle").textContent = `Delivery note ${note.note_no}`;
+  document.getElementById("marketModalMeta").textContent =
+    [note.loaded_on, note.receiver, note.market, note.transporter, `${note.pallets} pallets`].filter(Boolean).join(" · ");
+  document.getElementById("marketPackRows").innerHTML = note.packs.map((pk) => `
+    <tr class="border-b" data-pack="${esc(pk.pack)}">
+      <td class="p-1">${esc(pk.pack)}</td>
+      <td class="p-1">${pk.sent}</td>
+      <td class="p-1"><input type="number" min="0" step="1" class="mk-sold w-24 border border-slate-300 rounded-lg p-1" value="${pk.sold ?? ""}"></td>
+      <td class="p-1"><input type="number" min="0" step="0.01" class="mk-price w-28 border border-slate-300 rounded-lg p-1" value="${pk.price ?? ""}"></td>
+    </tr>
+  `).join("");
+  // Once the market's invoice has come in by email its figures are the
+  // statement, so the sales boxes only show them; transport stays typed.
+  const imported = note.invoices.length > 0;
+  const box = document.getElementById("marketInvoices");
+  box.classList.toggle("hidden", !imported);
+  box.innerHTML = imported ? `
+    <div class="font-semibold mb-1"><i class="fa-solid fa-envelope mr-1 text-slate-400"></i>From the market's emailed invoices</div>
+    ${note.invoices.map((i) => `
+      <div class="flex items-center justify-between gap-2 py-1">
+        <span>${esc(i.invoice_no)} · ${esc(i.payment)} · ${esc(i.invoice_date)} · net ${Boord.fmtRand(i.net)}</span>
+        <button class="text-xs text-red-600" data-remove-invoice="${esc(i.invoice_no)}">Remove</button>
+      </div>`).join("")}
+    ${note.packs.some((pk) => pk.unmapped) ? '<div class="text-xs text-amber-700 mt-1">Some market products are not matched to a pack yet - see Market invoices by email below the list.</div>' : ""}
+  ` : "";
+  box.querySelectorAll("[data-remove-invoice]").forEach((btn) => {
+    btn.addEventListener("click", () => removeMarketInvoice(btn.dataset.removeInvoice));
+  });
+  document.querySelectorAll("#marketPackRows input, #mkCommission, #mkDeductions, #mkBankCost")
+    .forEach((el) => { el.disabled = imported; el.classList.toggle("bg-slate-100", imported); });
+  const set = (id, v) => { document.getElementById(id).value = v ?? ""; };
+  // A note with no statement yet opens blank rather than with zeros.
+  set("mkCommission", note.entered ? note.commission : "");
+  set("mkDeductions", note.entered ? note.deductions : "");
+  set("mkBankCost", note.entered ? note.bank_cost : "");
+  set("mkTransport", note.transport_cost || "");
+  set("mkWaybill", note.waybill_no);
+  set("mkInvoice", note.invoice_no);
+  set("mkNotes", note.notes);
+  updateMarketNet();
+  document.getElementById("marketModal").classList.remove("hidden");
+  document.getElementById("marketModal").classList.add("flex");
+}
+
+function closeMarketModal() {
+  document.getElementById("marketModal").classList.add("hidden");
+  document.getElementById("marketModal").classList.remove("flex");
+  _marketNote = null;
+}
+
+async function saveMarketStatement() {
+  if (!_marketNote) return;
+  const num = (id) => numOrNull(document.getElementById(id)) || 0;
+  const body = {
+    lines: [...document.querySelectorAll("#marketPackRows tr")].map((tr) => ({
+      pack: tr.dataset.pack,
+      sold: numOrNull(tr.querySelector(".mk-sold")),
+      price: numOrNull(tr.querySelector(".mk-price")),
+    })),
+    commission: num("mkCommission"),
+    deductions: num("mkDeductions"),
+    bank_cost: num("mkBankCost"),
+    transport_cost: num("mkTransport"),
+    waybill_no: document.getElementById("mkWaybill").value,
+    invoice_no: document.getElementById("mkInvoice").value,
+    notes: document.getElementById("mkNotes").value,
+  };
+  try {
+    await Boord.api(`/api/reports/market-notes/${encodeURIComponent(_marketNote.uuid)}`, { method: "PUT", body });
+  } catch (e) {
+    if (Boord.isAuthError(e)) { accessRefused(e); return; }
+    Boord.toast(`Not saved: ${e.detail || e.message}`);
+    return;
+  }
+  Boord.toast(`Note ${_marketNote.note_no} saved`);
+  closeMarketModal();
+  loadMarketNotes();
+}
+
+async function removeMarketInvoice(invoiceNo) {
+  if (!confirm(`Take invoice ${invoiceNo} out of the reports? Its email stays labelled Boord-Done in Gmail, so it won't come back by itself.`)) return;
+  try {
+    await Boord.api(`/api/reports/market-invoices?invoice_no=${encodeURIComponent(invoiceNo)}`, { method: "DELETE" });
+  } catch (e) {
+    Boord.toast(`Not removed: ${e.detail || e.message}`);
+    return;
+  }
+  Boord.toast(`Invoice ${invoiceNo} removed`);
+  closeMarketModal();
+  loadMarketNotes();
+  loadMarketMail();
+}
+
+async function loadMarketMail() {
+  let m;
+  try {
+    m = await Boord.api("/api/reports/market-mail");
+  } catch (e) {
+    document.getElementById("marketMailState").textContent = e.detail || e.message;
+    return;
+  }
+  document.getElementById("marketMailState").textContent = m.address
+    ? `${m.address} · checked every ${m.every_minutes} min · last ${m.last_run ? m.last_run.replace("T", " ") : "not yet"} · from ${m.senders.join(", ")}`
+    : "Not set up on this server yet - see the manual (data\\market_mail.txt).";
+  document.getElementById("marketMailFetchBtn").classList.toggle("hidden", !m.address);
+  const err = document.getElementById("marketMailError");
+  err.textContent = m.last_error ? `Last check failed: ${m.last_error}` : "";
+  err.classList.toggle("hidden", !m.last_error);
+  document.getElementById("marketMailLog").innerHTML = m.log.length
+    ? m.log.map((line) => `<li>${esc(line)}</li>`).join("")
+    : "<li>Nothing yet.</li>";
+
+  // Each product description a market has invoiced, matched once to the
+  // Packhouse pack it is, so sold lines up with sent.
+  const options = (current) => [`<option value="">- not matched -</option>`]
+    .concat(m.packs.concat(current && !m.packs.includes(current) ? [current] : [])
+      .map((p) => `<option value="${esc(p)}" ${p === current ? "selected" : ""}>${esc(p)}</option>`)).join("");
+  document.getElementById("marketProducts").innerHTML = m.products.length ? `
+    <div class="text-xs text-slate-500 mb-1">Market products and the Packhouse pack each one is:</div>
+    <table class="w-full text-sm"><tbody>
+      ${m.products.map((p) => `
+        <tr class="border-b">
+          <td class="p-1 text-xs">${esc(p.product)}</td>
+          <td class="p-1"><select data-market-product="${esc(p.product)}" class="border border-slate-300 rounded-lg p-1 text-sm ${p.pack ? "" : "border-amber-400"}">${options(p.pack)}</select></td>
+        </tr>`).join("")}
+    </tbody></table>` : "";
+  document.querySelectorAll("[data-market-product]").forEach((sel) => {
+    sel.addEventListener("change", async () => {
+      try {
+        await Boord.api("/api/reports/market-products", { method: "PUT", body: { product: sel.dataset.marketProduct, pack: sel.value } });
+      } catch (e) {
+        Boord.toast(`Not saved: ${e.detail || e.message}`);
+        return;
+      }
+      sel.classList.toggle("border-amber-400", !sel.value);
+      loadMarketNotes();
+    });
+  });
+}
+
+async function fetchMarketMailNow() {
+  const btn = document.getElementById("marketMailFetchBtn");
+  btn.disabled = true;
+  btn.textContent = "Checking...";
+  try {
+    await Boord.api("/api/reports/market-mail/fetch", { method: "POST", timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+  } catch (e) {
+    Boord.toast(`Could not check the email: ${e.detail || e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Fetch now";
+  }
+  loadMarketMail();
+  loadMarketNotes();
+}
+
+function bindMarketModal() {
+  document.getElementById("marketMailFetchBtn").addEventListener("click", fetchMarketMailNow);
+
+  document.getElementById("marketModalClose").addEventListener("click", closeMarketModal);
+  document.getElementById("marketModalCancel").addEventListener("click", closeMarketModal);
+  document.getElementById("marketModalSave").addEventListener("click", saveMarketStatement);
+  document.getElementById("marketModal").addEventListener("input", updateMarketNet);
 }
 
 // ---------------------------------------------------------------------

@@ -211,6 +211,37 @@ joins.
 | Lietsjie Lone / Litchi Wages | Per-worker crates harvested, one column per date worked, plus a total — a whole pay period on one row |
 | Block Harvest Report | Per-block crates/kg/averages |
 
+### Markets & Transport
+
+Under the reports is a list of the delivery notes that Boord Packhouse loaded
+in the date range.
+
+1. When a market statement or a transporter's invoice arrives, find its
+   note and tap **Enter** (or **Edit**).
+2. For each pack, type the cartons sold and the price per carton. Then type
+   the commission, deductions and bank cost. The form adds up the net for you.
+3. Type the transporter's waybill number, the invoice number and the cost
+   excluding VAT, then **Save**.
+
+Notes still waiting for a statement show **Not entered**.
+
+**Emailed invoices fill themselves in.** Once the farm Gmail is set up (see
+the manual), the Johannesburg market agents' invoices are read every 15
+minutes. A note filled in that way shows an envelope next to its net paid,
+and its form lists the invoices instead of letting you type the sales. You
+still type the transport. When a new market product appears under **Market
+invoices by email** with an amber box, pick the Packhouse pack it is. You
+only do that once per product. **Fetch now** checks the email straight away.
+
+The four reports in this section use the same dates:
+
+| Report | What it contains |
+|---|---|
+| Markte Opsomming / Market Summary | Per receiver and market: pallets, cartons sent and sold, gross, costs, net paid, R/carton, R/kg, transport, plus a total |
+| Market Sales by Pack | Per market and pack: sent, sold, average price |
+| Consignment Sales | One row per delivery note: what went and what it paid |
+| Vervoer Opsomming / Transport Summary | One row per note: transporter, waybill, invoice, pallets, R/pallet, cost excluding and including VAT, plus a total |
+
 ---
 
 ## Settings
