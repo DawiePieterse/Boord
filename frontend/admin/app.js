@@ -269,6 +269,7 @@ function renderDashboardKpis(harvesting, inTransit, received, summary) {
     ["Harvesting", `${h.crates} crates / ${Boord.fmtKg(h.kg)}`],
     ["In Transit", `${t.crates} crates / ${Boord.fmtKg(t.kg)}`],
     ["Received", `${r.crates} crates / ${Boord.fmtKg(r.kg)}`],
+    ["Delivered vs Picked", _deliveredVsPicked(summary.delivered_kg, totalKg)],
   ];
   document.getElementById("dashKpiGrid").innerHTML = cards.map(([label, value]) => `
     <div class="bg-white rounded-xl shadow p-4">
@@ -276,6 +277,20 @@ function renderDashboardKpis(harvesting, inTransit, received, summary) {
       <div class="text-xl font-bold">${value}</div>
     </div>
   `).join("");
+}
+
+// Kg on the period's delivery notes less kg picked, and that as a % of
+// picked: negative is fruit picked that never went out (culls, packing
+// loss, or still in the cold store). Delivery notes can't be split by
+// supplier, so with one picked the card says so rather than mislead.
+function _deliveredVsPicked(deliveredKg, pickedKg) {
+  if (deliveredKg == null) {
+    return document.getElementById("dashSupplierFilter").value ? "All suppliers only" : "No Packhouse data";
+  }
+  const diff = deliveredKg - pickedKg;
+  const sign = diff > 0 ? "+" : "";
+  const pct = pickedKg ? ` (${sign}${Boord.fmtNum(diff / pickedKg * 100)}%)` : "";
+  return `${sign}${Boord.fmtKg(diff)}${pct}`;
 }
 
 function renderDashboardLists(harvesting, inTransit, received, summary) {

@@ -1,7 +1,8 @@
+import json
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from db import get_session
@@ -83,6 +84,26 @@ def dashboard_summary(period_start: date, period_end: date, supplier_id: Optiona
         # amount_due above is 0.00 in that state, and the UI needs to be able
         # to say so rather than presenting zeroes as real earnings.
         "rate_configured": rate_setting is not None,
+        "delivered_kg": _delivered_kg(period_start, period_end, supplier_id),
         "workers": workers,
         "blocks": blocks,
     }
+
+
+def _delivered_kg(period_start: date, period_end: date, supplier_id: Optional[int]) -> Optional[float]:
+    """Kg on Packhouse's delivery notes loaded in the period, for the picked
+    vs delivered KPI. None, and the card says so, when a supplier is picked
+    (a note keeps only its pallets' supplier names, which is why the Delivery
+    Notes report doesn't filter by supplier either) or when packhouse.db
+    can't be read: the rest of the dashboard must still load without it."""
+    if supplier_id is not None:
+        return None
+    # Imported here: reports imports this module for dashboard_summary.
+    from routers.reports import _packhouse_rows, _pallet_stats
+    try:
+        notes = _packhouse_rows("SELECT pallets FROM deliverynote WHERE removed = 0 AND loaded_on >= ? "
+                                "AND loaded_on <= ?", (period_start.isoformat(), period_end.isoformat()))
+    except HTTPException:
+        return None
+    return round(sum(_pallet_stats(p.get("lines", []))[1]
+                     for n in notes for p in json.loads(n["pallets"] or "[]")), 1)
