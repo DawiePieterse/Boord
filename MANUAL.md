@@ -1719,6 +1719,130 @@ not been captured against that supplier (or, for the PHC, in Settings) rather
 than that the load is untraceable. Fill them in before sending a report to a
 buyer or an auditor.
 
+### Markets & Transport
+
+Below the reports is a **Markets & Transport** section. It replaces the
+season "Markte" workbook the office used to keep by hand, with one sheet per
+market and a transport summary.
+
+The list shows every delivery note that Boord Packhouse loaded in the date
+range: date, note number, receiver, market, transporter, pallets and cartons.
+What went out on each note comes from Packhouse. What the market paid, and
+what the transporter charged, nobody records but the office. So when a
+market's statement or a transporter's invoice arrives, open the note
+(**Enter**, or **Edit** once it has been entered) and type in:
+
+- **Per pack:** cartons sold and the price per carton. Leave a pack blank if
+  the statement doesn't list it yet.
+- **Commission, deductions** (Xtend bags, SALGA, lab fees and so on) **and
+  bank cost**, in rand. The form shows gross minus costs equals net as you
+  type.
+- **Transport:** the waybill (vragbrief) number, the invoice number and the
+  cost excluding VAT.
+
+The list then shows the net paid. Notes still waiting for a statement show
+"Not entered". The four reports use the same date range (the date each note
+was loaded). Like the Delivery Notes report, they are not filtered by
+supplier, because a note carries whatever suppliers were stacked.
+
+| Report | Contents |
+|---|---|
+| Markte Opsomming / Market Summary | One row per receiver and market: notes, how many statements are entered, pallets, cartons sent, sold and outstanding, kg, gross, commission, deductions, bank cost, net paid, net R/carton and R/kg, transport, and net after transport. Ends with a total row. |
+| Market Sales by Pack | Per receiver, market and pack: cartons sent, sold and outstanding, average price per carton, gross and gross R/kg |
+| Consignment Sales | One row per delivery note: what went, what sold and at what price, and what the market paid after costs |
+| Vervoer Opsomming / Transport Summary | One row per delivery note: transporter, waybill, invoice, pallets, R/pallet, and cost excluding VAT, VAT and including VAT. Ends with a total row. |
+
+Kg comes from each pack's carton weight in Packhouse's Settings ->
+Consignment, so R/kg is only as right as those weights. If Boord Packhouse
+isn't installed on this server, the list says so and the four reports
+return no data.
+
+### Market invoices by email
+
+A market agent's tax invoice can fill in a note's statement by itself, so
+nobody has to type it. So far this covers the Johannesburg market's invoices
+(`pps_invoice`, as Dapper sends them). Every agent on that market uses the
+same system and the same layout.
+
+**How it works.** Every 15 minutes the server signs in to the farm Gmail,
+`bekfontein01@gmail.com`, and reads each email in the inbox from the last 90
+days that has a PDF attached. Each one it has dealt with gets the Gmail label
+**Boord-Done**, so it is never read twice. For each invoice it:
+
+- reads the delivery note number ("PRODUCER D/NOTE"), the invoice number,
+  whether it is a part payment or the final one, the cartons paid and income
+  per product, the commission and bank charges (including VAT, as they left
+  the farm's money) and the nett income;
+- refuses it if the figures don't add up (product lines to the sales total,
+  deduction lines to the total deductions, sales less deductions to the nett
+  income);
+- skips an invoice number that is already in (agents resend, and a forwarded
+  copy is the same invoice), and keeps a copy of each one in
+  `data\market_mail\`.
+
+A note with invoices takes its sales, commission, deductions and net from
+them, all its part payments added up. Its form shows them without letting
+them be typed over. Transport is still typed. The daily sales summaries
+(`producer_daily`) are skipped for now: they show sales before payment, and
+the invoice is what counts.
+
+**Setting it up (once).**
+
+1. **Get the invoices to bekfontein01@gmail.com.** The simplest way is to ask
+   each agent to add that address to the farm's email addresses. Their
+   invoices already go to `admin@laughw.co.za` and `andre@laughw.co.za`, so a
+   third address costs them nothing. Otherwise, set up a forwarding filter in
+   the control panel of the `laughw.co.za` mail host: "From contains
+   `dapper.co.za`", forward a copy to `bekfontein01@gmail.com`. It has to be on
+   the mail server, not in Outlook, because an Outlook rule only runs while
+   that PC is on. Don't let a Gmail filter archive them: only the inbox is
+   read.
+2. **Make an app password for that Gmail.** Sign in to the Google Account of
+   `bekfontein01@gmail.com` and go to **Security**. Turn on **2-Step
+   Verification** if it isn't on (an app password needs it), then open **App
+   passwords**, make one called "Boord" and copy the 16 letters it shows.
+   This password only lets the server read that mailbox, and it can be
+   revoked there at any time.
+3. **Give it to the server.** On the farm PC, open Notepad and save this as
+   `C:\Boord\data\market_mail.txt`, with your own app password:
+
+   ```
+   address=bekfontein01@gmail.com
+   app_password=abcd efgh ijkl mnop
+   senders=dapper.co.za, laughw.co.za
+   ```
+
+   `senders` is the list of email domains an invoice is accepted from. Keep
+   `laughw.co.za` in it if Andre's server forwards the mail, because a
+   forwarded copy can arrive from his address. The file is never put in Git
+   or shown on any page.
+4. Open **Reports**. Under the delivery notes, **Market invoices by email**
+   shows the address and when it last checked. Press **Fetch now** to check
+   straight away rather than wait for the next 15 minutes. Nothing needs
+   restarting.
+
+**Matching products to packs.** The market describes a pack its own way, for
+example `LICH, BX020, THREE MONTH RED, CL 1, XL, *, *`. The first time a
+description arrives, it is listed under **Market invoices by email** with an
+amber box. Pick the Packhouse pack it is, once, and sold then lines up with
+sent on every note. Until then its cartons and money still count in the
+note's totals, on a line of their own, but they have no kg and no
+outstanding against what was sent.
+
+**Recent activity** lists what each check did: imported, already in, a daily
+summary skipped, or skipped because the sender is not on the list (with who
+it was from, so a new agent's domain can be added to `senders`).
+
+**Taking an invoice out.** Open the note and press **Remove** next to the
+invoice. Its email keeps the Boord-Done label, so it doesn't come back by
+itself. To have it read again, remove that label from the email in Gmail.
+
+| "Last check failed" says | What to do |
+|---|---|
+| `AUTHENTICATIONFAILED` or `Invalid credentials` | The app password is wrong or was revoked. Make a new one and put it in `market_mail.txt`. |
+| `Not set up` | `data\market_mail.txt` is missing, or has no address or app password line. |
+| A network or timeout error | The PC had no internet. The next check tries again by itself. |
+
 Every generated report is also saved on the server itself, in
 `data\reports\` (same filename as the download, e.g.
 `Daily_Harvest_2026-08-05.xlsx`) - not just wherever the browser that

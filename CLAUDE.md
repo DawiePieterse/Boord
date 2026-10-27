@@ -84,6 +84,7 @@ There is no pytest and no CI. `scripts/selftest.py` is the test suite on purpose
   - The database is copied before anything alters it. If the copy can't be written, nothing migrates.
   - Drift between `models.py` and the live schema is printed at startup. A drift line means a model changed without a migration.
 - **Backups** (`backup.py`): a nightly 02:00 zip of the database and worker photos, written only when the data changed. "Backup Now" in Settings is always unconditional.
+- **Market invoices** (`market_mail.py`): every 15 minutes a thread reads the farm Gmail over IMAP (an app password in `data/market_mail.txt`, never in Git), parses the Johannesburg market agents' PDF invoices with `pypdf`, and files them as `MarketInvoice` rows against Packhouse's delivery note numbers. Handled mail is labelled `Boord-Done` in Gmail. An invoice whose figures don't add up is refused, never half-imported.
 - **`/api/version`** (`version.py`) reports the release tag, the frontend `VERSION`, the migration head versus current revision, backups and the update check.
   - Its states are `release`, `ahead`, `reported` and `unknown`.
   - Boord Monitor, its `heartbeat.ps1` and anyone at a tablet read it, so keep the field names stable.

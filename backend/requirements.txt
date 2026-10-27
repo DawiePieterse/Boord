@@ -10,3 +10,6 @@ alembic==1.14.1
 python-multipart==0.0.20
 openpyxl==3.1.5
 pandas==2.2.3
+# Reads the market agents' emailed invoices (market_mail.py). Pure Python,
+# so nothing to compile on the farm PC; 5.1.0 still runs on Python 3.9.
+pypdf==5.1.0
