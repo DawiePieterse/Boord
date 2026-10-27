@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 from datetime import date
 
@@ -143,19 +144,19 @@ def import_blocks(file: UploadFile, replace: bool = Query(False),
 
 # What a caller off the farm wifi gets back for each worker. The Field app
 # (renderWorkerOptions) and the badge printer both read this endpoint from
-# tablets that have no admin access and need only these; whatsapp_number is
-# the remaining personal field on Worker (SA ID and bank details were dropped
-# for POPIA) and it still only goes out to the admin.
+# tablets that have no admin access and need only these; whatsapp_number and
+# id_number (SA ID or passport) are the personal fields on Worker and they only
+# go out to the admin. Bank details were dropped for POPIA.
 #
 # This split is why deleting the login could not simply delete the check. The
 # Field and Pack House screens are still served to the whole LAN, so without
-# it every phone in the orchard could pull every worker's WhatsApp number.
+# it every phone in the orchard could pull every worker's WhatsApp and ID number.
 _PUBLIC_WORKER_FIELDS = ("id", "first_name", "last_name", "name", "supplier_id", "photo_filename", "active")
 
 
 @router.get("/workers")
 def list_workers(session: Session = Depends(get_session), is_admin=Depends(is_admin_client)):
-    """Full records for the admin; a reduced projection (no whatsapp_number)
+    """Full records for the admin; a reduced projection (no whatsapp_number or id_number)
     for everyone else."""
     workers = session.exec(select(Worker)).all()
     if is_admin:
@@ -209,12 +210,31 @@ def export_workers(fmt: str = Query("xlsx", pattern="^(csv|xlsx)$"), session: Se
                     _admin=Depends(require_admin_client)):
     workers = session.exec(select(Worker)).all()
     supplier_names = {s.id: s.name for s in session.exec(select(Supplier)).all()}
-    headers = ["emp_nr", "first_name", "last_name", "whatsapp_number",
+    headers = ["emp_nr", "first_name", "last_name", "id_number", "whatsapp_number",
                "supplier_id", "supplier_name", "active"]
-    rows = [[w.id, w.first_name, w.last_name, w.whatsapp_number,
+    rows = [[w.id, w.first_name, w.last_name, w.id_number, w.whatsapp_number,
              w.supplier_id, supplier_names.get(w.supplier_id, ""), w.active]
             for w in workers]
     return tabular_response(headers, rows, fmt, "Workers")
+
+
+# An SA cell number after spaces, dashes and brackets are removed. Also in
+# migration 3f8a2c6d9e15, which keeps its own copy as migrations must.
+_SA_CELL = re.compile(r"^(0|\+?27)[678]\d{8}$")
+
+
+def _id_and_whatsapp(r):
+    """id_number and whatsapp_number for one imported row. A file exported
+    before id_number existed has only whatsapp_number, which the office used
+    for ID and passport numbers - re-importing it must not put them back
+    there, so such a row gets the same split the migration made: a cell
+    number stays WhatsApp, anything else is the ID."""
+    whatsapp = str(r.get("whatsapp_number") or "").strip()
+    if "id_number" in r:
+        return dict(id_number=str(r.get("id_number") or "").strip(), whatsapp_number=whatsapp)
+    if not whatsapp or _SA_CELL.match(re.sub(r"[\s\-()]", "", whatsapp)):
+        return dict(whatsapp_number=whatsapp)
+    return dict(id_number=whatsapp, whatsapp_number="")
 
 
 @router.post("/workers/import")
@@ -243,7 +263,7 @@ def import_workers(file: UploadFile, session: Session = Depends(get_session),
             first_name=str(first_name).strip(),
             last_name=str(last_name).strip(),
             name=display_name,
-            whatsapp_number=str(r.get("whatsapp_number") or ""),
+            **_id_and_whatsapp(r),
             supplier_id=supplier_or_own(session, int(r["supplier_id"]) if r.get("supplier_id") else None),
             active=active,
         ))

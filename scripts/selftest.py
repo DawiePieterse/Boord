@@ -184,7 +184,12 @@ def test_a_database_from_before_migrations_is_caught_up_and_stamped():
                     "VALUES ('15', 'Blok 15', 'Mauritius', 100, 1.5, 1)")
         con.execute("INSERT INTO worker (id, first_name, last_name, name, id_number, "
                     "bank, account, whatsapp_number, photo_filename, active) "
-                    "VALUES ('001', 'Thandi', 'N', 'Thandi N', '', '', '', '', '', 1)")
+                    "VALUES ('001', 'Thandi', 'N', 'Thandi N', '', '', '', '8001015009087', '', 1)")
+        # The office typed IDs into WhatsApp Number; 3f8a2c6d9e15 moves them
+        # out and must leave a real cell number where it is.
+        con.execute("INSERT INTO worker (id, first_name, last_name, name, id_number, "
+                    "bank, account, whatsapp_number, photo_filename, active) "
+                    "VALUES ('002', 'Sipho', 'D', 'Sipho D', '', '', '', '082 123 4567', '', 1)")
         con.commit()
         con.close()
 
@@ -211,7 +216,12 @@ def test_a_database_from_before_migrations_is_caught_up_and_stamped():
             "an adopted database does not match models.py once it is up to date")
         with Session(old_engine) as s:
             assert s.exec(select(func.count()).select_from(Block)).one() == 1
-            assert s.exec(select(func.count()).select_from(Worker)).one() == 1
+            assert s.exec(select(func.count()).select_from(Worker)).one() == 2
+            thandi, sipho = s.get(Worker, "001"), s.get(Worker, "002")
+            assert (thandi.id_number, thandi.whatsapp_number) == ("8001015009087", ""), \
+                "an ID number typed into WhatsApp Number was not moved to id_number"
+            assert (sipho.id_number, sipho.whatsapp_number) == ("", "082 123 4567"), \
+                "a real WhatsApp number was moved to id_number"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

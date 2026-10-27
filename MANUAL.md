@@ -576,7 +576,7 @@ likely to get tidied up or deleted by accident.
 > file handles open, which blocks updates and folder deletion (this is a
 > real one: it took a reboot to work out why a folder refused to delete).
 > More seriously, `data\` holds a live SQLite database plus every worker's
-> name, WhatsApp number and photograph - syncing a database file while
+> name, ID number, WhatsApp number and photograph - syncing a database file while
 > it is being written is a known way to corrupt it, and uploading worker
 > records to a personal cloud account is a data-protection problem you do
 > not want. Back up *to* a cloud drive by all means (chapter 14) - a
@@ -1622,7 +1622,7 @@ pack house's reference data.
 
 ### Workers
 
-Employee number, name, WhatsApp number, which
+Employee number, name, ID number (SA ID or passport), WhatsApp number, which
 supplier they belong to, a photo (captured via the device's camera
 right in the edit form, or uploaded), and active/inactive. Supports
 CSV/xlsx **Export** and **Import** for bulk edits, and the
@@ -1802,7 +1802,7 @@ worth writing down what the folder is:
 ```
 # Off-site backup copies. See MANUAL.md chapter 11.
 # NOT a synced cloud folder - these files are not encrypted and contain
-# every worker's name, WhatsApp number and photograph.
+# every worker's name, ID number, WhatsApp number and photograph.
 E:\BoordBackups
 ```
 
@@ -1816,7 +1816,7 @@ error message.
 
 > **⚠️ Do not point this at a synced cloud folder - Google Drive, OneDrive,
 > Dropbox, iCloud.** A backup archive contains `boord.db`, which holds
-> **every worker's name, WhatsApp number and photograph**, plus every photo
+> **every worker's name, ID number, WhatsApp number and photograph**, plus every photo
 > file. The archives are not encrypted yet, so copying them into a personal
 > cloud account puts the pack house's
 > worker records on someone else's servers, under a personal login, outside
@@ -2065,7 +2065,8 @@ keys below match `backend/models.py` exactly.
 | `id` | text | `"001"` | Primary key - the employee number. Must be unique and must match the number printed on the worker's badge. |
 | `first_name` | text | `"Sipho"` | |
 | `last_name` | text | `"Dlamini"` | |
-| `whatsapp_number` | text | `"+27821234567"` | Optional, not currently used to send anything automatically. |
+| `id_number` | text | `"8001015009087"` | Optional. SA ID number, or passport number for a foreign worker. Admin-only: never sent to a field or pack house tablet. Until 3.26 there was no such field and the office typed IDs into WhatsApp Number; the 3.26 update moved every value there that is not an SA cell number into this field. |
+| `whatsapp_number` | text | `"+27821234567"` | Optional, not currently used to send anything automatically. Admin-only. |
 | `supplier_id` | number (optional) | `2` | Which farm this worker belongs to. Left blank for the farm's own workers. |
 | `photo_filename` | text | `"001.jpg"` | Set automatically when a photo is captured/uploaded - not hand-edited. |
 | `active` | true/false | `true` | Inactive workers are hidden from most pickers/dropdowns but kept for history. |
