@@ -1,9 +1,11 @@
+import json
 import os
+import sqlite3
 from collections import Counter
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlmodel import Session, select
 
@@ -462,6 +464,96 @@ def litchi_wages_report(period_start: date, period_end: date, supplier_id: Optio
         rows.append([worker_id, w.name if w else "", *(wd.get(d, 0) for d in days), sum(wd.values())])
 
     return _xlsx_response(headers, rows, "Litchi Wages", f"Litchi_Wages_{period_start}_{period_end}.xlsx")
+
+
+# Boord Packhouse owns pallets and delivery notes in its own packhouse.db. The
+# hub opens it read-only, the way the sibling apps open boord.db, rather than
+# asking Packhouse's API: that only lists the last 90 days, and a season report
+# can reach further back. Beside this repo on the Mac and on the farm PC
+# (C:\Boord and C:\Boord-packhouse); the env var is for anywhere else.
+PACKHOUSE_DB_PATH = os.path.abspath(os.environ.get("BOORD_PACKHOUSE_DB", os.path.join(
+    DATA_DIR, "..", "..", "Boord-packhouse", "data", "packhouse.db")))
+
+
+def _packhouse_rows(sql: str, params: tuple = ()) -> list:
+    """Rows from packhouse.db as dicts. A 503 with words, not a 500, when Pack
+    house isn't installed here or hasn't made the table yet - the office should
+    read "Packhouse isn't set up", not "could not generate report"."""
+    if not os.path.exists(PACKHOUSE_DB_PATH):
+        raise HTTPException(503, "Boord Packhouse data was not found on this server")
+    conn = sqlite3.connect(f"file:{PACKHOUSE_DB_PATH}?mode=ro", uri=True, timeout=10)
+    conn.row_factory = sqlite3.Row
+    try:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+    except sqlite3.OperationalError as e:
+        raise HTTPException(503, f"Boord Packhouse data could not be read: {e}")
+    finally:
+        conn.close()
+
+
+def _pallet_stats(lines: list) -> tuple:
+    cartons = sum(ln.get("cartons", 0) for ln in lines)
+    return cartons, round(sum(ln.get("cartons", 0) * ln.get("carton_kg", 0) for ln in lines), 1)
+
+
+def _line_text(ln: dict) -> str:
+    block = f", {ln.get('block_name')}" if ln.get("block_id") else ""
+    return f"{ln.get('cartons')} x {ln.get('packaging_name')}{block}"
+
+
+@router.get("/pallets-stacked")
+def pallets_stacked_report(period_start: date, period_end: date, supplier_id: Optional[int] = None):
+    """One row per pallet stacked (scanned) in the range, from Packhouse's
+    Pallet Stack, with the delivery note it went out on, if any."""
+    start, end = day_bounds(period_start, period_end)
+    sql = "SELECT * FROM pallet WHERE removed = 0 AND scanned_at >= ? AND scanned_at <= ?"
+    params = [str(start), str(end)]
+    if supplier_id is not None:
+        sql += " AND supplier_id = ?"
+        params.append(supplier_id)
+    pallets = _packhouse_rows(sql + " ORDER BY scanned_at", tuple(params))
+
+    note_of = {}
+    for n in _packhouse_rows("SELECT note_no, pallets FROM deliverynote WHERE removed = 0"):
+        for p in json.loads(n["pallets"] or "[]"):
+            note_of[p.get("uuid")] = n["note_no"]
+
+    headers = ["Date", "Time", "Pallet Ref", "Pallet Year-No", "Barcode", "Date Code", "Supplier", "Market",
+               "Cartons", "Kg", "Contents", "Scanned By", "Delivery Note"]
+    rows = []
+    for p in pallets:
+        lines = json.loads(p["lines"] or "[]")
+        cartons, kg = _pallet_stats(lines)
+        local_ts = to_local(datetime.fromisoformat(p["scanned_at"]))
+        rows.append([
+            local_ts.strftime("%Y-%m-%d") if local_ts else "", local_ts.strftime("%H:%M") if local_ts else "",
+            p["pallet_ref"], f"{p['pallet_year']}-{p['pallet_no']:04d}" if p["pallet_no"] else "",
+            p["barcode"], p["date_code"], p["supplier_name"], p["market_name"], cartons, kg,
+            "; ".join(_line_text(ln) for ln in lines), p["scanned_by_name"], note_of.get(p["uuid"], ""),
+        ])
+    return _xlsx_response(headers, rows, "Pallets Stacked", f"Pallets_Stacked_{period_start}_{period_end}.xlsx")
+
+
+@router.get("/delivery-notes")
+def delivery_notes_report(period_start: date, period_end: date, supplier_id: Optional[int] = None):
+    """One row per delivery note loaded in the range. The supplier filter is
+    accepted but not applied: a note carries pallets of whatever suppliers
+    were stacked, and keeps only their names."""
+    notes = _packhouse_rows("SELECT * FROM deliverynote WHERE removed = 0 AND loaded_on >= ? AND loaded_on <= ? "
+                            "ORDER BY loaded_on, note_no", (period_start.isoformat(), period_end.isoformat()))
+    headers = ["Note No", "Loaded On", "Offloaded On", "Receiver", "Transporter", "Seal No", "Cooled To (°C)",
+               "Target Receiver", "Pallets", "Cartons", "Kg", "Pallet Refs", "Made By"]
+    rows = []
+    for n in notes:
+        pallets = json.loads(n["pallets"] or "[]")
+        stats = [_pallet_stats(p.get("lines", [])) for p in pallets]
+        rows.append([
+            n["note_no"], n["loaded_on"], n["offloaded_on"], n["receiver"].replace("\n", ", "), n["transporter"],
+            n["seal_no"], n["cooled_to"], n["target_receiver"].replace("\n", ", "), len(pallets),
+            sum(s[0] for s in stats), round(sum(s[1] for s in stats), 1),
+            ", ".join(p.get("pallet_ref", "") for p in pallets), n["made_by_name"],
+        ])
+    return _xlsx_response(headers, rows, "Delivery Notes", f"Delivery_Notes_{period_start}_{period_end}.xlsx")
 
 
 @router.get("/block-harvest")
