@@ -289,3 +289,64 @@ class PrePackRecord(SQLModel, table=True):
     dominant_block_id: Optional[str] = Field(default=None, foreign_key="block.id")
     operator: str = ""
     notes: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Market statements (Admin -> Reports -> Markets & Transport)
+# ---------------------------------------------------------------------------
+
+class MarketStatement(SQLModel, table=True):
+    """What a market paid for one Boord Packhouse delivery note, and what the
+    transporter charged to carry it, typed in from the market's statement and
+    the transporter's invoice. Packhouse owns the note (packhouse.db, read-only
+    from here) and knows what was sent; this is the money side it never sees,
+    the columns the office kept by hand in the season's "Markte" workbook.
+    Keyed by the note's uuid, which never changes, rather than its number,
+    which the pack house can still correct. lines is a JSON list of {pack,
+    sold, price}, pack being the packaging name on the note's pallets; price
+    is per carton. Money is rand, transport excluding VAT."""
+    note_uuid: str = Field(primary_key=True)
+    lines: str = "[]"
+    commission: float = 0
+    deductions: float = 0       # Xtend bags, SALGA, lab fees: whatever else the statement takes off
+    bank_cost: float = 0
+    waybill_no: str = ""        # Vragbrief #, the transporter's POD
+    invoice_no: str = ""
+    transport_cost: float = 0
+    notes: str = ""
+    updated_at: datetime
+
+
+class MarketInvoice(SQLModel, table=True):
+    """A market agent's tax invoice for a delivery note, read out of the farm's
+    Gmail by market_mail.py. A note paid in parts has one per part; the
+    reports add them up and, once a note has any, use them instead of the
+    typed statement's sales figures. note_no is the invoice's "PRODUCER
+    D/NOTE", matched to Packhouse's note number when a report is made, so an
+    invoice that arrives before its note is made still finds it later. lines
+    is a JSON list of {product, sold, income}, product being the market's own
+    description ("LICH, BX020, THREE MONTH RED, CL 1, XL, *, *"). Deductions
+    include VAT. file is the copy kept in data/market_mail/."""
+    invoice_no: str = Field(primary_key=True)   # "5713087/1"
+    note_no: str
+    invoice_date: date
+    payment: str = ""           # "Final Payment", "Partial Payment #1"
+    agent: str = ""
+    lines: str = "[]"
+    gross: float = 0
+    commission: float = 0
+    deductions: float = 0
+    bank_cost: float = 0
+    net: float = 0
+    file: str = ""
+    email_from: str = ""
+    imported_at: datetime
+
+
+class MarketProduct(SQLModel, table=True):
+    """Which Packhouse pack a market's product description is, so sold
+    cartons line up with sent ones. Set once per description on the Reports
+    tab; a description with no pack still counts in a note's totals, under
+    its own name."""
+    product: str = Field(primary_key=True)
+    pack: str

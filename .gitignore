@@ -34,6 +34,10 @@ data/imports/
 data/photos/
 data/backups/
 data/reports/
+# The farm Gmail's address and app password (market_mail.py): a credential.
+data/market_mail.txt
+# The market invoices read from that Gmail, and the fetch log.
+data/market_mail/
 .DS_Store
 *.pyc
 # The heartbeat's ping URLs, before the heartbeat moved to Boord Monitor

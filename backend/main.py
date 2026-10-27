@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backup import start_backup_scheduler
 from db import PHOTOS_DIR, seed_defaults
+from market_mail import start_market_mail_scheduler
 from migrate import run_migrations
 from version import prime as prime_version
 from routers import (backups, dashboard, devices, harvest_records, master_data, lots,
@@ -68,6 +69,7 @@ def on_startup():
     run_migrations()
     seed_defaults()
     start_backup_scheduler()
+    start_market_mail_scheduler()
     # After the migrations, so the revision this reports is the one the
     # server is about to serve against rather than the one it booted with.
     prime_version()

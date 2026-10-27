@@ -3,15 +3,17 @@ import os
 import sqlite3
 from collections import Counter
 from datetime import date, datetime
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
+import market_mail
 from db import DATA_DIR, get_own_supplier_id, get_session, supplier_map
 from excel_io import XLSX_MEDIA, rows_to_xlsx_bytes
-from models import Block, Device, HarvestRecord, Lot, \
+from models import Block, Device, HarvestRecord, Lot, MarketInvoice, MarketProduct, MarketStatement, \
     ReceivingRecord, Supplier, SystemSetting, Team, Worker
 from routers.dashboard import dashboard_summary
 from routers.lots import blocks_by_lot as _blocks_by_lot, list_in_transit, list_pending, list_received
@@ -567,3 +569,294 @@ def block_harvest_report(period_start: date, period_end: date, supplier_id: Opti
         b["avg_kg_hectare"] if b["avg_kg_hectare"] is not None else "",
     ] for b in summary["blocks"]]
     return _xlsx_response(headers, rows, "Block Harvest", f"Block_Harvest_{period_start}_{period_end}.xlsx")
+
+
+# ---------------------------------------------------------------------------
+# Markets & Transport: what each delivery note sent (Packhouse's), what the
+# market paid for it and what carrying it cost (the office's MarketStatement).
+# These replace the season "Markte" workbook the office kept by hand.
+# ---------------------------------------------------------------------------
+
+# South African VAT. Statements and transport costs are typed excluding it,
+# the way the transport invoices list them; the Transport Summary adds it back.
+VAT_RATE = 0.15
+
+
+class MarketLineIn(BaseModel):
+    pack: str
+    sold: Optional[int] = Field(default=None, ge=0)
+    price: Optional[float] = Field(default=None, ge=0)
+
+
+class MarketStatementIn(BaseModel):
+    lines: List[MarketLineIn] = []
+    commission: float = Field(default=0, ge=0)
+    deductions: float = Field(default=0, ge=0)
+    bank_cost: float = Field(default=0, ge=0)
+    waybill_no: str = ""
+    invoice_no: str = ""
+    transport_cost: float = Field(default=0, ge=0)
+    notes: str = ""
+
+
+def _ratio(num: float, den: float):
+    """Blank rather than a division error when nothing was sold or carried."""
+    return round(num / den, 2) if den else ""
+
+
+def _market_notes(period_start: date, period_end: date, session: Session) -> list:
+    """Every live delivery note loaded in the range, with what went out on it
+    per pack and what the market paid. Packs come from the note's own copy of
+    its pallets, so a pack retired in Packhouse since still shows. Not
+    filtered by supplier, like the Delivery Notes report: a note carries
+    whatever suppliers were stacked.
+
+    The money comes from the market's emailed invoices (market_mail.py) once
+    any have arrived for the note, all its part-payments added up, and
+    otherwise from the statement the office typed. Transport is always typed."""
+    notes = _packhouse_rows("SELECT * FROM deliverynote WHERE removed = 0 AND loaded_on >= ? AND loaded_on <= ? "
+                            "ORDER BY loaded_on, note_no", (period_start.isoformat(), period_end.isoformat()))
+    uuids = [n["uuid"] for n in notes]
+    statements = {s.note_uuid: s for s in session.exec(
+        select(MarketStatement).where(MarketStatement.note_uuid.in_(uuids))).all()} if uuids else {}
+    invoices = {}
+    note_nos = [str(n["note_no"]) for n in notes]
+    for inv in session.exec(select(MarketInvoice).where(MarketInvoice.note_no.in_(note_nos))
+                            .order_by(MarketInvoice.invoice_date, MarketInvoice.invoice_no)).all() if notes else []:
+        invoices.setdefault(inv.note_no, []).append(inv)
+    pack_of = {m.product: m.pack for m in session.exec(select(MarketProduct)).all()}
+    out = []
+    for n in notes:
+        pallets = json.loads(n["pallets"] or "[]")
+        st = statements.get(n["uuid"])
+        invs = invoices.get(str(n["note_no"]), [])
+        packs = {}
+        for p in pallets:
+            for ln in p.get("lines", []):
+                name = ln.get("packaging_name", "")
+                pk = packs.setdefault(name, {"pack": name, "carton_kg": ln.get("carton_kg", 0), "sent": 0})
+                pk["sent"] += ln.get("cartons", 0)
+        if invs:
+            for pk in packs.values():
+                pk["sold"], pk["gross"] = 0, 0
+            for inv in invs:
+                for ln in json.loads(inv.lines):
+                    # A product not yet matched to a pack still counts, as a
+                    # line of its own with nothing sent and no kg.
+                    name = pack_of.get(ln["product"], ln["product"])
+                    pk = packs.setdefault(name, {"pack": name, "carton_kg": 0, "sent": 0, "sold": 0, "gross": 0,
+                                                 "unmapped": ln["product"] not in pack_of})
+                    pk["sold"] += ln["sold"]
+                    pk["gross"] += ln["income"]
+            for pk in packs.values():
+                pk["gross"] = round(pk["gross"], 2)
+                pk["price"] = round(pk["gross"] / pk["sold"], 2) if pk["sold"] else None
+            money = {k: round(sum(getattr(inv, k) for inv in invs), 2)
+                     for k in ("commission", "deductions", "bank_cost")}
+        else:
+            typed = {ln["pack"]: ln for ln in json.loads(st.lines)} if st else {}
+            for pk in packs.values():
+                pk["sold"] = typed.get(pk["pack"], {}).get("sold")
+                pk["price"] = typed.get(pk["pack"], {}).get("price")
+                pk["gross"] = round((pk["sold"] or 0) * (pk["price"] or 0), 2)
+            money = {k: getattr(st, k) if st else 0 for k in ("commission", "deductions", "bank_cost")}
+        packs = sorted(packs.values(), key=lambda pk: pk["pack"])
+        gross = round(sum(pk["gross"] for pk in packs), 2)
+        out.append(dict({
+            "uuid": n["uuid"], "note_no": n["note_no"], "loaded_on": n["loaded_on"],
+            "receiver": (n["receiver"] or "").split("\n")[0],
+            "market": ", ".join(sorted({p.get("market_name", "") for p in pallets} - {""})),
+            "transporter": n["transporter"], "pallets": len(pallets), "packs": packs,
+            "sent": sum(pk["sent"] for pk in packs), "sold": sum(pk["sold"] or 0 for pk in packs),
+            "kg_sent": round(sum(pk["sent"] * pk["carton_kg"] for pk in packs), 1),
+            "kg_sold": round(sum((pk["sold"] or 0) * pk["carton_kg"] for pk in packs), 1),
+            "entered": st is not None or bool(invs), "gross": gross,
+            "net": round(gross - sum(money.values()), 2),
+            "invoices": [{"invoice_no": i.invoice_no, "invoice_date": str(i.invoice_date), "payment": i.payment,
+                          "agent": i.agent, "net": i.net} for i in invs],
+            "waybill_no": st.waybill_no if st else "", "invoice_no": st.invoice_no if st else "",
+            "transport_cost": st.transport_cost if st else 0, "notes": st.notes if st else "",
+        }, **money))
+    return out
+
+
+@router.get("/market-notes")
+def list_market_notes(period_start: date, period_end: date, session: Session = Depends(get_session)):
+    """The Markets & Transport list on the Reports tab."""
+    return _market_notes(period_start, period_end, session)
+
+
+@router.put("/market-notes/{note_uuid}")
+def save_market_statement(note_uuid: str, body: MarketStatementIn, session: Session = Depends(get_session)):
+    if not _packhouse_rows("SELECT uuid FROM deliverynote WHERE uuid = ? AND removed = 0", (note_uuid,)):
+        raise HTTPException(404, "That delivery note is not in Boord Packhouse any more")
+    session.merge(MarketStatement(
+        note_uuid=note_uuid, lines=json.dumps([ln.model_dump() for ln in body.lines]),
+        commission=body.commission, deductions=body.deductions, bank_cost=body.bank_cost,
+        waybill_no=body.waybill_no.strip(), invoice_no=body.invoice_no.strip(),
+        transport_cost=body.transport_cost, notes=body.notes.strip(), updated_at=datetime.utcnow(),
+    ))
+    session.commit()
+    return {"ok": True}
+
+
+class MarketProductIn(BaseModel):
+    product: str
+    pack: str = ""
+
+
+@router.get("/market-mail")
+def market_mail_status(session: Session = Depends(get_session)):
+    """The market email box on the Reports tab: whether it is set up (the
+    address only - the app password never leaves the PC), the last pass and
+    its log, and every market product description with the pack it is
+    matched to, plus Packhouse's packs to choose from."""
+    cfg = market_mail.read_config()
+    status = market_mail.read_status()
+    products = sorted({ln["product"] for inv in session.exec(select(MarketInvoice)).all()
+                       for ln in json.loads(inv.lines)})
+    pack_of = {m.product: m.pack for m in session.exec(select(MarketProduct)).all()}
+    try:
+        packs = [r["name"] for r in _packhouse_rows("SELECT name FROM packaging WHERE active = 1 ORDER BY sort, name")]
+    except HTTPException:
+        packs = []
+    return {
+        "address": cfg["address"] if cfg else "", "senders": cfg["senders"] if cfg else [],
+        "every_minutes": market_mail.FETCH_MINUTES, "last_run": status.get("last_run"),
+        "last_error": status.get("last_error", "") if cfg else "", "log": status.get("log", [])[-15:][::-1],
+        "products": [{"product": p, "pack": pack_of.get(p, "")} for p in products], "packs": packs,
+    }
+
+
+@router.post("/market-mail/fetch")
+def market_mail_fetch_now():
+    """"Fetch now": one pass straight away instead of waiting for the next."""
+    if not market_mail.read_config():
+        raise HTTPException(400, "Market email isn't set up on this server: see the manual, data\\market_mail.txt")
+    market_mail.fetch_once()
+    return {"ok": True}
+
+
+@router.put("/market-products")
+def save_market_product(body: MarketProductIn, session: Session = Depends(get_session)):
+    """Match a market's product description to a Packhouse pack; a blank pack
+    unmatches it."""
+    existing = session.get(MarketProduct, body.product)
+    if body.pack.strip():
+        session.merge(MarketProduct(product=body.product, pack=body.pack.strip()))
+    elif existing:
+        session.delete(existing)
+    session.commit()
+    return {"ok": True}
+
+
+@router.delete("/market-invoices")
+def delete_market_invoice(invoice_no: str, session: Session = Depends(get_session)):
+    """Takes an imported invoice back out (a wrong or duplicate one). Its email
+    stays labelled in Gmail, so the next pass won't bring it back; remove the
+    label there to have it read again. In the query string, not the path:
+    invoice numbers have a slash in them."""
+    inv = session.get(MarketInvoice, invoice_no)
+    if not inv:
+        raise HTTPException(404, "No such invoice")
+    session.delete(inv)
+    session.commit()
+    return {"ok": True}
+
+
+_MONEY_HEADERS = ["Gross", "Commission", "Deductions", "Bank Cost", "Net Paid", "Net R/Carton", "Net R/Kg"]
+
+
+def _money(r: dict) -> list:
+    return [round(r["gross"], 2), round(r["commission"], 2), round(r["deductions"], 2), round(r["bank_cost"], 2),
+            round(r["net"], 2), _ratio(r["net"], r["sold"]), _ratio(r["net"], r["kg_sold"])]
+
+
+@router.get("/market-summary")
+def market_summary_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
+                          session: Session = Depends(get_session)):
+    """One row per receiver and market (Boeretrust / Local, AgriLink / USA Sea
+    Freight...), the "2025 Totaal" sheet's totals, with a Total row."""
+    keys = ["pallets", "sent", "sold", "kg_sent", "kg_sold", "gross", "commission", "deductions", "bank_cost",
+            "net", "transport_cost"]
+    groups = {}
+    for n in _market_notes(period_start, period_end, session):
+        g = groups.setdefault((n["receiver"], n["market"]), dict({k: 0 for k in keys}, notes=0, entered=0))
+        g["notes"] += 1
+        g["entered"] += n["entered"]
+        for k in keys:
+            g[k] += n[k]
+    total = dict({k: sum(g[k] for g in groups.values()) for k in keys},
+                 notes=sum(g["notes"] for g in groups.values()), entered=sum(g["entered"] for g in groups.values()))
+
+    def row(receiver, market, g):
+        return [receiver, market, g["notes"], f"{g['entered']} of {g['notes']}", g["pallets"], g["sent"], g["sold"],
+                g["sent"] - g["sold"], round(g["kg_sent"], 1), round(g["kg_sold"], 1)] + _money(g) + [
+                round(g["transport_cost"], 2), round(g["net"] - g["transport_cost"], 2)]
+
+    headers = ["Receiver", "Market", "Notes", "Statements Entered", "Pallets", "Cartons Sent", "Cartons Sold",
+               "Outstanding", "Kg Sent", "Kg Sold"] + _MONEY_HEADERS + ["Transport (excl VAT)", "Net After Transport"]
+    rows = [row(rc, mk, g) for (rc, mk), g in sorted(groups.items())]
+    if rows:
+        rows.append(row("Total", "", total))
+    return _xlsx_response(headers, rows, "Market Summary", f"Market_Summary_{period_start}_{period_end}.xlsx")
+
+
+@router.get("/market-packs")
+def market_packs_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
+                        session: Session = Depends(get_session)):
+    """One row per receiver, market and pack: sent, sold, outstanding and the
+    average price, the per-pack columns of the old workbook turned on their side."""
+    groups = {}
+    for n in _market_notes(period_start, period_end, session):
+        for pk in n["packs"]:
+            g = groups.setdefault((n["receiver"], n["market"], pk["pack"]), {"sent": 0, "sold": 0, "gross": 0, "kg": 0})
+            g["sent"] += pk["sent"]
+            g["sold"] += pk["sold"] or 0
+            g["gross"] += pk["gross"]
+            g["kg"] += (pk["sold"] or 0) * pk["carton_kg"]
+    headers = ["Receiver", "Market", "Pack", "Cartons Sent", "Cartons Sold", "Outstanding", "Avg Price/Carton",
+               "Gross", "Gross R/Kg"]
+    rows = [[rc, mk, pack, g["sent"], g["sold"], g["sent"] - g["sold"], _ratio(g["gross"], g["sold"]),
+             round(g["gross"], 2), _ratio(g["gross"], g["kg"])] for (rc, mk, pack), g in sorted(groups.items())]
+    return _xlsx_response(headers, rows, "Market Sales by Pack", f"Market_Sales_by_Pack_{period_start}_{period_end}.xlsx")
+
+
+@router.get("/market-sales")
+def market_sales_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
+                        session: Session = Depends(get_session)):
+    """One row per delivery note: what went, what sold, what the market paid."""
+    headers = ["Loaded On", "Note No", "Receiver", "Market", "Transporter", "Pallets", "Cartons Sent",
+               "Cartons Sold", "Outstanding", "Kg Sold"] + _MONEY_HEADERS + ["Packs", "Statement", "Notes"]
+    rows = [[
+        n["loaded_on"], n["note_no"], n["receiver"], n["market"], n["transporter"], n["pallets"], n["sent"],
+        n["sold"], n["sent"] - n["sold"], n["kg_sold"],
+    ] + _money(n) + [
+        "; ".join(f"{pk['pack']}: {pk['sent']} sent, {pk['sold'] if pk['sold'] is not None else '-'} sold"
+                  + (f" @ R{pk['price']:.2f}" if pk["price"] is not None else "") for pk in n["packs"]),
+        "Entered" if n["entered"] else "Not entered", n["notes"],
+    ] for n in _market_notes(period_start, period_end, session)]
+    return _xlsx_response(headers, rows, "Consignment Sales", f"Consignment_Sales_{period_start}_{period_end}.xlsx")
+
+
+@router.get("/transport-summary")
+def transport_summary_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
+                             session: Session = Depends(get_session)):
+    """The "Vervoer opsomming" sheet: one row per delivery note with its
+    transporter's waybill, invoice and cost, and a Total row."""
+    headers = ["Loaded On", "Note No", "Receiver", "Market", "Transporter", "Waybill No", "Invoice No", "Pallets",
+               "R/Pallet (excl VAT)", "Total (excl VAT)", "VAT", "Total (incl VAT)"]
+    notes = _market_notes(period_start, period_end, session)
+    rows = [[
+        n["loaded_on"], n["note_no"], n["receiver"], n["market"], n["transporter"], n["waybill_no"], n["invoice_no"],
+        n["pallets"], _ratio(n["transport_cost"], n["pallets"]), round(n["transport_cost"], 2),
+        round(n["transport_cost"] * VAT_RATE, 2), round(n["transport_cost"] * (1 + VAT_RATE), 2),
+    ] for n in notes]
+    if rows:
+        # The average per pallet is over the notes whose invoice is in, so one
+        # not typed yet doesn't drag it down.
+        pallets, cost = sum(n["pallets"] for n in notes), sum(n["transport_cost"] for n in notes)
+        costed = sum(n["pallets"] for n in notes if n["transport_cost"])
+        rows.append(["Total", "", "", "", "", "", "", pallets, _ratio(cost, costed), round(cost, 2),
+                     round(cost * VAT_RATE, 2), round(cost * (1 + VAT_RATE), 2)])
+    return _xlsx_response(headers, rows, "Transport Summary", f"Transport_Summary_{period_start}_{period_end}.xlsx")
