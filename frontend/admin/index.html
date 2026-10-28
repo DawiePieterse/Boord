@@ -406,6 +406,32 @@
           <ul id="marketMailLog" class="text-xs text-slate-600 mt-2 space-y-1"></ul>
         </details>
       </div>
+
+      <!-- The manual and the training guides, served by main.py's
+           /admin/manuals/ route from the PDFs at the repo root. -->
+      <h2 class="font-bold text-lg pt-2">Training Manuals</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <a href="/admin/manuals/TRAINING_FIELD.pdf" target="_blank" rel="noopener" class="bg-white rounded-xl shadow p-4 hover:bg-slate-50 flex flex-col items-center gap-2 text-center">
+          <i class="fa-solid fa-seedling text-3xl text-green-600"></i>
+          <div class="font-semibold text-sm">Field</div>
+          <div class="text-xs text-slate-400">Training guide (PDF)</div>
+        </a>
+        <a href="/admin/manuals/TRAINING_PACKHOUSE.pdf" target="_blank" rel="noopener" class="bg-white rounded-xl shadow p-4 hover:bg-slate-50 flex flex-col items-center gap-2 text-center">
+          <i class="fa-solid fa-warehouse text-3xl text-red-700"></i>
+          <div class="font-semibold text-sm">Pack House</div>
+          <div class="text-xs text-slate-400">Training guide (PDF)</div>
+        </a>
+        <a href="/admin/manuals/TRAINING_ADMIN.pdf" target="_blank" rel="noopener" class="bg-white rounded-xl shadow p-4 hover:bg-slate-50 flex flex-col items-center gap-2 text-center">
+          <i class="fa-solid fa-user-tie text-3xl text-yellow-500"></i>
+          <div class="font-semibold text-sm">Admin</div>
+          <div class="text-xs text-slate-400">Training guide (PDF)</div>
+        </a>
+        <a href="/admin/manuals/MANUAL.pdf" target="_blank" rel="noopener" class="bg-white rounded-xl shadow p-4 hover:bg-slate-50 flex flex-col items-center gap-2 text-center">
+          <i class="fa-solid fa-book text-3xl text-slate-500"></i>
+          <div class="font-semibold text-sm">Full Manual</div>
+          <div class="text-xs text-slate-400">User and admin manual (PDF)</div>
+        </a>
+      </div>
     </div>
 
     <!-- SETTINGS -->

@@ -1195,7 +1195,7 @@ const REPORTS = [
   // are built from. By the date each note was loaded; never by supplier.
   { key: "market-summary", label: "Markte Opsomming / Market Summary", icon: "fa-store", group: "markets",
     desc: "One row per receiver and market - notes, pallets, cartons sent and sold, kg, gross, commission, deductions, net paid, R/carton, R/kg and transport, with a total." },
-  { key: "market-packs", label: "Market Sales by Pack", icon: "fa-boxes-stacked", group: "markets",
+  { key: "market-packs", label: "Market Sales by Package Type", icon: "fa-boxes-stacked", group: "markets",
     desc: "Per receiver, market and pack - cartons sent, sold and outstanding, average price per carton and gross R/kg." },
   { key: "market-sales", label: "Consignment Sales", icon: "fa-file-invoice-dollar", group: "markets",
     desc: "One row per delivery note - what went, what sold at what price, and what the market paid after costs." },

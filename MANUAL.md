@@ -1748,7 +1748,7 @@ supplier, because a note carries whatever suppliers were stacked.
 | Report | Contents |
 |---|---|
 | Markte Opsomming / Market Summary | One row per receiver and market: notes, how many statements are entered, pallets, cartons sent, sold and outstanding, kg, gross, commission, deductions, bank cost, net paid, net R/carton and R/kg, transport, and net after transport. Ends with a total row. |
-| Market Sales by Pack | Per receiver, market and pack: cartons sent, sold and outstanding, average price per carton, gross and gross R/kg |
+| Market Sales by Package Type | Per receiver, market and pack: cartons sent, sold and outstanding, average price per carton, gross and gross R/kg |
 | Consignment Sales | One row per delivery note: what went, what sold and at what price, and what the market paid after costs |
 | Vervoer Opsomming / Transport Summary | One row per delivery note: transporter, waybill, invoice, pallets, R/pallet, and cost excluding VAT, VAT and including VAT. Ends with a total row. |
 
@@ -2189,7 +2189,7 @@ keys below match `backend/models.py` exactly.
 | `id` | text | `"001"` | Primary key - the employee number. Must be unique and must match the number printed on the worker's badge. |
 | `first_name` | text | `"Sipho"` | |
 | `last_name` | text | `"Dlamini"` | |
-| `id_number` | text | `"8001015009087"` | Optional. SA ID number, or passport number for a foreign worker. Admin-only: never sent to a field or pack house tablet. Until 3.28 there was no such field and the office typed IDs into WhatsApp Number; the 3.28 update moved every value there that is not an SA cell number into this field. |
+| `id_number` | text | `"8001015009087"` | Optional. SA ID number, or passport number for a foreign worker. Admin-only: never sent to a field or pack house tablet. Until 3.30 there was no such field and the office typed IDs into WhatsApp Number; the 3.30 update moved every value there that is not an SA cell number into this field. |
 | `whatsapp_number` | text | `"+27821234567"` | Optional, not currently used to send anything automatically. Admin-only. |
 | `supplier_id` | number (optional) | `2` | Which farm this worker belongs to. Left blank for the farm's own workers. |
 | `photo_filename` | text | `"001.jpg"` | Set automatically when a photo is captured/uploaded - not hand-edited. |
