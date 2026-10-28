@@ -1557,9 +1557,11 @@ reconnect Tailscale and reload.
 ### KPI cards
 
 Teams Active, Workers Active, Blocks Active (all counted as "had activity
-in the selected period", not a static list), Total Kg, Total Crates, Avg
-Kg/Lot, Avg Kg/Crate, and a breakdown of Harvesting / In Transit / Received
-crates and kg.
+in the selected period", not a static list), Total kg picked, Total
+Crates, Avg Kg/Lot, Avg Kg/Crate, a breakdown of Harvesting / In Transit /
+Received crates and kg, then Delivered kg (the kg on Boord Packhouse's
+delivery notes for the period) and Delivered vs Picked (that less the kg
+picked).
 
 ### The five collapsible lists
 
