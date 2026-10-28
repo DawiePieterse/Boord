@@ -264,6 +264,7 @@
   <nav class="admin-tabs">
     <button class="tab-btn active" data-tab="dashboard"><i class="fa-solid fa-gauge"></i><span>Dashboard</span></button>
     <button class="tab-btn" data-tab="payments"><i class="fa-solid fa-money-bill-wave"></i><span>Payments</span></button>
+    <button class="tab-btn" data-tab="markets"><i class="fa-solid fa-store"></i><span>Markets</span></button>
     <button class="tab-btn" data-tab="reports"><i class="fa-solid fa-chart-column"></i><span>Reports</span></button>
     <button class="tab-btn" data-tab="settings"><i class="fa-solid fa-gear"></i><span>Settings</span></button>
   </nav>
@@ -363,29 +364,33 @@
       </div>
     </div>
 
-    <!-- REPORTS -->
-    <div id="tab-reports" class="tab-content hidden space-y-4">
+    <!-- MARKETS: Packhouse's delivery notes, with the market statements and
+         transport invoices the office types or the market's email fills in
+         against them. Its own dates, not the Reports tab's: a statement
+         comes weeks after the load, so this is worked a week or more at a time. -->
+    <div id="tab-markets" class="tab-content hidden space-y-4">
       <div class="bg-white rounded-xl shadow p-4 flex flex-wrap gap-2 items-end">
-        <div><label class="text-xs text-slate-500 block">Supplier</label><select id="reportsSupplierFilter" class="border border-slate-300 rounded-lg p-2 text-sm"></select></div>
-        <div><label class="text-xs text-slate-500 block">Day / period start</label><input type="date" id="reportDate1" class="border border-slate-300 rounded-lg p-2"></div>
-        <div><label class="text-xs text-slate-500 block">Period end</label><input type="date" id="reportDate2" class="border border-slate-300 rounded-lg p-2"></div>
-        <button id="reportsTodayBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">Today</button>
-        <button id="reportsWeekBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">This Week</button>
-        <button id="setSeasonDatesBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">Season</button>
+        <div><label class="text-xs text-slate-500 block">Loaded from</label><input type="date" id="marketDate1" class="border border-slate-300 rounded-lg p-2"></div>
+        <div><label class="text-xs text-slate-500 block">Loaded to</label><input type="date" id="marketDate2" class="border border-slate-300 rounded-lg p-2"></div>
+        <button id="marketsTodayBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">Today</button>
+        <button id="marketsWeekBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">This Week</button>
+        <button id="marketsSeasonBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">Season</button>
       </div>
-      <div class="grid md:grid-cols-2 gap-3" id="reportsGrid"></div>
-
-      <!-- Markets & Transport: Packhouse's delivery notes, with the market
-           statements and transport invoices the office types against them. -->
-      <h2 class="font-bold text-lg pt-2">Markets &amp; Transport</h2>
-      <div class="grid md:grid-cols-2 gap-3" id="marketReportsGrid"></div>
       <div class="bg-white rounded-xl shadow overflow-x-auto">
         <div class="p-3 border-b text-xs text-slate-500">Delivery notes loaded in the period, from Boord Packhouse. Open one to type in the market's statement and the transporter's invoice.</div>
         <table class="w-full text-sm">
-          <thead><tr class="text-left border-b">
-            <th class="p-2">Loaded</th><th class="p-2">Note</th><th class="p-2">Receiver</th><th class="p-2">Market</th>
-            <th class="p-2">Transporter</th><th class="p-2">Pallets</th><th class="p-2">Cartons</th>
-            <th class="p-2">Net Paid</th><th class="p-2">Transport</th><th></th>
+          <!-- Click a heading to sort by it; click again to reverse. -->
+          <thead id="marketNotesHead"><tr class="text-left border-b">
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="loaded_on">Loaded</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="note_no">Note</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="receiver">Receiver</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="market">Market</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="transporter">Transporter</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="pallets">Pallets</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="sent">Cartons</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="sold">Cartons Sold</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="net">Net Paid</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="transport_cost">Transport</th><th></th>
           </tr></thead>
           <tbody id="marketNotesRows"></tbody>
         </table>
@@ -406,6 +411,29 @@
           <ul id="marketMailLog" class="text-xs text-slate-600 mt-2 space-y-1"></ul>
         </details>
       </div>
+    </div>
+
+    <!-- REPORTS -->
+    <div id="tab-reports" class="tab-content hidden space-y-4">
+      <div class="bg-white rounded-xl shadow p-4 flex flex-wrap gap-2 items-end">
+        <div><label class="text-xs text-slate-500 block">Supplier</label><select id="reportsSupplierFilter" class="border border-slate-300 rounded-lg p-2 text-sm"></select></div>
+        <div><label class="text-xs text-slate-500 block">Day / period start</label><input type="date" id="reportDate1" class="border border-slate-300 rounded-lg p-2"></div>
+        <div><label class="text-xs text-slate-500 block">Period end</label><input type="date" id="reportDate2" class="border border-slate-300 rounded-lg p-2"></div>
+        <button id="reportsTodayBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">Today</button>
+        <button id="reportsWeekBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">This Week</button>
+        <button id="setSeasonDatesBtn" class="date-preset-btn px-3 py-2 bg-slate-200 rounded-lg text-sm">Season</button>
+      </div>
+      <!-- Report cards, drawn by app.js from REPORTS by their group. -->
+      <h2 class="font-bold text-lg pt-2">Harvesting</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3" data-report-group="harvest"></div>
+
+      <h2 class="font-bold text-lg pt-2">Packhouse</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3" data-report-group="packhouse"></div>
+
+      <!-- The market downloads. The notes they are built from are kept on
+           the Markets tab. -->
+      <h2 class="font-bold text-lg pt-2">Markets &amp; Transport</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3" data-report-group="markets"></div>
 
       <!-- The manual and the training guides, served by main.py's
            /admin/manuals/ route from the PDFs at the repo root. -->

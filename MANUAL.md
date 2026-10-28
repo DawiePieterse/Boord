@@ -1721,12 +1721,13 @@ buyer or an auditor.
 
 ### Markets & Transport
 
-Below the reports is a **Markets & Transport** section. It replaces the
-season "Markte" workbook the office used to keep by hand, with one sheet per
-market and a transport summary.
+The **Markets** tab, next to Reports, replaces the season "Markte" workbook
+the office used to keep by hand, with one sheet per market and a transport
+summary. It has its own dates (**Loaded from** and **Loaded to**), and opens
+on the last week, because a statement comes in weeks after its load.
 
-The list shows every delivery note that Boord Packhouse loaded in the date
-range: date, note number, receiver, market, transporter, pallets and cartons.
+The list shows every delivery note that Boord Packhouse loaded in those
+dates: date, note number, receiver, market, transporter, pallets and cartons.
 What went out on each note comes from Packhouse. What the market paid, and
 what the transporter charged, nobody records but the office. So when a
 market's statement or a transporter's invoice arrives, open the note
@@ -1741,8 +1742,8 @@ market's statement or a transporter's invoice arrives, open the note
   cost excluding VAT.
 
 The list then shows the net paid. Notes still waiting for a statement show
-"Not entered". The four reports use the same date range (the date each note
-was loaded). Like the Delivery Notes report, they are not filtered by
+"Not entered". The four reports are on the Reports tab, under **Markets &
+Transport**, and use its date range (the date each note was loaded). Like the Delivery Notes report, they are not filtered by
 supplier, because a note carries whatever suppliers were stacked.
 
 | Report | Contents |
@@ -2189,7 +2190,7 @@ keys below match `backend/models.py` exactly.
 | `id` | text | `"001"` | Primary key - the employee number. Must be unique and must match the number printed on the worker's badge. |
 | `first_name` | text | `"Sipho"` | |
 | `last_name` | text | `"Dlamini"` | |
-| `id_number` | text | `"8001015009087"` | Optional. SA ID number, or passport number for a foreign worker. Admin-only: never sent to a field or pack house tablet. Until 3.30 there was no such field and the office typed IDs into WhatsApp Number; the 3.30 update moved every value there that is not an SA cell number into this field. |
+| `id_number` | text | `"8001015009087"` | Optional. SA ID number, or passport number for a foreign worker. Admin-only: never sent to a field or pack house tablet. Until 3.32 there was no such field and the office typed IDs into WhatsApp Number; the 3.32 update moved every value there that is not an SA cell number into this field. |
 | `whatsapp_number` | text | `"+27821234567"` | Optional, not currently used to send anything automatically. Admin-only. |
 | `supplier_id` | number (optional) | `2` | Which farm this worker belongs to. Left blank for the farm's own workers. |
 | `photo_filename` | text | `"001.jpg"` | Set automatically when a photo is captured/uploaded - not hand-edited. |

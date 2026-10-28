@@ -101,6 +101,7 @@ async function showApp() {
     bindMasterData();
     bindPayments();
     bindReports();
+    bindMarkets();
     bindMarketModal();
     bindSettings();
     bindSuppliers();
@@ -114,6 +115,7 @@ async function showApp() {
       if (tab === "dashboard") await refreshDashboard();
       // Master Data now lives inside the Settings tab.
       else if (tab === "settings") { await loadSettingsForm(); await loadAllMasterData(); }
+      else if (tab === "markets") { await loadMarketNotes(); await loadMarketMail(); }
     });
   }
 
@@ -1163,43 +1165,64 @@ async function exportPayments() {
 // ---------------------------------------------------------------------
 // Reports
 // ---------------------------------------------------------------------
+// Grouped by where the work happens - field, pack house, market - each group
+// a grid of cards under its own heading on the Reports tab, in this order.
+// `short` is the line on the card; the full `desc` is its tooltip, since a
+// paragraph on every card made the grid a wall of text.
 const REPORTS = [
-  { key: "daily-harvest", label: "Daily Harvest Summary", icon: "fa-sun",
+  { key: "daily-harvest", label: "Daily Harvest Summary", icon: "fa-sun", color: "text-amber-500", group: "harvest",
+    short: "Crates and kg by block and team, for one day",
     desc: "Crates and kg by block and team for one day. Uses the period start date even if a wider range is picked.",
     single_day: true },
-  { key: "lot-receiving", label: "Lot & Receiving Report", icon: "fa-truck",
-    desc: "Every lot dispatched in the range, with its receiving detail once the truck has been checked in." },
-  { key: "picking-notes", label: "Plukstrokies / Picking Notes", icon: "fa-clipboard-list",
-    desc: "One row per dispatched lot - slip, block(s), crates sent vs received, driver, supplier, condition, weather - matching the paper picking slip." },
-  { key: "team-picking-list", label: "Span Pluklys / Team Picking List", icon: "fa-people-group",
-    desc: "One row per team per day - data capturer, induna, worker count, deductions, plus each block picked and each lot dispatched that day." },
-  { key: "harvest-data", label: "Daaglikse Oesdata / Daily Harvest Data", icon: "fa-table-cells",
-    desc: "Kg by date (rows) against block (columns) over the range, with per-day and per-block totals including avg per tree and per hectare." },
-  { key: "harvesting-list", label: "Harvesting List", icon: "fa-seedling",
+  { key: "harvesting-list", label: "Harvesting List", icon: "fa-seedling", color: "text-green-600", group: "harvest",
+    short: "Loads still being picked",
     desc: "Loads still being picked, matching the Dashboard's Harvesting list." },
-  { key: "in-transit-list", label: "In Transit List", icon: "fa-truck-fast",
-    desc: "Loads dispatched from the field but not yet received at the pack house." },
-  { key: "received-list", label: "Pakhuis Ontvangstes / Pack House Receivables", icon: "fa-warehouse",
-    desc: "Received loads - slip, date/time, receiving block, supplier, team, driver, crates, kg and rejected waste kg - matching the paper receipt list." },
-  { key: "pallets-stacked", label: "Pallets Stacked", icon: "fa-pallet",
-    desc: "Every pallet stacked in Boord Packhouse's Pallet Stack in the range - number, barcode, supplier, market, cartons, kg, contents and the delivery note it went out on." },
-  { key: "delivery-notes", label: "Afleweringsnotas / Delivery Notes", icon: "fa-file-lines",
-    desc: "Delivery notes loaded in the range - receiver, transporter, seal, cooled-to, pallets, cartons and kg. Not filtered by supplier." },
-  { key: "worker-harvest", label: "Worker Harvest Report", icon: "fa-users",
-    desc: "Per-worker crates, kg, amount due and average kg per crate over the range." },
-  { key: "litchi-wages", label: "Lietsjie Lone / Litchi Wages", icon: "fa-hand-holding-dollar",
-    desc: "One row per worker with crates broken out per day worked, plus a total - a whole pay period on a single line." },
-  { key: "block-harvest", label: "Block Harvest Report", icon: "fa-tree",
+  { key: "picking-notes", label: "Plukstrokies / Picking Notes", icon: "fa-clipboard-list", color: "text-sky-600", group: "harvest",
+    short: "The paper picking slip, one row per lot",
+    desc: "One row per dispatched lot - slip, block(s), crates sent vs received, driver, supplier, condition, weather - matching the paper picking slip." },
+  { key: "team-picking-list", label: "Span Pluklys / Team Picking List", icon: "fa-people-group", color: "text-indigo-500", group: "harvest",
+    short: "Each team's day: workers, blocks and lots",
+    desc: "One row per team per day - data capturer, induna, worker count, deductions, plus each block picked and each lot dispatched that day." },
+  { key: "harvest-data", label: "Daaglikse Oesdata / Daily Harvest Data", icon: "fa-table-cells", color: "text-teal-600", group: "harvest",
+    short: "Kg per day against each block",
+    desc: "Kg by date (rows) against block (columns) over the range, with per-day and per-block totals including avg per tree and per hectare." },
+  { key: "block-harvest", label: "Block Harvest Report", icon: "fa-tree", color: "text-emerald-700", group: "harvest",
+    short: "Crates, kg and kg per tree per block",
     desc: "Per-block crates, kg, average kg per crate and average kg per tree over the range." },
-  // The Markets & Transport section, below the list of delivery notes they
-  // are built from. By the date each note was loaded; never by supplier.
-  { key: "market-summary", label: "Markte Opsomming / Market Summary", icon: "fa-store", group: "markets",
+  { key: "worker-harvest", label: "Worker Harvest Report", icon: "fa-users", color: "text-violet-500", group: "harvest",
+    short: "Crates, kg and pay per worker",
+    desc: "Per-worker crates, kg, amount due and average kg per crate over the range." },
+  { key: "litchi-wages", label: "Lietsjie Lone / Litchi Wages", icon: "fa-hand-holding-dollar", color: "text-lime-600", group: "harvest",
+    short: "A pay period per worker, crates per day",
+    desc: "One row per worker with crates broken out per day worked, plus a total - a whole pay period on a single line." },
+  { key: "in-transit-list", label: "In Transit List", icon: "fa-truck-fast", color: "text-orange-500", group: "packhouse",
+    short: "Loads on the way to the pack house",
+    desc: "Loads dispatched from the field but not yet received at the pack house." },
+  { key: "lot-receiving", label: "Lot & Receiving Report", icon: "fa-truck", color: "text-sky-600", group: "packhouse",
+    short: "Lots dispatched, with their receiving detail",
+    desc: "Every lot dispatched in the range, with its receiving detail once the truck has been checked in." },
+  { key: "received-list", label: "Pakhuis Ontvangstes / Pack House Receivables", icon: "fa-warehouse", color: "text-red-700", group: "packhouse",
+    short: "Loads received, as on the paper list",
+    desc: "Received loads - slip, date/time, receiving block, supplier, team, driver, crates, kg and rejected waste kg - matching the paper receipt list." },
+  { key: "pallets-stacked", label: "Pallets Stacked", icon: "fa-pallet", color: "text-yellow-700", group: "packhouse",
+    short: "Every pallet stacked in Packhouse",
+    desc: "Every pallet stacked in Boord Packhouse's Pallet Stack in the range - number, barcode, supplier, market, cartons, kg, contents and the delivery note it went out on." },
+  { key: "delivery-notes", label: "Afleweringsnotas / Delivery Notes", icon: "fa-file-lines", color: "text-slate-500", group: "packhouse",
+    short: "Notes loaded: pallets, cartons and kg",
+    desc: "Delivery notes loaded in the range - receiver, transporter, seal, cooled-to, pallets, cartons and kg. Not filtered by supplier." },
+  // Markets & Transport: built from the delivery notes on the Markets tab.
+  // By the date each note was loaded; never by supplier.
+  { key: "market-summary", label: "Markte Opsomming / Market Summary", icon: "fa-store", color: "text-pink-600", group: "markets",
+    short: "Sent, sold and paid per receiver and market",
     desc: "One row per receiver and market - notes, pallets, cartons sent and sold, kg, gross, commission, deductions, net paid, R/carton, R/kg and transport, with a total." },
-  { key: "market-packs", label: "Market Sales by Package Type", icon: "fa-boxes-stacked", group: "markets",
+  { key: "market-packs", label: "Market Sales by Package Type", icon: "fa-boxes-stacked", color: "text-amber-600", group: "markets",
+    short: "Cartons and price per package type",
     desc: "Per receiver, market and pack - cartons sent, sold and outstanding, average price per carton and gross R/kg." },
-  { key: "market-sales", label: "Consignment Sales", icon: "fa-file-invoice-dollar", group: "markets",
+  { key: "market-sales", label: "Consignment Sales", icon: "fa-file-invoice-dollar", color: "text-green-600", group: "markets",
+    short: "What went, sold and was paid, per note",
     desc: "One row per delivery note - what went, what sold at what price, and what the market paid after costs." },
-  { key: "transport-summary", label: "Vervoer Opsomming / Transport Summary", icon: "fa-truck-moving", group: "markets",
+  { key: "transport-summary", label: "Vervoer Opsomming / Transport Summary", icon: "fa-truck-moving", color: "text-blue-600", group: "markets",
+    short: "Transport cost per delivery note",
     desc: "One row per delivery note - transporter, waybill, invoice, pallets, R/pallet and cost excluding and including VAT, with a total." },
 ];
 
@@ -1224,25 +1247,22 @@ function renderReportsGrid() {
     const flagDailyOnly = isRange && r.single_day;
     const note = flagDailyOnly
       ? `<div class="text-xs text-amber-600 font-medium mt-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Daily report only - uses ${d1} (period start)</div>`
-      : `<div class="text-xs text-slate-400 mt-1">Download .xlsx</div>`;
+      : `<div class="text-xs text-slate-400">Download .xlsx</div>`;
     return `
-    <button class="bg-white rounded-xl shadow p-4 text-left hover:bg-slate-50 flex items-start gap-3" data-report="${r.key}">
-      <i class="fa-solid ${r.icon} text-slate-400 mt-0.5"></i>
-      <div>
-        <div class="font-semibold text-sm">${r.label}</div>
-        <div class="text-xs text-slate-500">${r.desc || ""}</div>
-        ${note}
-      </div>
+    <button class="bg-white rounded-xl shadow p-4 hover:bg-slate-50 flex flex-col items-center gap-2 text-center" data-report="${r.key}" title="${esc(r.desc)}">
+      <i class="fa-solid ${r.icon} text-3xl ${r.color}"></i>
+      <div class="font-semibold text-sm">${r.label}</div>
+      <div class="text-xs text-slate-500">${r.short}</div>
+      ${note}
     </button>
   `;
   };
-  document.getElementById("reportsGrid").innerHTML = REPORTS.filter((r) => !r.group).map(card).join("");
-  document.getElementById("marketReportsGrid").innerHTML = REPORTS.filter((r) => r.group === "markets").map(card).join("");
+  document.querySelectorAll("[data-report-group]").forEach((grid) => {
+    grid.innerHTML = REPORTS.filter((r) => r.group === grid.dataset.reportGroup).map(card).join("");
+  });
   document.querySelectorAll("[data-report]").forEach((btn) => {
     btn.addEventListener("click", () => downloadReport(btn.dataset.report));
   });
-  loadMarketNotes();
-  loadMarketMail();
 }
 
 function bindReports() {
@@ -1288,25 +1308,90 @@ async function downloadReport(key) {
 }
 
 // ---------------------------------------------------------------------
-// Markets & Transport: the delivery notes Boord Packhouse loaded in the
-// report period, each with the market statement and transport invoice the
+// Markets: the delivery notes Boord Packhouse loaded in the
+// chosen period, each with the market statement and transport invoice the
 // office types against it (what the season "Markte" workbook held).
 // ---------------------------------------------------------------------
 let _marketNotes = [];
 let _marketNote = null;
+// The heading the office last clicked. It holds across period changes, so
+// sorting by market and then widening to the season keeps the market order.
+let _marketSort = { key: "loaded_on", dir: 1 };
+
+// A note with nothing typed in yet has no sold count or net: it sorts below
+// every entered one, whichever way round, rather than passing for zero.
+function marketSortValue(n, key) {
+  if ((key === "sold" || key === "net") && !n.entered) return null;
+  return n[key];
+}
+
+function sortMarketNotes() {
+  const { key, dir } = _marketSort;
+  _marketNotes.sort((a, b) => {
+    const x = marketSortValue(a, key), y = marketSortValue(b, key);
+    if (x == null || x === "") return (y == null || y === "") ? 0 : 1;
+    if (y == null || y === "") return -1;
+    // numeric: true so note 1341 comes before 13410, and names ignore case.
+    return dir * (typeof x === "number" && typeof y === "number"
+      ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" }));
+  });
+}
+
+// The Markets tab opens on the last week. Packhouse and the market's email
+// change the list from outside, so it is fetched again each time the tab opens.
+function bindMarkets() {
+  Boord.bindDateRangePresets({
+    todayBtn: document.getElementById("marketsTodayBtn"),
+    weekBtn: document.getElementById("marketsWeekBtn"),
+    seasonBtn: document.getElementById("marketsSeasonBtn"),
+    startInput: document.getElementById("marketDate1"),
+    endInput: document.getElementById("marketDate2"),
+    seasonAnchor: () => ({
+      month: (_systemSettings && _systemSettings.season_start_month) || 1,
+      day: (_systemSettings && _systemSettings.season_start_day) || 1,
+    }),
+    onChange: loadMarketNotes,
+  });
+  document.getElementById("marketDate1").addEventListener("change", loadMarketNotes);
+  document.getElementById("marketDate2").addEventListener("change", loadMarketNotes);
+  document.querySelectorAll("#marketNotesHead [data-sort]").forEach((th) => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      _marketSort = { key, dir: _marketSort.key === key ? -_marketSort.dir : 1 };
+      renderMarketNotes();
+    });
+  });
+  document.querySelector('.tab-btn[data-tab="markets"]').addEventListener("click", () => {
+    loadMarketNotes();
+    loadMarketMail();
+  });
+  document.getElementById("marketsWeekBtn").click();
+}
 
 async function loadMarketNotes() {
-  const d1 = document.getElementById("reportDate1").value;
-  const d2 = document.getElementById("reportDate2").value;
+  const d1 = document.getElementById("marketDate1").value;
+  const d2 = document.getElementById("marketDate2").value;
   const tbody = document.getElementById("marketNotesRows");
   if (!d1 || !d2) return;
   try {
     _marketNotes = await Boord.api(`/api/reports/market-notes?period_start=${d1}&period_end=${d2}`);
   } catch (e) {
     // Most often Packhouse isn't on this server; the 503 says so in words.
-    tbody.innerHTML = `<tr><td colspan="10" class="p-3 text-sm text-slate-500">${esc(e.detail || e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="p-3 text-sm text-slate-500">${esc(e.detail || e.message)}</td></tr>`;
     return;
   }
+  renderMarketNotes();
+}
+
+function renderMarketNotes() {
+  const tbody = document.getElementById("marketNotesRows");
+  sortMarketNotes();
+  document.querySelectorAll("#marketNotesHead [data-sort]").forEach((th) => {
+    const on = th.dataset.sort === _marketSort.key;
+    th.querySelector("i")?.remove();
+    th.setAttribute("aria-sort", on ? (_marketSort.dir > 0 ? "ascending" : "descending") : "none");
+    th.insertAdjacentHTML("beforeend", ` <i class="fa-solid ${on ? (_marketSort.dir > 0 ? "fa-sort-up" : "fa-sort-down") : "fa-sort text-slate-300"} text-xs"></i>`);
+  });
   tbody.innerHTML = _marketNotes.length ? _marketNotes.map((n) => `
     <tr class="border-b">
       <td class="p-2 whitespace-nowrap">${esc(n.loaded_on)}</td>
@@ -1316,11 +1401,12 @@ async function loadMarketNotes() {
       <td class="p-2">${esc(n.transporter)}</td>
       <td class="p-2">${n.pallets}</td>
       <td class="p-2">${n.sent}</td>
+      <td class="p-2">${n.entered ? n.sold : "-"}</td>
       <td class="p-2">${n.entered ? Boord.fmtRand(n.net) : '<span class="text-amber-600">Not entered</span>'}${n.invoices.length ? ` <i class="fa-solid fa-envelope text-slate-400" title="From ${n.invoices.length} emailed invoice(s)"></i>` : ""}</td>
       <td class="p-2">${n.transport_cost ? Boord.fmtRand(n.transport_cost) : "-"}</td>
       <td class="p-2"><button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-note="${esc(n.uuid)}">${n.entered ? "Edit" : "Enter"}</button></td>
     </tr>
-  `).join("") : `<tr><td colspan="10" class="p-3 text-sm text-slate-500">No delivery notes loaded in this period.</td></tr>`;
+  `).join("") : `<tr><td colspan="11" class="p-3 text-sm text-slate-500">No delivery notes loaded in this period.</td></tr>`;
   tbody.querySelectorAll("[data-market-note]").forEach((btn) => {
     btn.addEventListener("click", () => openMarketModal(_marketNotes.find((n) => n.uuid === btn.dataset.marketNote)));
   });
