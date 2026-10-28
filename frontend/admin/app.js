@@ -1480,7 +1480,11 @@ function printMarketNote(n) {
 }
 
 // A plain page in its own window with its own styles: Tailwind isn't loaded
-// there. The print dialog's "Save as PDF" is how the office makes a PDF to
+// there. On a phone that window has no address bar or back button (the Admin
+// app runs installed, full screen), so the page carries its own Back to Boord,
+// and Print again for a dialog dismissed too soon; neither is printed. Back
+// closes the window; where the phone won't let a page close itself it goes
+// to the Admin app instead. The print dialog's "Save as PDF" is how the office makes a PDF to
 // email, so no PDF library has to ride along to the farm PC.
 // `w` is a window already opened, by a caller that has to fetch first: a
 // window opened after an await is no longer the click's, and gets blocked.
@@ -1488,6 +1492,7 @@ function printPage(title, body, w) {
   w = w || window.open("", "_blank");
   if (!w) { Boord.toast("The browser blocked the print window - allow pop-ups for Boord"); return; }
   w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>${esc(title)}</title>
     <style>
       body { font-family: system-ui, sans-serif; margin: 24px; color: #0f172a; }
@@ -1498,7 +1503,14 @@ function printPage(title, body, w) {
       .net td { font-weight: bold; } .small { font-size: 12px; color: #64748b; }
       .grp { font-weight: bold; font-size: 15px; padding-top: 14px; border-bottom: 2px solid #0f172a; }
       td:first-child { white-space: nowrap; } .sub td { font-weight: bold; } @media print { tr { break-inside: avoid; } .grp { break-after: avoid; } }
+      .bar { position: sticky; top: 0; display: flex; gap: 8px; padding: 8px 0 12px; background: #fff; }
+      .bar button { font: inherit; font-size: 16px; padding: 10px 16px; border: 0; border-radius: 8px; background: #e2e8f0; color: #0f172a; }
+      .bar .back { background: #1e3a8a; color: #fff; } @media print { .bar { display: none; } }
     </style></head><body>
+    <div class="bar">
+      <button class="back" onclick="window.close(); setTimeout(function () { location.href = '/admin/'; }, 300)">&larr; Back to Boord</button>
+      <button onclick="window.print()">Print / PDF</button>
+    </div>
     ${body}
     <p class="small">Printed ${esc(new Date().toLocaleString())} from Boord ${esc(Boord.VERSION || "")}</p>
     </body></html>`);
