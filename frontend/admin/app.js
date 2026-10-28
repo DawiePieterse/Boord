@@ -1418,6 +1418,11 @@ function numOrNull(el) {
 }
 
 function updateMarketNet() {
+  // Unsold follows the Sold box as it is typed; blank until a figure is in.
+  document.querySelectorAll("#marketPackRows tr").forEach((tr) => {
+    const sold = numOrNull(tr.querySelector(".mk-sold"));
+    tr.querySelector(".mk-unsold").textContent = sold == null ? "-" : Number(tr.dataset.sent) - sold;
+  });
   // An invoiced note's figures are the invoices' own: multiplying the
   // averaged price back out would be a few rand off what was paid.
   if (_marketNote && _marketNote.invoices.length) {
@@ -1442,10 +1447,11 @@ function openMarketModal(note) {
   document.getElementById("marketModalMeta").textContent =
     [note.loaded_on, note.receiver, note.market, note.transporter, `${note.pallets} pallets`].filter(Boolean).join(" · ");
   document.getElementById("marketPackRows").innerHTML = note.packs.map((pk) => `
-    <tr class="border-b" data-pack="${esc(pk.pack)}">
+    <tr class="border-b" data-pack="${esc(pk.pack)}" data-sent="${pk.sent}">
       <td class="p-1">${esc(pk.pack)}</td>
       <td class="p-1">${pk.sent}</td>
       <td class="p-1"><input type="number" min="0" step="1" class="mk-sold w-24 border border-slate-300 rounded-lg p-1" value="${pk.sold ?? ""}"></td>
+      <td class="p-1 mk-unsold"></td>
       <td class="p-1"><input type="number" min="0" step="0.01" class="mk-price w-28 border border-slate-300 rounded-lg p-1" value="${pk.price ?? ""}"></td>
     </tr>
   `).join("");
