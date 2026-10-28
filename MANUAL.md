@@ -1762,7 +1762,7 @@ return no data.
 
 A market agent's tax invoice can fill in a note's statement by itself, so
 nobody has to type it. So far this covers the Johannesburg market's invoices
-(`pps_invoice`, as Dapper sends them). Every agent on that market uses the
+(`pps_invoice`, as Dapper sends them) and Onderberg's juice payment advice. Every agent on that market uses the
 same system and the same layout.
 
 **How it works.** Every 15 minutes the server signs in to the farm Gmail,
@@ -1810,7 +1810,7 @@ the invoice is what counts.
    ```
    address=bekfontein01@gmail.com
    app_password=abcd efgh ijkl mnop
-   senders=dapper.co.za, laughw.co.za
+   senders=dapper.co.za, laughw.co.za, rmputter.co.za
    ```
 
    `senders` is the list of email domains an invoice is accepted from. Keep
@@ -1821,6 +1821,18 @@ the invoice is what counts.
    shows the address and when it last checked. Press **Fetch now** to check
    straight away rather than wait for the next 15 minutes. Nothing needs
    restarting.
+
+**Onderberg's juice payment advice.** Onderberg's bookkeeper emails a
+payment advice for the juice loads from `admin@rmputter.co.za`, so
+`rmputter.co.za` must be in `senders`. Each load on it (weighbridge ticket,
+date, payable kg, rotten %, our delivery note) is filed as its own invoice,
+`OB-` and the ticket number, against Packhouse's juice note with that number
+(`J-0008`, or `8` written on the paper). The advice only gives the levies
+(SALGA's 2% and the rest) for the whole batch, so each load carries its share
+by rand. The agterskot printed at the bottom is a later payment, not money
+paid yet, so it isn't counted. An advice whose rows don't add up to its total
+is refused. The Boere Unie's membership statements come from the same address
+and are skipped.
 
 **Matching products to packs.** The market describes a pack its own way, for
 example `LICH, BX020, THREE MONTH RED, CL 1, XL, *, *`. The first time a
