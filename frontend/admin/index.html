@@ -396,6 +396,15 @@
           <tbody id="marketNotesRows"></tbody>
           <tfoot id="marketNotesFoot"></tfoot>
         </table>
+        <!-- Quick reports of the notes above, for the dates above. -->
+        <div class="p-3 border-t flex flex-wrap gap-2 items-center">
+          <span class="text-xs text-slate-500 mr-1">Print (or save as PDF) by:</span>
+          <button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-report="receiver"><i class="fa-solid fa-print"></i> Receiver</button>
+          <button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-report="market"><i class="fa-solid fa-print"></i> Market</button>
+          <button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-report="transporter"><i class="fa-solid fa-print"></i> Transporter</button>
+          <button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-report="sold"><i class="fa-solid fa-print"></i> Sold</button>
+          <button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-report="unsold"><i class="fa-solid fa-print"></i> Unsold</button>
+        </div>
       </div>
       <!-- The agents' invoices, read from the farm Gmail (market_mail.py). -->
       <div class="bg-white rounded-xl shadow p-4 space-y-3">

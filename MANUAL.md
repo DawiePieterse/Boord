@@ -1742,7 +1742,21 @@ market's statement or a transporter's invoice arrives, open the note
   cost excluding VAT.
 
 The list then shows the net paid. Notes still waiting for a statement show
-"Not entered". The four reports are on the Reports tab, under **Markets &
+"Not entered".
+
+Under the list, **Print (or save as PDF) by** gives five quick reports of
+the notes listed, for the dates at the top (Today, This Week, Season or your
+own). Each opens a page and the print dialog. To make a PDF to email, choose
+**Save as PDF** as the printer.
+
+- **Receiver, Market, Transporter:** the notes grouped by that, each group with its
+  notes (pallets, cartons sent, sold and unsold, gross, net paid, transport)
+  and a subtotal, and a grand total at the end.
+- **Sold:** every pack that sold, per note, with the cartons sold, the price and the gross.
+- **Unsold:** every pack with cartons still outstanding. A note with no
+  statement entered yet counts as all unsold.
+
+The four full reports are on the Reports tab, under **Markets &
 Transport**, and use its date range (the date each note was loaded). Like the Delivery Notes report, they are not filtered by
 supplier, because a note carries whatever suppliers were stacked.
 
