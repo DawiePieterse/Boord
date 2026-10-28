@@ -2,7 +2,7 @@ import os
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from backup import start_backup_scheduler
@@ -109,6 +109,25 @@ if os.path.isdir(TEMPLATES_DIR):
 else:
     print(f"[boord] no templates directory at {TEMPLATES_DIR} - the import templates "
           f"the setup wizard links to will 404", flush=True)
+
+# The manual and training guides, for the Reports tab, so the office can open
+# one on the PC (or hand a phone to a new picker's supervisor) without hunting
+# for the repo folder. They live at the repo root beside the .md they are
+# rendered from, not in frontend/, so they are named here one by one: a fixed
+# list rather than a mount, so nothing else at the root is ever served. Under
+# /admin/ so the middleware above keeps them off the farm wifi like the rest.
+REPO_DIR = os.path.join(os.path.dirname(__file__), "..")
+MANUALS = {"MANUAL", "TRAINING_ADMIN", "TRAINING_FIELD", "TRAINING_PACKHOUSE"}
+
+
+@app.get("/admin/manuals/{name}.pdf", include_in_schema=False)
+def manual_pdf(name: str):
+    path = os.path.join(REPO_DIR, name + ".pdf")
+    if name not in MANUALS or not os.path.isfile(path):
+        return PlainTextResponse("No such manual", status_code=404)
+    # No filename, so the browser opens it in its viewer rather than saving it.
+    return FileResponse(path, media_type="application/pdf")
+
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 app.mount("/", NoCacheStaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
