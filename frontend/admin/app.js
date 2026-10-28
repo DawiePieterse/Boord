@@ -1318,11 +1318,11 @@ let _marketNote = null;
 // sorting by market and then widening to the season keeps the market order.
 let _marketSort = { key: "loaded_on", dir: 1 };
 
-// A note with nothing typed in yet has no sold count or net: it sorts below
-// every entered one, whichever way round, rather than passing for zero.
+// A note with nothing typed in yet has no sold, unsold or net: it sorts
+// below every entered one, whichever way round, rather than passing for zero.
 function marketSortValue(n, key) {
-  if ((key === "sold" || key === "net") && !n.entered) return null;
-  return n[key];
+  if ((key === "sold" || key === "unsold" || key === "net") && !n.entered) return null;
+  return key === "unsold" ? n.sent - n.sold : n[key];
 }
 
 function sortMarketNotes() {
@@ -1377,7 +1377,7 @@ async function loadMarketNotes() {
     _marketNotes = await Boord.api(`/api/reports/market-notes?period_start=${d1}&period_end=${d2}`);
   } catch (e) {
     // Most often Packhouse isn't on this server; the 503 says so in words.
-    tbody.innerHTML = `<tr><td colspan="11" class="p-3 text-sm text-slate-500">${esc(e.detail || e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12" class="p-3 text-sm text-slate-500">${esc(e.detail || e.message)}</td></tr>`;
     return;
   }
   renderMarketNotes();
@@ -1402,11 +1402,12 @@ function renderMarketNotes() {
       <td class="p-2">${n.pallets}</td>
       <td class="p-2">${n.sent}</td>
       <td class="p-2">${n.entered ? n.sold : "-"}</td>
+      <td class="p-2">${n.entered ? n.sent - n.sold : "-"}</td>
       <td class="p-2">${n.entered ? Boord.fmtRand(n.net) : '<span class="text-amber-600">Not entered</span>'}${n.invoices.length ? ` <i class="fa-solid fa-envelope text-slate-400" title="From ${n.invoices.length} emailed invoice(s)"></i>` : ""}</td>
       <td class="p-2">${n.transport_cost ? Boord.fmtRand(n.transport_cost) : "-"}</td>
       <td class="p-2"><button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-note="${esc(n.uuid)}">${n.entered ? "Edit" : "Enter"}</button></td>
     </tr>
-  `).join("") : `<tr><td colspan="11" class="p-3 text-sm text-slate-500">No delivery notes loaded in this period.</td></tr>`;
+  `).join("") : `<tr><td colspan="12" class="p-3 text-sm text-slate-500">No delivery notes loaded in this period.</td></tr>`;
   tbody.querySelectorAll("[data-market-note]").forEach((btn) => {
     btn.addEventListener("click", () => openMarketModal(_marketNotes.find((n) => n.uuid === btn.dataset.marketNote)));
   });
@@ -1418,6 +1419,11 @@ function numOrNull(el) {
 }
 
 function updateMarketNet() {
+  // Unsold follows the Sold box as it is typed; blank until a figure is in.
+  document.querySelectorAll("#marketPackRows tr").forEach((tr) => {
+    const sold = numOrNull(tr.querySelector(".mk-sold"));
+    tr.querySelector(".mk-unsold").textContent = sold == null ? "-" : Number(tr.dataset.sent) - sold;
+  });
   // An invoiced note's figures are the invoices' own: multiplying the
   // averaged price back out would be a few rand off what was paid.
   if (_marketNote && _marketNote.invoices.length) {
@@ -1442,10 +1448,11 @@ function openMarketModal(note) {
   document.getElementById("marketModalMeta").textContent =
     [note.loaded_on, note.receiver, note.market, note.transporter, `${note.pallets} pallets`].filter(Boolean).join(" · ");
   document.getElementById("marketPackRows").innerHTML = note.packs.map((pk) => `
-    <tr class="border-b" data-pack="${esc(pk.pack)}">
+    <tr class="border-b" data-pack="${esc(pk.pack)}" data-sent="${pk.sent}">
       <td class="p-1">${esc(pk.pack)}</td>
       <td class="p-1">${pk.sent}</td>
       <td class="p-1"><input type="number" min="0" step="1" class="mk-sold w-24 border border-slate-300 rounded-lg p-1" value="${pk.sold ?? ""}"></td>
+      <td class="p-1 mk-unsold"></td>
       <td class="p-1"><input type="number" min="0" step="0.01" class="mk-price w-28 border border-slate-300 rounded-lg p-1" value="${pk.price ?? ""}"></td>
     </tr>
   `).join("");
