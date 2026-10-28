@@ -1748,7 +1748,7 @@ supplier, because a note carries whatever suppliers were stacked.
 | Report | Contents |
 |---|---|
 | Markte Opsomming / Market Summary | One row per receiver and market: notes, how many statements are entered, pallets, cartons sent, sold and outstanding, kg, gross, commission, deductions, bank cost, net paid, net R/carton and R/kg, transport, and net after transport. Ends with a total row. |
-| Market Sales by Pack | Per receiver, market and pack: cartons sent, sold and outstanding, average price per carton, gross and gross R/kg |
+| Market Sales by Package Type | Per receiver, market and pack: cartons sent, sold and outstanding, average price per carton, gross and gross R/kg |
 | Consignment Sales | One row per delivery note: what went, what sold and at what price, and what the market paid after costs |
 | Vervoer Opsomming / Transport Summary | One row per delivery note: transporter, waybill, invoice, pallets, R/pallet, and cost excluding VAT, VAT and including VAT. Ends with a total row. |
 
