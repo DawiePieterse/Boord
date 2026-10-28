@@ -1742,7 +1742,21 @@ market's statement or a transporter's invoice arrives, open the note
   cost excluding VAT.
 
 The list then shows the net paid. Notes still waiting for a statement show
-"Not entered". The four reports are on the Reports tab, under **Markets &
+"Not entered".
+
+Under the list, **Print (or save as PDF) by** gives five quick reports of
+the notes listed, for the dates at the top (Today, This Week, Season or your
+own). Each opens a page and the print dialog, set to landscape. To make a PDF to email, choose
+**Save as PDF** as the printer.
+
+- **Receiver, Market, Transporter:** the notes grouped by that, each group with its
+  notes (pallets, cartons sent, sold and unsold, gross, net paid, transport)
+  and a subtotal, and a grand total at the end.
+- **Sold:** every pack that sold, per note, with the cartons sold, the price and the gross.
+- **Unsold:** every pack with cartons still outstanding. A note with no
+  statement entered yet counts as all unsold.
+
+The four full reports are on the Reports tab, under **Markets &
 Transport**, and use its date range (the date each note was loaded). Like the Delivery Notes report, they are not filtered by
 supplier, because a note carries whatever suppliers were stacked.
 
@@ -2202,7 +2216,7 @@ keys below match `backend/models.py` exactly.
 | `id` | text | `"001"` | Primary key - the employee number. Must be unique and must match the number printed on the worker's badge. |
 | `first_name` | text | `"Sipho"` | |
 | `last_name` | text | `"Dlamini"` | |
-| `id_number` | text | `"8001015009087"` | Optional. SA ID number, or passport number for a foreign worker. Admin-only: never sent to a field or pack house tablet. Until 3.38 there was no such field and the office typed IDs into WhatsApp Number; the 3.38 update moved every value there that is not an SA cell number into this field. |
+| `id_number` | text | `"8001015009087"` | Optional. SA ID number, or passport number for a foreign worker. Admin-only: never sent to a field or pack house tablet. Until 3.40 there was no such field and the office typed IDs into WhatsApp Number; the 3.40 update moved every value there that is not an SA cell number into this field. |
 | `whatsapp_number` | text | `"+27821234567"` | Optional, not currently used to send anything automatically. Admin-only. |
 | `supplier_id` | number (optional) | `2` | Which farm this worker belongs to. Left blank for the farm's own workers. |
 | `photo_filename` | text | `"001.jpg"` | Set automatically when a photo is captured/uploaded - not hand-edited. |

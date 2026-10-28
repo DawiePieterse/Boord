@@ -1361,6 +1361,9 @@ function bindMarkets() {
       renderMarketNotes();
     });
   });
+  document.querySelectorAll("[data-market-report]").forEach((btn) => {
+    btn.addEventListener("click", () => printMarketReport(btn.dataset.marketReport));
+  });
   document.querySelector('.tab-btn[data-tab="markets"]').addEventListener("click", () => {
     loadMarketNotes();
     loadMarketMail();
@@ -1437,24 +1440,13 @@ function renderMarketNotes() {
 // dialog to email it. A plain page with its own styles: Tailwind isn't loaded
 // in the new window, and nothing here is fetched again.
 function printMarketNote(n) {
-  const w = window.open("", "_blank");
-  if (!w) { Boord.toast("The browser blocked the print window - allow pop-ups for Boord"); return; }
   const r = (v) => Boord.fmtRand(v || 0);
   const dash = (v) => (n.entered && v != null ? v : "-");
   const rows = n.packs.map((pk) => `<tr><td>${esc(pk.pack)}</td><td>${pk.sent}</td><td>${dash(pk.sold)}</td>
     <td>${n.entered && pk.sold != null ? pk.sent - pk.sold : "-"}</td><td>${pk.price != null ? r(pk.price) : "-"}</td>
     <td>${n.entered ? r(pk.gross) : "-"}</td></tr>`).join("");
   const line = (label, v) => `<tr><td>${label}</td><td>${v}</td></tr>`;
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8">
-    <title>Delivery note ${esc(n.note_no)}</title>
-    <style>
-      body { font-family: system-ui, sans-serif; margin: 24px; color: #0f172a; }
-      h1 { font-size: 20px; margin: 0 0 4px; } .meta { color: #475569; margin-bottom: 16px; }
-      table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
-      th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #cbd5e1; }
-      th { background: #f1f5f9; } .sum { width: auto; min-width: 320px; } .sum td:last-child { text-align: right; }
-      .net td { font-weight: bold; } .small { font-size: 12px; color: #64748b; }
-    </style></head><body>
+  printPage(`Delivery note ${n.note_no}`, `
     <h1>Bekfontein Boerdery - Delivery note ${esc(n.note_no)}</h1>
     <div class="meta">${[n.loaded_on, n.receiver, n.market, n.transporter, `${n.pallets} pallets`].filter(Boolean).map(esc).join(" · ")}</div>
     <table><thead><tr><th>Pack</th><th>Sent</th><th>Sold</th><th>Unsold</th><th>Price</th><th>Gross</th></tr></thead>
@@ -1467,11 +1459,99 @@ function printMarketNote(n) {
       ${line("Transport", n.transport_cost ? r(n.transport_cost) : "-")}${line("Waybill", esc(n.waybill_no || "-"))}${line("Transport invoice", esc(n.invoice_no || "-"))}</table>
     ${n.invoices.length ? `<p class="small">From emailed invoices: ${n.invoices.map((i) => `${esc(i.invoice_no)} (${esc(i.payment)}, ${esc(i.invoice_date)}, net ${r(i.net)})`).join("; ")}</p>` : ""}
     ${n.notes ? `<p>${esc(n.notes)}</p>` : ""}
+`);
+}
+
+// A plain page in its own window with its own styles: Tailwind isn't loaded
+// there. The print dialog's "Save as PDF" is how the office makes a PDF to
+// email, so no PDF library has to ride along to the farm PC.
+function printPage(title, body) {
+  const w = window.open("", "_blank");
+  if (!w) { Boord.toast("The browser blocked the print window - allow pop-ups for Boord"); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+    <title>${esc(title)}</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 24px; color: #0f172a; }
+      h1 { font-size: 20px; margin: 0 0 4px; } .meta { color: #475569; margin-bottom: 16px; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+      th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #cbd5e1; }
+      th { background: #f1f5f9; } .sum { width: auto; min-width: 320px; } .sum td:last-child { text-align: right; }
+      .net td { font-weight: bold; } .small { font-size: 12px; color: #64748b; }
+      .grp { font-weight: bold; font-size: 15px; padding-top: 14px; border-bottom: 2px solid #0f172a; }
+      td:first-child { white-space: nowrap; } .sub td { font-weight: bold; } @media print { tr { break-inside: avoid; } .grp { break-after: avoid; } }
+    </style></head><body>
+    ${body}
     <p class="small">Printed ${esc(new Date().toLocaleString())} from Boord ${esc(Boord.VERSION || "")}</p>
     </body></html>`);
   w.document.close();
   w.focus();
   w.print();
+}
+
+// The quick reports under the notes list: the notes already loaded for the
+// dates at the top, in the list's own order. A note with no statement in
+// yet has no sold figure; it shows "-" and counts as all unsold on Unsold,
+// because nothing on it has been paid for.
+function printMarketReport(kind) {
+  const d1 = document.getElementById("marketDate1").value;
+  const d2 = document.getElementById("marketDate2").value;
+  const period = d1 === d2 ? d1 : `${d1} to ${d2}`;
+  const notes = _marketNotes;
+  const r = (v) => Boord.fmtRand(v || 0);
+  const head = (cols) => `<thead><tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr></thead>`;
+  let title, body;
+  if (kind === "receiver" || kind === "market" || kind === "transporter") {
+    title = { receiver: "Receiver", market: "Market", transporter: "Transporter" }[kind];
+    const others = ["receiver", "market", "transporter"].filter((k) => k !== kind);
+    const cols = ["Loaded", "Note", ...others.map((k) => k[0].toUpperCase() + k.slice(1)),
+      "Pallets", "Sent", "Sold", "Unsold", "Gross", "Net paid", "Transport"];
+    const totals = (ns, label, tag) => `<tr class="sub"><${tag} colspan="4">${label}</${tag}>
+      <${tag}>${ns.reduce((s, n) => s + n.pallets, 0)}</${tag}><${tag}>${ns.reduce((s, n) => s + n.sent, 0)}</${tag}>
+      <${tag}>${ns.reduce((s, n) => s + (n.entered ? n.sold : 0), 0)}</${tag}>
+      <${tag}>${ns.reduce((s, n) => s + (n.entered ? n.sent - n.sold : 0), 0)}</${tag}>
+      <${tag}>${r(ns.reduce((s, n) => s + (n.entered ? n.gross : 0), 0))}</${tag}>
+      <${tag}>${r(ns.reduce((s, n) => s + (n.entered ? n.net : 0), 0))}</${tag}>
+      <${tag}>${r(ns.reduce((s, n) => s + (n.transport_cost || 0), 0))}</${tag}></tr>`;
+    const groups = {};
+    notes.forEach((n) => (groups[n[kind] || "(none)"] = groups[n[kind] || "(none)"] || []).push(n));
+    // One table, a heading row per group, so the columns line up down the
+    // page and the grand total sits under them.
+    body = `<table>${head(cols)}<tbody>${Object.keys(groups).sort((a, b) => a.localeCompare(b)).map((g) => `
+      <tr><td colspan="${cols.length}" class="grp">${esc(g)}</td></tr>
+      ${groups[g].map((n) => `<tr><td>${esc(n.loaded_on)}</td><td>${esc(n.note_no)}</td>
+        ${others.map((k) => `<td>${esc(n[k] || "")}</td>`).join("")}<td>${n.pallets}</td><td>${n.sent}</td>
+        <td>${n.entered ? n.sold : "-"}</td><td>${n.entered ? n.sent - n.sold : "-"}</td>
+        <td>${n.entered ? r(n.gross) : "-"}</td><td>${n.entered ? r(n.net) : "Not entered"}</td>
+        <td>${n.transport_cost ? r(n.transport_cost) : "-"}</td></tr>`).join("")}
+        ${totals(groups[g], `${esc(g)}: ${groups[g].length} note${groups[g].length === 1 ? "" : "s"}`, "td")}`).join("")}</tbody>
+      <tfoot>${totals(notes, `Total, ${notes.length} notes`, "th")}</tfoot></table>`;
+  } else {
+    // Sold and Unsold are per pack: what sold at what price, and what is
+    // still outstanding on each note.
+    const sold = kind === "sold";
+    title = sold ? "Sold" : "Unsold";
+    const lines = [];
+    notes.forEach((n) => n.packs.forEach((pk) => {
+      const out = pk.sent - (n.entered ? pk.sold || 0 : 0);
+      if (sold ? n.entered && pk.sold > 0 : out > 0) lines.push({ n, pk, out });
+    }));
+    const cols = ["Loaded", "Note", "Receiver", "Market", "Pack",
+      ...(sold ? ["Sold", "Price", "Gross"] : ["Sent", "Sold", "Unsold"])];
+    const sum = (f) => lines.reduce((s, l) => s + f(l), 0);
+    body = `<table>${head(cols)}<tbody>${lines.map(({ n, pk, out }) => `<tr><td>${esc(n.loaded_on)}</td>
+      <td>${esc(n.note_no)}</td><td>${esc(n.receiver)}</td><td>${esc(n.market)}</td><td>${esc(pk.pack)}</td>
+      ${sold ? `<td>${pk.sold}</td><td>${pk.price != null ? r(pk.price) : "-"}</td><td>${r(pk.gross)}</td>`
+        : `<td>${pk.sent}</td><td>${n.entered ? pk.sold || 0 : "Not entered"}</td><td>${out}</td>`}</tr>`).join("")
+      || `<tr><td colspan="8">Nothing ${sold ? "sold" : "unsold"} in this period.</td></tr>`}</tbody>
+      ${lines.length ? `<tfoot><tr><th colspan="5">Total, ${lines.length} line${lines.length === 1 ? "" : "s"}</th>
+        ${sold ? `<th>${sum((l) => l.pk.sold)}</th><th></th><th>${r(sum((l) => l.pk.gross))}</th>`
+          : `<th>${sum((l) => l.pk.sent)}</th><th>${sum((l) => l.pk.sent - l.out)}</th><th>${sum((l) => l.out)}</th>`}</tr></tfoot>` : ""}</table>`;
+  }
+  printPage(`Markets - ${title} ${period}`, `
+    <style>@page { size: landscape; }</style>
+    <h1>Bekfontein Boerdery - Markets: ${esc(title)}</h1>
+    <div class="meta">Delivery notes loaded ${esc(period)} · ${notes.length} note${notes.length === 1 ? "" : "s"}</div>
+    ${notes.length ? body : "<p>No delivery notes loaded in this period.</p>"}`);
 }
 
 // A blank box is "not on the statement yet", not zero.
