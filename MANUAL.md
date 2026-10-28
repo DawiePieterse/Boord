@@ -1746,7 +1746,7 @@ The list then shows the net paid. Notes still waiting for a statement show
 
 Under the list, **Print (or save as PDF) by** gives five quick reports of
 the notes listed, for the dates at the top (Today, This Week, Season or your
-own). Each opens a page and the print dialog. To make a PDF to email, choose
+own). Each opens a page and the print dialog, set to landscape. To make a PDF to email, choose
 **Save as PDF** as the printer.
 
 - **Receiver, Market, Transporter:** the notes grouped by that, each group with its
