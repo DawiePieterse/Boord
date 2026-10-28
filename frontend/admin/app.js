@@ -264,13 +264,14 @@ function renderDashboardKpis(harvesting, inTransit, received, summary) {
     ["Teams Active", `${summary.active_teams} teams`],
     ["Workers Active", `${summary.active_workers} workers`],
     ["Blocks Active", `${summary.active_blocks} blocks`],
-    ["Total Kg", Boord.fmtKg(totalKg)],
+    ["Total kg picked", Boord.fmtKg(totalKg)],
     ["Total Crates", `${totalCrates} crates`],
     ["Avg Kg/Lot", Boord.fmtNum(avgKgPerLot)],
     ["Avg Kg/Crate", Boord.fmtNum(avgKgPerCrate)],
     ["Harvesting", `${h.crates} crates / ${Boord.fmtKg(h.kg)}`],
     ["In Transit", `${t.crates} crates / ${Boord.fmtKg(t.kg)}`],
     ["Received", `${r.crates} crates / ${Boord.fmtKg(r.kg)}`],
+    ["Delivered kg", _deliveredKg(summary.delivered_kg)],
     ["Delivered vs Picked", _deliveredVsPicked(summary.delivered_kg, totalKg)],
   ];
   document.getElementById("dashKpiGrid").innerHTML = cards.map(([label, value]) => `
@@ -281,14 +282,20 @@ function renderDashboardKpis(harvesting, inTransit, received, summary) {
   `).join("");
 }
 
-// Kg on the period's delivery notes less kg picked, and that as a % of
-// picked: negative is fruit picked that never went out (culls, packing
-// loss, or still in the cold store). Delivery notes can't be split by
-// supplier, so with one picked the card says so rather than mislead.
-function _deliveredVsPicked(deliveredKg, pickedKg) {
+// Kg on the period's Packhouse delivery notes. Delivery notes can't be split
+// by supplier, so with one picked the card says so rather than mislead.
+function _deliveredKg(deliveredKg) {
   if (deliveredKg == null) {
     return document.getElementById("dashSupplierFilter").value ? "All suppliers only" : "No Packhouse data";
   }
+  return Boord.fmtKg(deliveredKg);
+}
+
+// Kg on the period's delivery notes less kg picked, and that as a % of
+// picked: negative is fruit picked that never went out (culls, packing
+// loss, or still in the cold store).
+function _deliveredVsPicked(deliveredKg, pickedKg) {
+  if (deliveredKg == null) return _deliveredKg(deliveredKg);
   const diff = deliveredKg - pickedKg;
   const sign = diff > 0 ? "+" : "";
   const pct = pickedKg ? ` (${sign}${Boord.fmtNum(diff / pickedKg * 100)}%)` : "";
