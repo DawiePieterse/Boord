@@ -640,6 +640,16 @@ def _market_notes(period_start: date, period_end: date, session: Session) -> lis
                 name = ln.get("packaging_name", "")
                 pk = packs.setdefault(name, {"pack": name, "carton_kg": ln.get("carton_kg", 0), "sent": 0})
                 pk["sent"] += ln.get("cartons", 0)
+        # A juice note's bins and crates stand where a fruit note's cartons
+        # do, a line each, with the average net kg as the "carton" weight so
+        # kg sent comes out as weighed. Copies made before crates existed
+        # have no container and are bins.
+        for b in json.loads(n.get("bins") or "[]"):
+            name = "Crates" if b.get("container") == "crate" else "Bins"
+            pk = packs.setdefault(name, {"pack": name, "carton_kg": 0, "sent": 0, "net_kg": 0})
+            pk["sent"] += 1
+            pk["net_kg"] += max((b.get("full_kg") or 0) - (b.get("empty_kg") or 0), 0)
+            pk["carton_kg"] = pk["net_kg"] / pk["sent"]
         if invs:
             for pk in packs.values():
                 pk["sold"], pk["gross"] = 0, 0
