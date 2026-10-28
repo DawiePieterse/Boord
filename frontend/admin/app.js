@@ -1405,7 +1405,8 @@ function renderMarketNotes() {
       <td class="p-2">${n.entered ? n.sent - n.sold : "-"}</td>
       <td class="p-2">${n.entered ? Boord.fmtRand(n.net) : '<span class="text-amber-600">Not entered</span>'}${n.invoices.length ? ` <i class="fa-solid fa-envelope text-slate-400" title="From ${n.invoices.length} emailed invoice(s)"></i>` : ""}</td>
       <td class="p-2">${n.transport_cost ? Boord.fmtRand(n.transport_cost) : "-"}</td>
-      <td class="p-2"><button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-note="${esc(n.uuid)}">${n.entered ? "Edit" : "Enter"}</button></td>
+      <td class="p-2 whitespace-nowrap"><button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-note="${esc(n.uuid)}">${n.entered ? "Edit" : "Enter"}</button>
+        <button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-print="${esc(n.uuid)}" title="Print or save as PDF"><i class="fa-solid fa-print"></i> Print</button></td>
     </tr>
   `).join("") : `<tr><td colspan="12" class="p-3 text-sm text-slate-500">No delivery notes loaded in this period.</td></tr>`;
   // Sold, Unsold and Net Paid add up only the notes with a statement in, the
@@ -1425,6 +1426,51 @@ function renderMarketNotes() {
   tbody.querySelectorAll("[data-market-note]").forEach((btn) => {
     btn.addEventListener("click", () => openMarketModal(_marketNotes.find((n) => n.uuid === btn.dataset.marketNote)));
   });
+  tbody.querySelectorAll("[data-market-print]").forEach((btn) => {
+    btn.addEventListener("click", () => printMarketNote(_marketNotes.find((n) => n.uuid === btn.dataset.marketPrint)));
+  });
+}
+
+// One note's statement on its own page, from the figures the list already
+// has, so the office can print it for the file or "Save as PDF" in the print
+// dialog to email it. A plain page with its own styles: Tailwind isn't loaded
+// in the new window, and nothing here is fetched again.
+function printMarketNote(n) {
+  const w = window.open("", "_blank");
+  if (!w) { Boord.toast("The browser blocked the print window - allow pop-ups for Boord"); return; }
+  const r = (v) => Boord.fmtRand(v || 0);
+  const dash = (v) => (n.entered && v != null ? v : "-");
+  const rows = n.packs.map((pk) => `<tr><td>${esc(pk.pack)}</td><td>${pk.sent}</td><td>${dash(pk.sold)}</td>
+    <td>${n.entered && pk.sold != null ? pk.sent - pk.sold : "-"}</td><td>${pk.price != null ? r(pk.price) : "-"}</td>
+    <td>${n.entered ? r(pk.gross) : "-"}</td></tr>`).join("");
+  const line = (label, v) => `<tr><td>${label}</td><td>${v}</td></tr>`;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+    <title>Delivery note ${esc(n.note_no)}</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 24px; color: #0f172a; }
+      h1 { font-size: 20px; margin: 0 0 4px; } .meta { color: #475569; margin-bottom: 16px; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+      th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #cbd5e1; }
+      th { background: #f1f5f9; } .sum { width: auto; min-width: 320px; } .sum td:last-child { text-align: right; }
+      .net td { font-weight: bold; } .small { font-size: 12px; color: #64748b; }
+    </style></head><body>
+    <h1>Bekfontein Boerdery - Delivery note ${esc(n.note_no)}</h1>
+    <div class="meta">${[n.loaded_on, n.receiver, n.market, n.transporter, `${n.pallets} pallets`].filter(Boolean).map(esc).join(" · ")}</div>
+    <table><thead><tr><th>Pack</th><th>Sent</th><th>Sold</th><th>Unsold</th><th>Price</th><th>Gross</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6">No packs on this note.</td></tr>'}</tbody>
+      <tfoot><tr><th>Total</th><th>${n.sent}</th><th>${n.entered ? n.sold : "-"}</th><th>${n.entered ? n.sent - n.sold : "-"}</th><th></th><th>${n.entered ? r(n.gross) : "-"}</th></tr></tfoot></table>
+    ${n.entered ? `<table class="sum">
+      ${line("Gross sales", r(n.gross))}${line("Commission", r(n.commission))}${line("Deductions", r(n.deductions))}${line("Bank charges", r(n.bank_cost))}
+      <tr class="net"><td>Net paid</td><td>${r(n.net)}</td></tr></table>` : "<p><b>Market statement not entered yet.</b></p>"}
+    <table class="sum">
+      ${line("Transport", n.transport_cost ? r(n.transport_cost) : "-")}${line("Waybill", esc(n.waybill_no || "-"))}${line("Transport invoice", esc(n.invoice_no || "-"))}</table>
+    ${n.invoices.length ? `<p class="small">From emailed invoices: ${n.invoices.map((i) => `${esc(i.invoice_no)} (${esc(i.payment)}, ${esc(i.invoice_date)}, net ${r(i.net)})`).join("; ")}</p>` : ""}
+    ${n.notes ? `<p>${esc(n.notes)}</p>` : ""}
+    <p class="small">Printed ${esc(new Date().toLocaleString())} from Boord ${esc(Boord.VERSION || "")}</p>
+    </body></html>`);
+  w.document.close();
+  w.focus();
+  w.print();
 }
 
 // A blank box is "not on the statement yet", not zero.

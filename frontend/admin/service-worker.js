@@ -2,7 +2,7 @@
 // loads if the connection briefly drops. Data (dashboard, reports, etc.)
 // always goes over the network when available.
 const CACHE_PREFIX = "boord-admin-";
-const CACHE = "boord-admin-v70";
+const CACHE = "boord-admin-v71";
 const SHELL = [
   "./",
   "./index.html",
