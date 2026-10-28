@@ -819,7 +819,7 @@ def market_packs_report(period_start: date, period_end: date, supplier_id: Optio
                "Gross", "Gross R/Kg"]
     rows = [[rc, mk, pack, g["sent"], g["sold"], g["sent"] - g["sold"], _ratio(g["gross"], g["sold"]),
              round(g["gross"], 2), _ratio(g["gross"], g["kg"])] for (rc, mk, pack), g in sorted(groups.items())]
-    return _xlsx_response(headers, rows, "Market Sales by Pack", f"Market_Sales_by_Pack_{period_start}_{period_end}.xlsx")
+    return _xlsx_response(headers, rows, "Market Sales by Package Type", f"Market_Sales_by_Package_Type_{period_start}_{period_end}.xlsx")
 
 
 @router.get("/market-sales")

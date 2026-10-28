@@ -237,7 +237,7 @@ The four reports in this section use the same dates:
 | Report | What it contains |
 |---|---|
 | Markte Opsomming / Market Summary | Per receiver and market: pallets, cartons sent and sold, gross, costs, net paid, R/carton, R/kg, transport, plus a total |
-| Market Sales by Pack | Per market and pack: sent, sold, average price |
+| Market Sales by Package Type | Per market and pack: sent, sold, average price |
 | Consignment Sales | One row per delivery note: what went and what it paid |
 | Vervoer Opsomming / Transport Summary | One row per note: transporter, waybill, invoice, pallets, R/pallet, cost excluding and including VAT, plus a total |
 
