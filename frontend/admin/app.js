@@ -1547,6 +1547,7 @@ function printMarketReport(kind) {
           : `<th>${sum((l) => l.pk.sent)}</th><th>${sum((l) => l.pk.sent - l.out)}</th><th>${sum((l) => l.out)}</th>`}</tr></tfoot>` : ""}</table>`;
   }
   printPage(`Markets - ${title} ${period}`, `
+    <style>@page { size: landscape; }</style>
     <h1>Bekfontein Boerdery - Markets: ${esc(title)}</h1>
     <div class="meta">Delivery notes loaded ${esc(period)} · ${notes.length} note${notes.length === 1 ? "" : "s"}</div>
     ${notes.length ? body : "<p>No delivery notes loaded in this period.</p>"}`);
