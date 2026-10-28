@@ -1313,7 +1313,9 @@ def test_an_emailed_market_invoice_is_read_checked_and_added_up():
                    (json.dumps([pallet]),))
         # A juice note: bins and crates, no pallets.
         ph.execute("INSERT INTO deliverynote VALUES ('j8', 8, 'Onderberg', 'Self', '2026-10-20', '[]', 0, ?)",
-                   (json.dumps([{"container": "bin", "bin_no": 88, "empty_kg": 37, "full_kg": 503}]),))
+                   (json.dumps([{"container": "bin", "bin_no": 88, "empty_kg": 37, "full_kg": 503},
+                                {"bin_no": 89, "empty_kg": 33, "full_kg": 529},
+                                {"container": "crate", "bin_no": 1, "empty_kg": 2, "full_kg": 20}]),))
         ph.commit()
         ph.close()
         reports.PACKHOUSE_DB_PATH = os.path.join(tmp, "packhouse.db")
@@ -1340,6 +1342,9 @@ def test_an_emailed_market_invoice_is_read_checked_and_added_up():
             assert len(note["invoices"]) == 2
             # Juice note 8 takes Onderberg's J-0008 load, not fruit note 8's.
             assert ([i["invoice_no"] for i in juice["invoices"]], juice["gross"]) == (["OB-170677"], 18480.0), juice
+            # Its bins and crates are its lines, as cartons are a fruit note's.
+            sent = {pk["pack"]: (pk["sent"], pk["sent"] * pk["carton_kg"]) for pk in juice["packs"]}
+            assert (sent["Bins"], sent["Crates"]) == ((2, 962), (1, 18)), sent
     finally:
         reports.PACKHOUSE_DB_PATH = saved_path
         shutil.rmtree(tmp, ignore_errors=True)
