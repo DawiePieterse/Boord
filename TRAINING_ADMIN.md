@@ -194,7 +194,9 @@ joins.
 1. Reports tab.
 2. Set the date range and, if needed, a Farm/Supplier filter — **both
    dates must be filled in** or the report won't generate.
-3. Tap the report you want. Each one downloads as an `.xlsx` file:
+3. Tap the report you want. They are grouped under **Harvesting**,
+   **Packhouse** and **Markets & Transport**; hold the pointer on one to read
+   more about it. Each one downloads as an `.xlsx` file:
 
 | Report | What it contains |
 |---|---|
@@ -212,8 +214,9 @@ joins.
 
 ### Markets & Transport
 
-Under the reports is a list of the delivery notes that Boord Packhouse loaded
-in the date range.
+The **Markets** tab lists the delivery notes that Boord Packhouse loaded
+between its two dates. It opens on the last week; tap **Season** to see
+them all.
 
 1. When a market statement or a transporter's invoice arrives, find its
    note and tap **Enter** (or **Edit**).
@@ -232,7 +235,8 @@ still type the transport. When a new market product appears under **Market
 invoices by email** with an amber box, pick the Packhouse pack it is. You
 only do that once per product. **Fetch now** checks the email straight away.
 
-The four reports in this section use the same dates:
+The four market reports are on the Reports tab, under **Markets &
+Transport**, and use the Reports tab's dates:
 
 | Report | What it contains |
 |---|---|

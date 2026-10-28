@@ -1721,12 +1721,13 @@ buyer or an auditor.
 
 ### Markets & Transport
 
-Below the reports is a **Markets & Transport** section. It replaces the
-season "Markte" workbook the office used to keep by hand, with one sheet per
-market and a transport summary.
+The **Markets** tab, next to Reports, replaces the season "Markte" workbook
+the office used to keep by hand, with one sheet per market and a transport
+summary. It has its own dates (**Loaded from** and **Loaded to**), and opens
+on the last week, because a statement comes in weeks after its load.
 
-The list shows every delivery note that Boord Packhouse loaded in the date
-range: date, note number, receiver, market, transporter, pallets and cartons.
+The list shows every delivery note that Boord Packhouse loaded in those
+dates: date, note number, receiver, market, transporter, pallets and cartons.
 What went out on each note comes from Packhouse. What the market paid, and
 what the transporter charged, nobody records but the office. So when a
 market's statement or a transporter's invoice arrives, open the note
@@ -1741,8 +1742,8 @@ market's statement or a transporter's invoice arrives, open the note
   cost excluding VAT.
 
 The list then shows the net paid. Notes still waiting for a statement show
-"Not entered". The four reports use the same date range (the date each note
-was loaded). Like the Delivery Notes report, they are not filtered by
+"Not entered". The four reports are on the Reports tab, under **Markets &
+Transport**, and use its date range (the date each note was loaded). Like the Delivery Notes report, they are not filtered by
 supplier, because a note carries whatever suppliers were stacked.
 
 | Report | Contents |
