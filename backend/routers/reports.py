@@ -665,7 +665,9 @@ def _market_notes(period_start: date, period_end: date, session: Session) -> lis
         out.append(dict({
             "uuid": n["uuid"], "note_no": n["note_no"], "loaded_on": n["loaded_on"],
             "receiver": (n["receiver"] or "").split("\n")[0],
-            "market": ", ".join(sorted({p.get("market_name", "") for p in pallets} - {""})),
+            # A juice note (Packhouse's J- notes) carries bins and crates, not pallets.
+            "market": "Juice" if json.loads(n.get("bins") or "[]")
+                      else ", ".join(sorted({p.get("market_name", "") for p in pallets} - {""})),
             "transporter": n["transporter"], "pallets": len(pallets), "packs": packs,
             "sent": sum(pk["sent"] for pk in packs), "sold": sum(pk["sold"] or 0 for pk in packs),
             "kg_sent": round(sum(pk["sent"] * pk["carton_kg"] for pk in packs), 1),

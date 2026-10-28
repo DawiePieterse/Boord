@@ -2190,7 +2190,7 @@ keys below match `backend/models.py` exactly.
 | `id` | text | `"001"` | Primary key - the employee number. Must be unique and must match the number printed on the worker's badge. |
 | `first_name` | text | `"Sipho"` | |
 | `last_name` | text | `"Dlamini"` | |
-| `id_number` | text | `"8001015009087"` | Optional. SA ID number, or passport number for a foreign worker. Admin-only: never sent to a field or pack house tablet. Until 3.34 there was no such field and the office typed IDs into WhatsApp Number; the 3.34 update moved every value there that is not an SA cell number into this field. |
+| `id_number` | text | `"8001015009087"` | Optional. SA ID number, or passport number for a foreign worker. Admin-only: never sent to a field or pack house tablet. Until 3.36 there was no such field and the office typed IDs into WhatsApp Number; the 3.36 update moved every value there that is not an SA cell number into this field. |
 | `whatsapp_number` | text | `"+27821234567"` | Optional, not currently used to send anything automatically. Admin-only. |
 | `supplier_id` | number (optional) | `2` | Which farm this worker belongs to. Left blank for the farm's own workers. |
 | `photo_filename` | text | `"001.jpg"` | Set automatically when a photo is captured/uploaded - not hand-edited. |

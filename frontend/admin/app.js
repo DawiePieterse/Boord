@@ -1378,6 +1378,7 @@ async function loadMarketNotes() {
   } catch (e) {
     // Most often Packhouse isn't on this server; the 503 says so in words.
     tbody.innerHTML = `<tr><td colspan="12" class="p-3 text-sm text-slate-500">${esc(e.detail || e.message)}</td></tr>`;
+    document.getElementById("marketNotesFoot").innerHTML = "";
     return;
   }
   renderMarketNotes();
@@ -1408,6 +1409,20 @@ function renderMarketNotes() {
       <td class="p-2"><button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-note="${esc(n.uuid)}">${n.entered ? "Edit" : "Enter"}</button></td>
     </tr>
   `).join("") : `<tr><td colspan="12" class="p-3 text-sm text-slate-500">No delivery notes loaded in this period.</td></tr>`;
+  // Sold, Unsold and Net Paid add up only the notes with a statement in, the
+  // same notes their columns show figures for; the rest are still "-".
+  const sum = (f, only) => _marketNotes.reduce((s, n) => s + (!only || n.entered ? f(n) : 0), 0);
+  document.getElementById("marketNotesFoot").innerHTML = _marketNotes.length ? `
+    <tr class="font-semibold bg-slate-50">
+      <td class="p-2" colspan="5">Total (${_marketNotes.length} notes)</td>
+      <td class="p-2">${sum((n) => n.pallets)}</td>
+      <td class="p-2">${sum((n) => n.sent)}</td>
+      <td class="p-2">${sum((n) => n.sold, true)}</td>
+      <td class="p-2">${sum((n) => n.sent - n.sold, true)}</td>
+      <td class="p-2 whitespace-nowrap">${Boord.fmtRand(sum((n) => n.net, true))}</td>
+      <td class="p-2 whitespace-nowrap">${Boord.fmtRand(sum((n) => n.transport_cost || 0))}</td>
+      <td></td>
+    </tr>` : "";
   tbody.querySelectorAll("[data-market-note]").forEach((btn) => {
     btn.addEventListener("click", () => openMarketModal(_marketNotes.find((n) => n.uuid === btn.dataset.marketNote)));
   });
