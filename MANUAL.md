@@ -1747,7 +1747,14 @@ The list then shows the net paid. Notes still waiting for a statement show
 Under the list, **Print (or save as PDF) by** gives five quick reports of
 the notes listed, for the dates at the top (Today, This Week, Season or your
 own). Each opens a page and the print dialog, set to landscape. To make a PDF to email, choose
-**Save as PDF** as the printer.
+**Save as PDF** as the printer. At the top of the page (none of it is printed):
+
+- **Share / PDF** makes the report a PDF and opens the phone's own share
+  options: email, WhatsApp, messages, Drive, print, whatever the phone has.
+  On a computer it downloads the PDF. It reads "Making PDF..." for a moment
+  first.
+- **Print** opens the print dialog. On a computer it opens by itself.
+- **Back to Boord** returns to the app.
 
 - **Receiver, Market, Transporter:** the notes grouped by that, each group with its
   notes (pallets, cartons sent, sold and unsold, gross, net paid, transport)
@@ -1756,7 +1763,11 @@ own). Each opens a page and the print dialog, set to landscape. To make a PDF to
 - **Unsold:** every pack with cartons still outstanding. A note with no
   statement entered yet counts as all unsold.
 
-The four full reports are on the Reports tab, under **Markets &
+The same five are on the Reports tab too, under **Markets & Transport**
+(Markets by Receiver, by Market, by Transporter, Markets Sold and Markets
+Unsold), for the Reports tab's dates.
+
+The four spreadsheet reports are on the Reports tab, under **Markets &
 Transport**, and use its date range (the date each note was loaded). Like the Delivery Notes report, they are not filtered by
 supplier, because a note carries whatever suppliers were stacked.
 
@@ -2216,7 +2227,7 @@ keys below match `backend/models.py` exactly.
 | `id` | text | `"001"` | Primary key - the employee number. Must be unique and must match the number printed on the worker's badge. |
 | `first_name` | text | `"Sipho"` | |
 | `last_name` | text | `"Dlamini"` | |
-| `id_number` | text | `"8001015009087"` | Optional. SA ID number, or passport number for a foreign worker. Admin-only: never sent to a field or pack house tablet. Until 3.40 there was no such field and the office typed IDs into WhatsApp Number; the 3.40 update moved every value there that is not an SA cell number into this field. |
+| `id_number` | text | `"8001015009087"` | Optional. SA ID number, or passport number for a foreign worker. Admin-only: never sent to a field or pack house tablet. Until 3.42 there was no such field and the office typed IDs into WhatsApp Number; the 3.42 update moved every value there that is not an SA cell number into this field. |
 | `whatsapp_number` | text | `"+27821234567"` | Optional, not currently used to send anything automatically. Admin-only. |
 | `supplier_id` | number (optional) | `2` | Which farm this worker belongs to. Left blank for the farm's own workers. |
 | `photo_filename` | text | `"001.jpg"` | Set automatically when a photo is captured/uploaded - not hand-edited. |
