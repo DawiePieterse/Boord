@@ -1273,10 +1273,13 @@ def test_an_emailed_market_invoice_is_read_checked_and_added_up():
     try:
         ph = sqlite3.connect(os.path.join(tmp, "packhouse.db"))
         ph.execute("CREATE TABLE deliverynote (uuid TEXT, note_no INTEGER, receiver TEXT, transporter TEXT, "
-                   "loaded_on TEXT, pallets TEXT, removed INTEGER)")
+                   "loaded_on TEXT, pallets TEXT, removed INTEGER, bins TEXT DEFAULT '[]')")
         pallet = {"market_name": "Local", "lines": [{"packaging_name": "2kg XL", "carton_kg": 2.0, "cartons": 30}]}
-        ph.execute("INSERT INTO deliverynote VALUES ('n7', 7, 'Dapper', 'HFR', '2026-10-20', ?, 0)",
+        ph.execute("INSERT INTO deliverynote VALUES ('n7', 7, 'Dapper', 'HFR', '2026-10-20', ?, 0, '[]')",
                    (json.dumps([pallet]),))
+        # A juice note: bins and crates, no pallets.
+        ph.execute("INSERT INTO deliverynote VALUES ('j8', 8, 'Onderberg', 'Self', '2026-10-20', '[]', 0, ?)",
+                   (json.dumps([{"container": "bin", "bin_no": 88, "empty_kg": 37, "full_kg": 503}]),))
         ph.commit()
         ph.close()
         reports.PACKHOUSE_DB_PATH = os.path.join(tmp, "packhouse.db")
@@ -1290,7 +1293,8 @@ def test_an_emailed_market_invoice_is_read_checked_and_added_up():
             reports.save_market_product(reports.MarketProductIn(
                 product="LICH, BX020, THREE MONTH RED, CL 1, XL, *, *", pack="2kg XL"), s)
             day = datetime(2026, 10, 20).date()
-            note = reports._market_notes(day, day, s)[0]
+            note, juice = reports._market_notes(day, day, s)
+            assert (note["market"], juice["market"]) == ("Local", "Juice"), (note, juice)
             # Two part-payments, one product matched to the pack on the
             # pallet and one not: it still counts, on a line of its own.
             assert (note["gross"], note["net"], note["commission"]) == (4200.0, 3543.8, 603.76), note
