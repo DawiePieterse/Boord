@@ -1223,6 +1223,23 @@ const REPORTS = [
   { key: "transport-summary", label: "Vervoer Opsomming / Transport Summary", icon: "fa-truck-moving", color: "text-blue-600", group: "markets",
     short: "Transport cost per delivery note",
     desc: "One row per delivery note - transporter, waybill, invoice, pallets, R/pallet and cost excluding and including VAT, with a total." },
+  // The Markets tab's quick print reports, for the dates here: `print` names
+  // the printMarketReport kind, and they open the print dialog, not a .xlsx.
+  { key: "market-by-receiver", label: "Markets by Receiver", icon: "fa-user-tie", color: "text-purple-600", group: "markets", print: "receiver",
+    short: "Notes grouped per receiver",
+    desc: "The delivery notes grouped by receiver - pallets, sent, sold, unsold, gross, net paid and transport - with subtotals and a total. Prints landscape; Save as PDF in the print dialog." },
+  { key: "market-by-market", label: "Markets by Market", icon: "fa-map-location-dot", color: "text-rose-600", group: "markets", print: "market",
+    short: "Notes grouped per market",
+    desc: "The delivery notes grouped by market, with subtotals and a total. Prints landscape; Save as PDF in the print dialog." },
+  { key: "market-by-transporter", label: "Markets by Transporter", icon: "fa-truck-ramp-box", color: "text-cyan-600", group: "markets", print: "transporter",
+    short: "Notes grouped per transporter",
+    desc: "The delivery notes grouped by transporter, with subtotals and a total. Prints landscape; Save as PDF in the print dialog." },
+  { key: "market-sold", label: "Markets Sold", icon: "fa-handshake", color: "text-emerald-600", group: "markets", print: "sold",
+    short: "What sold, per note and pack",
+    desc: "Every pack that sold, per delivery note - cartons, bins or crates sold, price and gross, with a total. Prints landscape; Save as PDF in the print dialog." },
+  { key: "market-unsold", label: "Markets Unsold", icon: "fa-box-open", color: "text-orange-600", group: "markets", print: "unsold",
+    short: "What is still outstanding",
+    desc: "Every pack still outstanding, per delivery note; a note with no statement in counts as all unsold. Prints landscape; Save as PDF in the print dialog." },
 ];
 
 // The query string for one report. Every report takes the same
@@ -1246,7 +1263,7 @@ function renderReportsGrid() {
     const flagDailyOnly = isRange && r.single_day;
     const note = flagDailyOnly
       ? `<div class="text-xs text-amber-600 font-medium mt-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Daily report only - uses ${d1} (period start)</div>`
-      : `<div class="text-xs text-slate-400">Download .xlsx</div>`;
+      : `<div class="text-xs text-slate-400">${r.print ? "Print / PDF" : "Download .xlsx"}</div>`;
     return `
     <button class="bg-white rounded-xl shadow p-4 hover:bg-slate-50 flex flex-col items-center gap-2 text-center" data-report="${r.key}" title="${esc(r.desc)}">
       <i class="fa-solid ${r.icon} text-3xl ${r.color}"></i>
@@ -1293,6 +1310,7 @@ async function downloadReport(key) {
   const d2 = document.getElementById("reportDate2").value;
   const supplierId = document.getElementById("reportsSupplierFilter").value;
   if (!d1 || !d2) { Boord.toast("Pick both dates first"); return; }
+  if (report.print) { printMarketReportFor(report.print, d1, d2); return; }
   try {
     const blob = await Boord.api(`/api/reports/${key}?${reportParams(report, d1, d2, supplierId)}`, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
     Boord.downloadBlob(blob, `${report.label.replace(/[^a-zA-Z0-9]+/g, "_")}.xlsx`);
@@ -1464,8 +1482,10 @@ function printMarketNote(n) {
 // A plain page in its own window with its own styles: Tailwind isn't loaded
 // there. The print dialog's "Save as PDF" is how the office makes a PDF to
 // email, so no PDF library has to ride along to the farm PC.
-function printPage(title, body) {
-  const w = window.open("", "_blank");
+// `w` is a window already opened, by a caller that has to fetch first: a
+// window opened after an await is no longer the click's, and gets blocked.
+function printPage(title, body, w) {
+  w = w || window.open("", "_blank");
   if (!w) { Boord.toast("The browser blocked the print window - allow pop-ups for Boord"); return; }
   w.document.write(`<!doctype html><html><head><meta charset="utf-8">
     <title>${esc(title)}</title>
@@ -1491,11 +1511,25 @@ function printPage(title, body) {
 // dates at the top, in the list's own order. A note with no statement in
 // yet has no sold figure; it shows "-" and counts as all unsold on Unsold,
 // because nothing on it has been paid for.
-function printMarketReport(kind) {
-  const d1 = document.getElementById("marketDate1").value;
-  const d2 = document.getElementById("marketDate2").value;
+// The same reports from the Reports tab, for its dates: the notes are
+// fetched for them, so the Markets tab's list is left as it is.
+async function printMarketReportFor(kind, d1, d2) {
+  const w = window.open("", "_blank");
+  if (!w) { Boord.toast("The browser blocked the print window - allow pop-ups for Boord"); return; }
+  try {
+    const notes = await Boord.api(`/api/reports/market-notes?period_start=${d1}&period_end=${d2}`);
+    printMarketReport(kind, notes, d1, d2, w);
+  } catch (e) {
+    w.close();
+    Boord.toast(e.detail || "Could not load the delivery notes - check connection");
+  }
+}
+
+function printMarketReport(kind, notes, d1, d2, w) {
+  notes = notes || _marketNotes;
+  d1 = d1 || document.getElementById("marketDate1").value;
+  d2 = d2 || document.getElementById("marketDate2").value;
   const period = d1 === d2 ? d1 : `${d1} to ${d2}`;
-  const notes = _marketNotes;
   const r = (v) => Boord.fmtRand(v || 0);
   const head = (cols) => `<thead><tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr></thead>`;
   let title, body;
@@ -1550,7 +1584,7 @@ function printMarketReport(kind) {
     <style>@page { size: landscape; }</style>
     <h1>Bekfontein Boerdery - Markets: ${esc(title)}</h1>
     <div class="meta">Delivery notes loaded ${esc(period)} · ${notes.length} note${notes.length === 1 ? "" : "s"}</div>
-    ${notes.length ? body : "<p>No delivery notes loaded in this period.</p>"}`);
+    ${notes.length ? body : "<p>No delivery notes loaded in this period.</p>"}`, w);
 }
 
 // A blank box is "not on the statement yet", not zero.

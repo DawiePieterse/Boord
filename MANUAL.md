@@ -1756,7 +1756,11 @@ own). Each opens a page and the print dialog, set to landscape. To make a PDF to
 - **Unsold:** every pack with cartons still outstanding. A note with no
   statement entered yet counts as all unsold.
 
-The four full reports are on the Reports tab, under **Markets &
+The same five are on the Reports tab too, under **Markets & Transport**
+(Markets by Receiver, by Market, by Transporter, Markets Sold and Markets
+Unsold), for the Reports tab's dates.
+
+The four spreadsheet reports are on the Reports tab, under **Markets &
 Transport**, and use its date range (the date each note was loaded). Like the Delivery Notes report, they are not filtered by
 supplier, because a note carries whatever suppliers were stacked.
 
