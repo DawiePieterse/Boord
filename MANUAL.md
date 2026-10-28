@@ -1747,7 +1747,14 @@ The list then shows the net paid. Notes still waiting for a statement show
 Under the list, **Print (or save as PDF) by** gives five quick reports of
 the notes listed, for the dates at the top (Today, This Week, Season or your
 own). Each opens a page and the print dialog, set to landscape. To make a PDF to email, choose
-**Save as PDF** as the printer.
+**Save as PDF** as the printer. At the top of the page (none of it is printed):
+
+- **Share / PDF** makes the report a PDF and opens the phone's own share
+  options: email, WhatsApp, messages, Drive, print, whatever the phone has.
+  On a computer it downloads the PDF. It reads "Making PDF..." for a moment
+  first.
+- **Print** opens the print dialog. On a computer it opens by itself.
+- **Back to Boord** returns to the app.
 
 - **Receiver, Market, Transporter:** the notes grouped by that, each group with its
   notes (pallets, cartons sent, sold and unsold, gross, net paid, transport)

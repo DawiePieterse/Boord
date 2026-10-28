@@ -1480,7 +1480,13 @@ function printMarketNote(n) {
 }
 
 // A plain page in its own window with its own styles: Tailwind isn't loaded
-// there. The print dialog's "Save as PDF" is how the office makes a PDF to
+// there. On a phone that window has no address bar or back button (the Admin
+// app runs installed, full screen), so the page carries its own Back to Boord,
+// Share / PDF (shared/report-pdf.js: the phone's own share sheet with the
+// report as a PDF) and Print; none of them is printed. Back closes the
+// window; where the phone won't let a page close itself it goes to the Admin
+// app instead. Only a desktop opens the print dialog by itself: on a phone
+// it would stand in front of the share button. The print dialog's "Save as PDF" is how the office makes a PDF to
 // email, so no PDF library has to ride along to the farm PC.
 // `w` is a window already opened, by a caller that has to fetch first: a
 // window opened after an await is no longer the click's, and gets blocked.
@@ -1488,6 +1494,7 @@ function printPage(title, body, w) {
   w = w || window.open("", "_blank");
   if (!w) { Boord.toast("The browser blocked the print window - allow pop-ups for Boord"); return; }
   w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>${esc(title)}</title>
     <style>
       body { font-family: system-ui, sans-serif; margin: 24px; color: #0f172a; }
@@ -1498,13 +1505,24 @@ function printPage(title, body, w) {
       .net td { font-weight: bold; } .small { font-size: 12px; color: #64748b; }
       .grp { font-weight: bold; font-size: 15px; padding-top: 14px; border-bottom: 2px solid #0f172a; }
       td:first-child { white-space: nowrap; } .sub td { font-weight: bold; } @media print { tr { break-inside: avoid; } .grp { break-after: avoid; } }
+      .bar { position: sticky; top: 0; display: flex; gap: 8px; padding: 8px 0 12px; background: #fff; }
+      .bar button { font: inherit; font-size: 16px; padding: 10px 16px; border: 0; border-radius: 8px; background: #e2e8f0; color: #0f172a; }
+      .bar .back { background: #1e3a8a; color: #fff; } @media print { .bar { display: none; } }
     </style></head><body>
-    ${body}
-    <p class="small">Printed ${esc(new Date().toLocaleString())} from Boord ${esc(Boord.VERSION || "")}</p>
+    <div class="bar">
+      <button class="back" onclick="window.close(); setTimeout(function () { location.href = '/admin/'; }, 300)">&larr; Back to Boord</button>
+      <button id="sharePdf" disabled>Making PDF...</button>
+      <button onclick="window.print()">Print</button>
+    </div>
+    <div id="report">${body}
+    <p class="small">Printed ${esc(new Date().toLocaleString())} from Boord ${esc(Boord.VERSION || "")}</p></div>
+    <script src="../shared/vendor/html2canvas/html2canvas.min.js"></script>
+    <script src="../shared/vendor/jspdf/jspdf.umd.min.js"></script>
+    <script src="../shared/report-pdf.js"></script>
     </body></html>`);
   w.document.close();
   w.focus();
-  w.print();
+  if (!window.matchMedia("(pointer: coarse)").matches) w.print();
 }
 
 // The quick reports under the notes list: the notes already loaded for the
