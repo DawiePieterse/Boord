@@ -379,10 +379,18 @@
       <div class="bg-white rounded-xl shadow overflow-x-auto">
         <div class="p-3 border-b text-xs text-slate-500">Delivery notes loaded in the period, from Boord Packhouse. Open one to type in the market's statement and the transporter's invoice.</div>
         <table class="w-full text-sm">
-          <thead><tr class="text-left border-b">
-            <th class="p-2">Loaded</th><th class="p-2">Note</th><th class="p-2">Receiver</th><th class="p-2">Market</th>
-            <th class="p-2">Transporter</th><th class="p-2">Pallets</th><th class="p-2">Cartons</th>
-            <th class="p-2">Net Paid</th><th class="p-2">Transport</th><th></th>
+          <!-- Click a heading to sort by it; click again to reverse. -->
+          <thead id="marketNotesHead"><tr class="text-left border-b">
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="loaded_on">Loaded</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="note_no">Note</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="receiver">Receiver</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="market">Market</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="transporter">Transporter</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="pallets">Pallets</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="sent">Cartons</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="sold">Cartons Sold</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="net">Net Paid</th>
+            <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="transport_cost">Transport</th><th></th>
           </tr></thead>
           <tbody id="marketNotesRows"></tbody>
         </table>

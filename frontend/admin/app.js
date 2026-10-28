@@ -1313,6 +1313,28 @@ async function downloadReport(key) {
 // ---------------------------------------------------------------------
 let _marketNotes = [];
 let _marketNote = null;
+// The heading the office last clicked. It holds across period changes, so
+// sorting by market and then widening to the season keeps the market order.
+let _marketSort = { key: "loaded_on", dir: 1 };
+
+// A note with nothing typed in yet has no sold count or net: it sorts below
+// every entered one, whichever way round, rather than passing for zero.
+function marketSortValue(n, key) {
+  if ((key === "sold" || key === "net") && !n.entered) return null;
+  return n[key];
+}
+
+function sortMarketNotes() {
+  const { key, dir } = _marketSort;
+  _marketNotes.sort((a, b) => {
+    const x = marketSortValue(a, key), y = marketSortValue(b, key);
+    if (x == null || x === "") return (y == null || y === "") ? 0 : 1;
+    if (y == null || y === "") return -1;
+    // numeric: true so note 1341 comes before 13410, and names ignore case.
+    return dir * (typeof x === "number" && typeof y === "number"
+      ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" }));
+  });
+}
 
 // The Markets tab opens on the last week. Packhouse and the market's email
 // change the list from outside, so it is fetched again each time the tab opens.
@@ -1331,6 +1353,13 @@ function bindMarkets() {
   });
   document.getElementById("marketDate1").addEventListener("change", loadMarketNotes);
   document.getElementById("marketDate2").addEventListener("change", loadMarketNotes);
+  document.querySelectorAll("#marketNotesHead [data-sort]").forEach((th) => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      _marketSort = { key, dir: _marketSort.key === key ? -_marketSort.dir : 1 };
+      renderMarketNotes();
+    });
+  });
   document.querySelector('.tab-btn[data-tab="markets"]').addEventListener("click", () => {
     loadMarketNotes();
     loadMarketMail();
@@ -1347,9 +1376,21 @@ async function loadMarketNotes() {
     _marketNotes = await Boord.api(`/api/reports/market-notes?period_start=${d1}&period_end=${d2}`);
   } catch (e) {
     // Most often Packhouse isn't on this server; the 503 says so in words.
-    tbody.innerHTML = `<tr><td colspan="10" class="p-3 text-sm text-slate-500">${esc(e.detail || e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="p-3 text-sm text-slate-500">${esc(e.detail || e.message)}</td></tr>`;
     return;
   }
+  renderMarketNotes();
+}
+
+function renderMarketNotes() {
+  const tbody = document.getElementById("marketNotesRows");
+  sortMarketNotes();
+  document.querySelectorAll("#marketNotesHead [data-sort]").forEach((th) => {
+    const on = th.dataset.sort === _marketSort.key;
+    th.querySelector("i")?.remove();
+    th.setAttribute("aria-sort", on ? (_marketSort.dir > 0 ? "ascending" : "descending") : "none");
+    th.insertAdjacentHTML("beforeend", ` <i class="fa-solid ${on ? (_marketSort.dir > 0 ? "fa-sort-up" : "fa-sort-down") : "fa-sort text-slate-300"} text-xs"></i>`);
+  });
   tbody.innerHTML = _marketNotes.length ? _marketNotes.map((n) => `
     <tr class="border-b">
       <td class="p-2 whitespace-nowrap">${esc(n.loaded_on)}</td>
@@ -1359,11 +1400,12 @@ async function loadMarketNotes() {
       <td class="p-2">${esc(n.transporter)}</td>
       <td class="p-2">${n.pallets}</td>
       <td class="p-2">${n.sent}</td>
+      <td class="p-2">${n.entered ? n.sold : "-"}</td>
       <td class="p-2">${n.entered ? Boord.fmtRand(n.net) : '<span class="text-amber-600">Not entered</span>'}${n.invoices.length ? ` <i class="fa-solid fa-envelope text-slate-400" title="From ${n.invoices.length} emailed invoice(s)"></i>` : ""}</td>
       <td class="p-2">${n.transport_cost ? Boord.fmtRand(n.transport_cost) : "-"}</td>
       <td class="p-2"><button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-note="${esc(n.uuid)}">${n.entered ? "Edit" : "Enter"}</button></td>
     </tr>
-  `).join("") : `<tr><td colspan="10" class="p-3 text-sm text-slate-500">No delivery notes loaded in this period.</td></tr>`;
+  `).join("") : `<tr><td colspan="11" class="p-3 text-sm text-slate-500">No delivery notes loaded in this period.</td></tr>`;
   tbody.querySelectorAll("[data-market-note]").forEach((btn) => {
     btn.addEventListener("click", () => openMarketModal(_marketNotes.find((n) => n.uuid === btn.dataset.marketNote)));
   });
