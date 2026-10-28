@@ -134,7 +134,8 @@ Five subtabs: **Workers**, **Teams**, **Blocks**, **Devices**,
 ### Adding a worker
 
 1. Master Data → Workers → **Add Worker**.
-2. Fill in Employee Number, First Name, Last Name, WhatsApp Number, and
+2. Fill in Employee Number, First Name, Last Name, ID Number (SA ID or
+   passport number), WhatsApp Number, and
    which Farm/Supplier they belong to (leave as "(none)" for your own
    farm's workers).
 3. Optionally take or upload a **Photo** right there.

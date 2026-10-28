@@ -55,12 +55,13 @@ class Worker(SQLModel, table=True):
     first_name: str = ""
     last_name: str = ""
     name: str = ""  # display name = first_name + " " + last_name, kept for reports compat
-    # SA ID number and bank details used to live here. They were dropped to
-    # comply with POPIA - Boord never needed them to run a harvest, and holding
-    # them made every backup and export a data-protection liability. See
-    # migration 20260906 (drop worker id/bank columns).
+    # Bank details used to live here and were dropped for POPIA (migration
+    # 20260906). The ID number went with them and came back (20261027) because
+    # the office kept it in whatsapp_number instead. Admin-only, like
+    # whatsapp_number: never in master_data._PUBLIC_WORKER_FIELDS.
     team_id: Optional[str] = Field(default=None, foreign_key="team.id")  # kept for compat; not used in UI
     whatsapp_number: str = ""
+    id_number: str = ""  # SA ID number, or passport number for a foreign worker
     supplier_id: Optional[int] = Field(default=None, foreign_key="supplier.id")  # which farm/supplier this worker belongs to
     photo_filename: str = ""  # basename under data/photos/, e.g. "001.jpg"; empty = no photo
     active: bool = True
