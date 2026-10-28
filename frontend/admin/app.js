@@ -266,11 +266,10 @@ function renderDashboardKpis(harvesting, inTransit, received, summary) {
     ["Blocks Active", `${summary.active_blocks} blocks`],
     ["Total kg picked", Boord.fmtKg(totalKg)],
     ["Total Crates", `${totalCrates} crates`],
-    ["Avg Kg/Lot", Boord.fmtNum(avgKgPerLot)],
+    ["Avg Kg/Slip", Boord.fmtNum(avgKgPerLot)],
     ["Avg Kg/Crate", Boord.fmtNum(avgKgPerCrate)],
     ["Harvesting", `${h.crates} crates / ${Boord.fmtKg(h.kg)}`],
     ["In Transit", `${t.crates} crates / ${Boord.fmtKg(t.kg)}`],
-    ["Received", `${r.crates} crates / ${Boord.fmtKg(r.kg)}`],
     ["Delivered kg", _deliveredKg(summary.delivered_kg)],
     ["Delivered vs Picked", _deliveredVsPicked(summary.delivered_kg, totalKg)],
   ];
