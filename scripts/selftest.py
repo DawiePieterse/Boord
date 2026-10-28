@@ -1259,6 +1259,40 @@ DEDUCTION TOTAL:   -285.30   -42.80   -328.10
 """
 
 
+# Onderberg's juice payment advice as pypdf gives it, shaped on a real one:
+# two loads, R4/kg paid twice, a 2% levy and another 0.3%.
+_ONDERBERG = """Onderberg Verwerkingskooperasie Beperk
+HEREWITH THE PAYMENT ADVICE FOR FRUIT DELIVERED:
+NO   DATE   DELIVERED KG   LITCHI   TOTAL KG   ROTTEN   DELIVERY NOTE   R 4,000.00   R 4,000.00   TOTAL RAND
+170677   03-Dec-25   2310   2310   2,310   0%   J-0008   R 9,240.00   R 9,240.00   R 18,480.00
+170990   10-Dec-25   3816   3339   3,339   13%   1306   R 13,356.00   R 13,356.00   R {row2}
+   5,649   5,649   R 22,596.00   R 22,596.00   R 45,192.00
+DEDUCTIONS   QTY   RATE
+SALGA Member Levy   45,192   (2% of fruit cost)   R 903.84
+   R 135.58
+VAT   R -
+   R 1,039.42
+PAYMENT 30 DAYS AFTER DELIVERY - 31 JANUARY 2026   R 21,556.58
+"""
+
+
+def test_onderbergs_juice_advice_is_one_invoice_per_load():
+    import market_mail  # noqa: E402
+    loads = market_mail.parse_onderberg(_ONDERBERG.format(row2="26,712.00"))
+    assert [(i["invoice_no"], i["note_no"], i["payment"]) for i in loads] == [
+        ("OB-170677", "J-0008", "Juice"), ("OB-170990", "J-1306", "Juice, 13% rotten")], loads
+    assert [i["lines"][0]["sold"] for i in loads] == [2310, 3339], loads
+    assert str(loads[1]["invoice_date"]) == "2025-12-10", loads
+    # The levies shared by rand, every cent of them on some load.
+    assert round(sum(i["deductions"] for i in loads), 2) == 1039.42, loads
+    assert round(sum(i["net"] for i in loads), 2) == 44152.58, loads
+    try:
+        market_mail.parse_onderberg(_ONDERBERG.format(row2="26,713.00"))
+        raise AssertionError("an advice that doesn't add up was read")
+    except ValueError:
+        pass
+
+
 def test_an_emailed_market_invoice_is_read_checked_and_added_up():
     import json  # noqa: E402
     import market_mail  # noqa: E402
@@ -1289,7 +1323,9 @@ def test_an_emailed_market_invoice_is_read_checked_and_added_up():
                    (json.dumps([pallet]),))
         # A juice note: bins and crates, no pallets.
         ph.execute("INSERT INTO deliverynote VALUES ('j8', 8, 'Onderberg', 'Self', '2026-10-20', '[]', 0, ?)",
-                   (json.dumps([{"container": "bin", "bin_no": 88, "empty_kg": 37, "full_kg": 503}]),))
+                   (json.dumps([{"container": "bin", "bin_no": 88, "empty_kg": 37, "full_kg": 503},
+                                {"bin_no": 89, "empty_kg": 33, "full_kg": 529},
+                                {"container": "crate", "bin_no": 1, "empty_kg": 2, "full_kg": 20}]),))
         ph.commit()
         ph.close()
         reports.PACKHOUSE_DB_PATH = os.path.join(tmp, "packhouse.db")
@@ -1300,6 +1336,8 @@ def test_an_emailed_market_invoice_is_read_checked_and_added_up():
             assert market_mail.save_invoice(inv, s)
             assert not market_mail.save_invoice(inv, s), "the same invoice was filed twice"
             market_mail.save_invoice(market_mail.parse_invoice(invoice("1/2")), s)
+            for load in market_mail.parse_onderberg(_ONDERBERG.format(row2="26,712.00")):
+                market_mail.save_invoice(load, s)
             reports.save_market_product(reports.MarketProductIn(
                 product="LICH, BX020, THREE MONTH RED, CL 1, XL, *, *", pack="2kg XL"), s)
             day = datetime(2026, 10, 20).date()
@@ -1312,6 +1350,11 @@ def test_an_emailed_market_invoice_is_read_checked_and_added_up():
             assert (xl["sent"], xl["sold"], xl["price"]) == (30, 20, 100.0), xl
             assert any(pk.get("unmapped") and pk["sold"] == 4 for pk in note["packs"]), note["packs"]
             assert len(note["invoices"]) == 2
+            # Juice note 8 takes Onderberg's J-0008 load, not fruit note 8's.
+            assert ([i["invoice_no"] for i in juice["invoices"]], juice["gross"]) == (["OB-170677"], 18480.0), juice
+            # Its bins and crates are its lines, as cartons are a fruit note's.
+            sent = {pk["pack"]: (pk["sent"], pk["sent"] * pk["carton_kg"]) for pk in juice["packs"]}
+            assert (sent["Bins"], sent["Crates"]) == ((2, 962), (1, 18)), sent
     finally:
         reports.PACKHOUSE_DB_PATH = saved_path
         shutil.rmtree(tmp, ignore_errors=True)
@@ -1414,7 +1457,8 @@ def main():
 
     section("Markets & Transport")
     for fn in (test_a_market_statement_sums_to_what_the_market_paid,
-               test_an_emailed_market_invoice_is_read_checked_and_added_up):
+               test_an_emailed_market_invoice_is_read_checked_and_added_up,
+               test_onderbergs_juice_advice_is_one_invoice_per_load):
         check(fn.__name__, fn)
 
     section("Backups")
