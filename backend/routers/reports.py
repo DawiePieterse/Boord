@@ -620,7 +620,11 @@ def _market_notes(period_start: date, period_end: date, session: Session) -> lis
     statements = {s.note_uuid: s for s in session.exec(
         select(MarketStatement).where(MarketStatement.note_uuid.in_(uuids))).all()} if uuids else {}
     invoices = {}
-    note_nos = [str(n["note_no"]) for n in notes]
+    # A juice note's number is its own series (J-0001), so its invoices
+    # (Onderberg's) are filed under that, apart from fruit note 1.
+    key = {n["uuid"]: f"J-{n['note_no']:04d}" if json.loads(n.get("bins") or "[]") else str(n["note_no"])
+           for n in notes}
+    note_nos = list(key.values())
     for inv in session.exec(select(MarketInvoice).where(MarketInvoice.note_no.in_(note_nos))
                             .order_by(MarketInvoice.invoice_date, MarketInvoice.invoice_no)).all() if notes else []:
         invoices.setdefault(inv.note_no, []).append(inv)
@@ -629,7 +633,7 @@ def _market_notes(period_start: date, period_end: date, session: Session) -> lis
     for n in notes:
         pallets = json.loads(n["pallets"] or "[]")
         st = statements.get(n["uuid"])
-        invs = invoices.get(str(n["note_no"]), [])
+        invs = invoices.get(key[n["uuid"]], [])
         packs = {}
         for p in pallets:
             for ln in p.get("lines", []):
@@ -645,7 +649,8 @@ def _market_notes(period_start: date, period_end: date, session: Session) -> lis
                     # line of its own with nothing sent and no kg.
                     name = pack_of.get(ln["product"], ln["product"])
                     pk = packs.setdefault(name, {"pack": name, "carton_kg": 0, "sent": 0, "sold": 0, "gross": 0,
-                                                 "unmapped": ln["product"] not in pack_of})
+                                                 "unmapped": ln["product"] not in pack_of
+                                                             and ln["product"] != market_mail.JUICE_PRODUCT})
                     pk["sold"] += ln["sold"]
                     pk["gross"] += ln["income"]
             for pk in packs.values():
@@ -716,7 +721,7 @@ def market_mail_status(session: Session = Depends(get_session)):
     cfg = market_mail.read_config()
     status = market_mail.read_status()
     products = sorted({ln["product"] for inv in session.exec(select(MarketInvoice)).all()
-                       for ln in json.loads(inv.lines)})
+                       for ln in json.loads(inv.lines)} - {market_mail.JUICE_PRODUCT})
     pack_of = {m.product: m.pack for m in session.exec(select(MarketProduct)).all()}
     try:
         packs = [r["name"] for r in _packhouse_rows("SELECT name FROM packaging WHERE active = 1 ORDER BY sort, name")]

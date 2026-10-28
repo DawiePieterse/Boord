@@ -24,7 +24,10 @@ page, so the app password is only ever on the PC:
 
     address=bekfontein01@gmail.com
     app_password=abcd efgh ijkl mnop
-    senders=dapper.co.za, laughw.co.za
+    senders=dapper.co.za, laughw.co.za, rmputter.co.za
+
+Onderberg's juice payment advice comes the same way (parse_onderberg), one
+invoice per juice load, filed against Packhouse's J- note.
 
 senders is the trust check: mail from any other domain is skipped and listed
 on the Reports tab with who sent it, so a new agent can be added. Dapper's
@@ -58,7 +61,7 @@ DONE_LABEL = "Boord-Done"
 # one season's worth, not years.
 SEARCH = f'"has:attachment filename:pdf -label:{DONE_LABEL} newer_than:90d"'
 MAX_PDF_BYTES = 5 * 1024 * 1024
-DEFAULT_SENDERS = ["dapper.co.za", "laughw.co.za"]
+DEFAULT_SENDERS = ["dapper.co.za", "laughw.co.za", "rmputter.co.za"]
 
 _lock = threading.Lock()
 
@@ -151,6 +154,71 @@ def parse_invoice(text: str) -> dict:
     return inv
 
 
+_R = r"R\s*([\d,]+\.\d\d)"
+# Juice is paid by the kg and has no Packhouse pack to be matched to.
+JUICE_PRODUCT = "LITCHI JUICE, KG"
+
+
+def parse_onderberg(text: str) -> list:
+    """Onderberg's juice payment advice, one per batch of juice loads, as one
+    invoice dict per load, or ValueError. Its bookkeeper (rmputter.co.za)
+    sends it from the same address as the Boere Unie's membership statements,
+    which have no rows like these and are skipped.
+
+    Each load is a row: weighbridge ticket, date, delivered kg, payable kg,
+    rotten %, our delivery note, then the rand per payment and the row's
+    total. The levies (SALGA's 2% and the rest) are only given for the whole
+    advice, so each load carries its share by rand. The agterskot printed
+    under it is a promise, not money paid; it isn't filed. The ticket number
+    is the invoice number, so a resent advice is skipped load by load."""
+    tickets = re.findall(r"\b(\d{5,7})\s+(\d{1,2}-[A-Za-z]{3}-\d{2})\b", text)
+    rows = list(re.finditer(r"([\d,]+)\s+(\d+)\s*%\s+(J-?\s*\d+|\d+)\s+" + _R + r"\s+" + _R + r"\s+" + _R, text))
+    if not rows:
+        raise ValueError("no delivery rows on the payment advice")
+    # The printout puts the ticket columns and the money columns side by
+    # side; text out of the PDF may give them on separate lines, so they are
+    # read apart and paired in order.
+    if len(tickets) != len(rows):
+        raise ValueError(f"{len(tickets)} weighbridge tickets but {len(rows)} payment rows")
+    m = re.search(_R + r"\s+" + _R + r"\s+" + _R, text[rows[-1].end():])
+    if not m:
+        raise ValueError("no total under the delivery rows")
+    gross = _amount(m.group(3))
+    levy_text = text.split("DEDUCTIONS", 1)[-1].split("PAYMENT", 1)[0]
+    levies = [0.0 if a == "-" else _amount(a) for a in re.findall(r"R\s*(-|[\d,]+\.\d\d)", levy_text)]
+    if not levies:
+        raise ValueError("no deductions on the payment advice")
+    levy = levies[-1]
+
+    out = []
+    for (ticket, day), row in zip(tickets, rows):
+        part1, part2, total = (_amount(row.group(i)) for i in (4, 5, 6))
+        if abs(part1 + part2 - total) > 0.01:
+            raise ValueError(f"ticket {ticket}: payments don't add up to {total:.2f}")
+        rotten = int(row.group(2))
+        out.append({
+            "invoice_no": f"OB-{ticket}",
+            # Packhouse numbers juice notes on their own, J-0001 on.
+            "note_no": f"J-{int(re.sub(r'[^0-9]', '', row.group(3))):04d}",
+            "invoice_date": datetime.strptime(day, "%d-%b-%y").date(),
+            "payment": f"Juice, {rotten}% rotten" if rotten else "Juice",
+            "agent": "Onderberg",
+            "lines": [{"product": JUICE_PRODUCT, "sold": int(_amount(row.group(1))), "income": total}],
+            "commission": 0.0, "deductions": round(levy * total / gross, 2) if gross else 0.0, "bank_cost": 0.0,
+            "gross": total,
+        })
+    # The checks that stand in for trusting the sender, as on a market invoice.
+    if abs(sum(inv["gross"] for inv in out) - gross) > 0.01:
+        raise ValueError(f"delivery rows don't add up to the total {gross:.2f}")
+    if abs(sum(levies[:-1]) - levy) > 0.01:
+        raise ValueError(f"deduction lines don't add up to {levy:.2f}")
+    # Rounding the shares can leave a cent or two; the last load takes it.
+    out[-1]["deductions"] = round(out[-1]["deductions"] + levy - sum(inv["deductions"] for inv in out), 2)
+    for inv in out:
+        inv["net"] = round(inv["gross"] - inv["deductions"], 2)
+    return out
+
+
 def save_invoice(inv: dict, session: Session, email_from: str = "", file: str = "") -> bool:
     """Files a parsed invoice. False if that invoice number is already in:
     agents resend, and Andre forwards the odd one twice."""
@@ -209,6 +277,23 @@ def _handle_message(msg, cfg: dict, session: Session) -> list:
             continue
         if "PRODUCER DAILY SUMMARY" in text:
             out.append(f"Skipped {name}: a daily sales summary, not an invoice")
+            continue
+        if "PAYMENT ADVICE" in text.upper() and "ONDERBERG" in text.upper():
+            try:
+                loads = parse_onderberg(text)
+            except ValueError as e:
+                out.append(f"Refused {name} from {sender}: {e}")
+                continue
+            os.makedirs(MAIL_DIR, exist_ok=True)
+            file = f"onderberg_{loads[0]['invoice_no']}.pdf"
+            with open(os.path.join(MAIL_DIR, file), "wb") as f:
+                f.write(data)
+            for inv in loads:
+                if save_invoice(inv, session, sender, file):
+                    out.append(f"Imported Onderberg {inv['invoice_no']} for juice note {inv['note_no']}: "
+                               f"{inv['lines'][0]['sold']:,} kg, net R{inv['net']:,.2f}")
+                else:
+                    out.append(f"Onderberg {inv['invoice_no']} (note {inv['note_no']}) was already in")
             continue
         if "TAX INVOICE" not in text or "PRODUCER D/NOTE" not in text:
             out.append(f"Skipped {name} from {sender}: not a market invoice")
