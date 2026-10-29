@@ -149,6 +149,16 @@ def harvest_data_report(period_start: date, period_end: date, supplier_id: Optio
         if r.worker_id:
             dt["workers"].add(r.worker_id)
 
+    # Every active block gets a column, picked or not, so the sheet keeps the
+    # paper log's fixed layout and a block nobody picked reads as an empty
+    # column rather than going missing. An inactive or unregistered block
+    # still shows up if crates were logged against it. A block with no
+    # supplier set is the farm's own orchard.
+    own_id = get_own_supplier_id(session)
+    for b in blocks.values():
+        if b.active and (supplier_id is None or (b.supplier_id or own_id) == supplier_id):
+            block_totals.setdefault(b.id, 0.0)
+
     days = sorted(day_totals.keys())
     block_ids = sorted(block_totals, key=lambda bid: ((blocks.get(bid).name if blocks.get(bid) else "") or bid or ""),
                         reverse=True)
