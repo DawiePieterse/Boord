@@ -28,6 +28,8 @@ page, so the app password is only ever on the PC:
 
 Onderberg's juice payment advice comes the same way (parse_onderberg), one
 invoice per juice load, filed against Packhouse's J- note.
+Boere Trust's account sales (parse_account_sale) come as a zip the office
+downloads from that agent's website and mails on from laughw.co.za.
 
 senders is the trust check: mail from any other domain is skipped and listed
 on the Reports tab with who sent it, so a new agent can be added. Dapper's
@@ -43,6 +45,7 @@ import os
 import re
 import threading
 import time
+import zipfile
 from datetime import datetime
 from email.utils import parseaddr
 from typing import Optional
@@ -59,7 +62,7 @@ FETCH_MINUTES = 15
 DONE_LABEL = "Boord-Done"
 # Only mail this recent is looked at, so the first run on a busy inbox reads
 # one season's worth, not years.
-SEARCH = f'"has:attachment filename:pdf -label:{DONE_LABEL} newer_than:90d"'
+SEARCH = f'"has:attachment {{filename:pdf filename:zip}} -label:{DONE_LABEL} newer_than:90d"'
 MAX_PDF_BYTES = 5 * 1024 * 1024
 DEFAULT_SENDERS = ["dapper.co.za", "laughw.co.za", "rmputter.co.za"]
 
@@ -171,6 +174,59 @@ def parse_invoice(text: str) -> dict:
     return inv
 
 
+def parse_account_sale(text: str) -> dict:
+    """Boere Trust's account sale (Pretoria market) as a dict, or ValueError.
+    Its own layout, not pps_invoice: one PDF per account sale, our delivery
+    note is "REFNO" (the "DELIVERY NOTE NO" beside it is the market's own),
+    and each GRN's sold cartons and value are its sub-total line. The agent
+    isn't emailing them: the office downloads them from Boere Trust's website
+    as a zip and mails that to the farm Gmail. Deductions are printed
+    including VAT already, and positive."""
+    inv = {
+        "invoice_no": _find(r"TAX INVOICE\s+(BT\d+)", text),
+        "note_no": _find(r"\bREFNO\s*:\s*(\S+)", text),
+        "invoice_date": datetime.strptime(_find(r"\bDATE\s*:\s*(\d{2}/\d{2}/\d{4})", text), "%d/%m/%Y").date(),
+        "payment": _find(r"\*\*\s+([A-Z ]*PAYMENT)\s+\*\*", text).title(),
+        "agent": "Boere Trust",
+        "lines": [],
+        "commission": 0.0, "deductions": 0.0, "bank_cost": 0.0,
+        "gross": _amount(_find(r"GROSS AMOUNT\s+([\d,]+\.\d\d)", text)),
+        "net": _amount(_find(r"NETT AMOUNT\s+(-?[\d,]+\.\d\d)", text)),
+    }
+    for block in text.split("MARKET GRN :")[1:]:
+        m = re.search(r"-{8,}[ \t]*\n\s*[\d,]+\.\d\d\s+(\d+)\s+([\d,]+\.\d\d)", block)
+        if not m:
+            raise ValueError("a GRN without its sub-total line")
+        inv["lines"].append({
+            "product": re.sub(r"\s+", " ", _find(r"PRODUCT\s*:\s*(.+?)\s+SMAN\b", block)).strip(),
+            "sold": int(m.group(1)),
+            "income": _amount(m.group(2)),
+        })
+    if not inv["lines"]:
+        raise ValueError("no product lines on the account sale")
+
+    details = text.split("VAT (INPUT)", 1)[-1].split("NETT AMOUNT", 1)[0]
+    for m in re.finditer(r"^\s*([A-Z][A-Z .&/()-]*?)\s{2,}([\d,]+\.\d\d)\s+([\d,]+\.\d\d)\s+([\d,]+\.\d\d)",
+                         details, re.M):
+        name, total = m.group(1).lower(), _amount(m.group(4))
+        key = "commission" if "commission" in name else "bank_cost" if "bank" in name else "deductions"
+        inv[key] = round(inv[key] + total, 2)
+    # LESS COSTS leaves the bank charges out; they are taken on the next line.
+    deducted = (_amount(_find(r"LESS COSTS?\s+([\d,]+\.\d\d)", text))
+                + _amount(_find(r"(?m)BANK CHARGES\s+([\d,]+\.\d\d)\s*$", text)))
+    sold = int(_find(r"TOTAL SOLD \*\*\s+(\d+)", text))
+
+    if sum(ln["sold"] for ln in inv["lines"]) != sold:
+        raise ValueError(f"product lines don't add up to the {sold} cartons sold")
+    if abs(sum(ln["income"] for ln in inv["lines"]) - inv["gross"]) > 0.01:
+        raise ValueError(f"product lines don't add up to the gross amount {inv['gross']:.2f}")
+    if abs(inv["commission"] + inv["deductions"] + inv["bank_cost"] - deducted) > 0.01:
+        raise ValueError(f"deduction lines don't add up to {deducted:.2f}")
+    if abs(inv["gross"] - deducted - inv["net"]) > 0.01:
+        raise ValueError(f"gross less deductions isn't the nett amount {inv['net']:.2f}")
+    return inv
+
+
 _R = r"R\s*([\d,]+\.\d\d)"
 # Juice is paid by the kg and has no Packhouse pack to be matched to.
 JUICE_PRODUCT = "LITCHI JUICE, KG"
@@ -271,6 +327,26 @@ def _write_status(status: dict) -> None:
         json.dump(status, f, indent=1, default=str)
 
 
+def _pdfs(msg):
+    """(file name, bytes) of each PDF in the email, including those inside a
+    zip: Boere Trust's website hands out a day's account sales as one."""
+    for part in msg.walk():
+        name = part.get_filename() or ""
+        if name.lower().endswith(".pdf"):
+            yield name, part.get_payload(decode=True) or b""
+        elif name.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(io.BytesIO(part.get_payload(decode=True) or b"")) as z:
+                    for info in z.infolist():
+                        if info.filename.lower().endswith(".pdf"):
+                            # One byte over the limit is enough for the caller
+                            # to refuse it, and a zip bomb is never unpacked.
+                            with z.open(info) as f:
+                                yield os.path.basename(info.filename), f.read(MAX_PDF_BYTES + 1)
+            except zipfile.BadZipFile:
+                yield name, b""
+
+
 def _handle_message(msg, cfg: dict, session: Session) -> list:
     """What became of each PDF in one email, as log lines."""
     sender = parseaddr(msg.get("From", ""))[1].lower()
@@ -279,11 +355,7 @@ def _handle_message(msg, cfg: dict, session: Session) -> list:
     if domain not in cfg["senders"]:
         return [f"Skipped \"{subject}\" from {sender}: not on the senders list"]
     out = []
-    for part in msg.walk():
-        name = part.get_filename() or ""
-        if not name.lower().endswith(".pdf"):
-            continue
-        data = part.get_payload(decode=True) or b""
+    for name, data in _pdfs(msg):
         if len(data) > MAX_PDF_BYTES:
             out.append(f"Skipped {name} from {sender}: larger than {MAX_PDF_BYTES // 1024 // 1024} MB")
             continue
@@ -294,6 +366,9 @@ def _handle_message(msg, cfg: dict, session: Session) -> list:
             continue
         if "PRODUCER DAILY SUMMARY" in text:
             out.append(f"Skipped {name}: a daily sales summary, not an invoice")
+            continue
+        if "PAYMENT SUMMARY" in text:
+            out.append(f"Skipped {name}: a payment summary, its account sales carry the figures")
             continue
         if "PAYMENT ADVICE" in text.upper() and "ONDERBERG" in text.upper():
             try:
@@ -312,14 +387,18 @@ def _handle_message(msg, cfg: dict, session: Session) -> list:
                 else:
                     out.append(f"Onderberg {inv['invoice_no']} (note {inv['note_no']}) was already in")
             continue
-        if "TAX INVOICE" not in text or "PRODUCER D/NOTE" not in text:
+        if "ACCOUNT SALES NO" in text:
+            parts, parse = [text], parse_account_sale
+        elif "TAX INVOICE" in text and "PRODUCER D/NOTE" in text:
+            parts, parse = split_invoices(text), parse_invoice
+        else:
             out.append(f"Skipped {name} from {sender}: not a market invoice")
             continue
         # Each invoice in a batch stands alone: one that doesn't add up is
         # refused without holding back the others.
-        for part in split_invoices(text):
+        for part in parts:
             try:
-                inv = parse_invoice(part)
+                inv = parse(part)
             except ValueError as e:
                 out.append(f"Refused {name} from {sender}: {e}")
                 continue

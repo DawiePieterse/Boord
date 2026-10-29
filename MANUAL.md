@@ -1794,7 +1794,7 @@ same system and the same layout.
 
 **How it works.** Every 15 minutes the server signs in to the farm Gmail,
 `bekfontein01@gmail.com`, and reads each email in the inbox from the last 90
-days that has a PDF attached. Each one it has dealt with gets the Gmail label
+days that has a PDF attached, or a zip of PDFs. Each one it has dealt with gets the Gmail label
 **Boord-Done**, so it is never read twice. For each invoice it:
 
 - reads the delivery note number ("PRODUCER D/NOTE"), the invoice number,
@@ -1862,6 +1862,17 @@ by rand. The agterskot printed at the bottom is a later payment, not money
 paid yet, so it isn't counted. An advice whose rows don't add up to its total
 is refused. The Boere Unie's membership statements come from the same address
 and are skipped.
+
+**Boere Trust's account sales.** Boere Trust (the Pretoria market) doesn't
+email its account sales: the office downloads them from its website as a zip
+(`3054_2026-10-21.zip`) and emails that from `admin@laughw.co.za` to
+`bekfontein01@gmail.com`, zip and all, no need to unzip it. Each account sale
+in it is filed as its own invoice, `BT` and the account sales number, against
+the Packhouse note in its **REFNO** (the "delivery note no" beside it is the
+market's own number). The payment summary in the same zip only totals the
+account sales, so it is skipped. An account sale whose cartons or rands don't
+add up is refused. Anything else attached to the same email, such as
+spreadsheets, is left alone.
 
 **Matching products to packs.** The market describes a pack its own way, for
 example `LICH, BX020, THREE MONTH RED, CL 1, XL, *, *`. The first time a

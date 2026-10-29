@@ -1276,6 +1276,60 @@ PAYMENT 30 DAYS AFTER DELIVERY - 31 JANUARY 2026   R 21,556.58
 """
 
 
+# Boere Trust's account sale as pypdf's layout mode reads it, shaped on BT405246:
+# two GRNs, part payment, bank charges under the costs. {nett} breaks the sums.
+_ACCOUNT_SALE = """AGENT VAT REGISTRATION NUMBER: 4250103472
+                               TAX INVOICE
+                                  BT405246       ACCOUNT SALES NO :     405246
+PRODUCER : 097120 BEKFONTEIN BDY (LAUGHING WATERS) DATE : 21/10/2026  Page:  1
+           MALALANE                              DELIVERY NOTE NO :     205350
+           1320                                             REFNO :       1324
+Vat Reg No : 4020133783                             DATE RECEIVED : 16/10/2026
+MARKET GRN : 20535001   QUANTITY RECEIVED :   33    QUANTITY B/F :     33
+PRODUCT : LITM    NJ10     T2 LITCHI THIRD MONTH RED     SMAN : FRANCO / MARK
+DATE        PRICES           AVER.PRICE  MARKET AVG      QUANTITY        VALUE
+----          ------         ----------  ----------      --------     --------
+19/10/2026 550.00 - 550.00       550.00      550.00              33     18150.00
+                             ----------                  --------     --------
+                                 550.00                        33     18150.00
+QUANTITY OUTSTANDING :    0          AGENT COMM % : 7.50
+MARKET GRN : 20535002   QUANTITY RECEIVED :   120    QUANTITY B/F :     93
+PRODUCT : LITM    B220     T2 LITCHI THIRD MONTH RED     SMAN : FRANCO / MARK
+----          ------         ----------  ----------      --------     --------
+19/10/2026 180.00 - 180.00       180.00      180.00               2       360.00
+20/10/2026 180.00 - 180.00       180.00      180.00               4       720.00
+                             ----------                  --------     --------
+                                 180.00                         6      1080.00
+QUANTITY OUTSTANDING :   87          AGENT COMM % : 7.50
+               **  PART PAYMENT  **        ** TOTAL SOLD **    39
+DEDUCTION              AMOUNT  VAT (INPUT)    TOTAL
+MARKET FEES            961.50      144.23    1105.73  GROSS AMOUNT   19230.00
+SMS DEDUCTION FE        00.39       00.06      00.45  LESS COST       2764.78
+AGENT COMMISSION      1442.25      216.35    1658.60
+                   ----------  ----------   --------  SUB TOTAL      16465.22
+                      2404.14      360.64    2764.78
+BANK CHARGES            11.57        1.74      13.31  BANK CHARGES      13.31
+                      2415.71      362.38    2778.09              -----------
+                   ----------  ----------   --------  NETT AMOUNT    {nett}
+TOTAL SOLD      :    66
+"""
+
+
+def test_a_boere_trust_account_sale_is_read_and_added_up():
+    import market_mail  # noqa: E402
+    inv = market_mail.parse_account_sale(_ACCOUNT_SALE.format(nett="16451.91"))
+    assert (inv["invoice_no"], inv["note_no"], inv["payment"]) == ("BT405246", "1324", "Part Payment"), inv
+    assert inv["agent"] == "Boere Trust" and str(inv["invoice_date"]) == "2026-10-21", inv
+    assert (inv["commission"], inv["deductions"], inv["bank_cost"]) == (1658.6, 1106.18, 13.31), inv
+    assert [(ln["product"], ln["sold"]) for ln in inv["lines"]] == [
+        ("LITM NJ10 T2 LITCHI THIRD MONTH RED", 33), ("LITM B220 T2 LITCHI THIRD MONTH RED", 6)], inv["lines"]
+    try:
+        market_mail.parse_account_sale(_ACCOUNT_SALE.format(nett="16541.91"))
+        raise AssertionError("an account sale that doesn't add up was read")
+    except ValueError:
+        pass
+
+
 def test_onderbergs_juice_advice_is_one_invoice_per_load():
     import market_mail  # noqa: E402
     loads = market_mail.parse_onderberg(_ONDERBERG.format(row2="26,712.00"))
@@ -1458,7 +1512,8 @@ def main():
     section("Markets & Transport")
     for fn in (test_a_market_statement_sums_to_what_the_market_paid,
                test_an_emailed_market_invoice_is_read_checked_and_added_up,
-               test_onderbergs_juice_advice_is_one_invoice_per_load):
+               test_onderbergs_juice_advice_is_one_invoice_per_load,
+               test_a_boere_trust_account_sale_is_read_and_added_up):
         check(fn.__name__, fn)
 
     section("Backups")
