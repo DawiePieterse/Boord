@@ -108,6 +108,23 @@ def _find(pattern: str, text: str) -> str:
     return m.group(1)
 
 
+def split_invoices(text: str) -> list:
+    """The invoices in one PDF. The agent sends a day's invoices as one batch,
+    each page starting with its letterhead and invoice number; a page with the
+    same number as the one before (a long invoice) carries it on."""
+    agent = text.strip().splitlines()[0].strip()
+    pages = re.split(r"(?m)^(?=[ \t]*" + re.escape(agent) + r"[ \t]*$)", text)
+    invoices, last_no = [], None
+    for page in pages:
+        m = re.search(r"TAX INVOICE\s+(\d+/\d+)", page)
+        if invoices and (not m or m.group(1) == last_no):
+            invoices[-1] += page
+        else:
+            invoices.append(page)
+            last_no = m and m.group(1)
+    return [p for p in invoices if "TAX INVOICE" in p]
+
+
 def parse_invoice(text: str) -> dict:
     """A market tax invoice (pps_invoice) as a dict, or ValueError saying what
     was missing or didn't add up. Deductions are taken including VAT, the way
@@ -298,21 +315,24 @@ def _handle_message(msg, cfg: dict, session: Session) -> list:
         if "TAX INVOICE" not in text or "PRODUCER D/NOTE" not in text:
             out.append(f"Skipped {name} from {sender}: not a market invoice")
             continue
-        try:
-            inv = parse_invoice(text)
-        except ValueError as e:
-            out.append(f"Refused {name} from {sender}: {e}")
-            continue
-        if session.get(MarketInvoice, inv["invoice_no"]):
-            out.append(f"Invoice {inv['invoice_no']} (note {inv['note_no']}) was already in")
-            continue
-        os.makedirs(MAIL_DIR, exist_ok=True)
-        file = f"invoice_{inv['invoice_no'].replace('/', '-')}.pdf"
-        with open(os.path.join(MAIL_DIR, file), "wb") as f:
-            f.write(data)
-        save_invoice(inv, session, sender, file)
-        out.append(f"Imported invoice {inv['invoice_no']} for note {inv['note_no']} ({inv['payment']}): "
-                   f"net R{inv['net']:,.2f}")
+        # Each invoice in a batch stands alone: one that doesn't add up is
+        # refused without holding back the others.
+        for part in split_invoices(text):
+            try:
+                inv = parse_invoice(part)
+            except ValueError as e:
+                out.append(f"Refused {name} from {sender}: {e}")
+                continue
+            if session.get(MarketInvoice, inv["invoice_no"]):
+                out.append(f"Invoice {inv['invoice_no']} (note {inv['note_no']}) was already in")
+                continue
+            os.makedirs(MAIL_DIR, exist_ok=True)
+            file = f"invoice_{inv['invoice_no'].replace('/', '-')}.pdf"
+            with open(os.path.join(MAIL_DIR, file), "wb") as f:
+                f.write(data)
+            save_invoice(inv, session, sender, file)
+            out.append(f"Imported invoice {inv['invoice_no']} for note {inv['note_no']} ({inv['payment']}): "
+                       f"net R{inv['net']:,.2f}")
     return out or [f"Skipped \"{subject}\" from {sender}: no PDF attached"]
 
 

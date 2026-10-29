@@ -1804,6 +1804,8 @@ days that has a PDF attached. Each one it has dealt with gets the Gmail label
 - refuses it if the figures don't add up (product lines to the sales total,
   deduction lines to the total deductions, sales less deductions to the nett
   income);
+- reads each invoice in a PDF on its own when the agent sends a day's
+  invoices as one batch, so one that doesn't add up holds back only itself;
 - skips an invoice number that is already in (agents resend, and a forwarded
   copy is the same invoice), and keeps a copy of each one in
   `data\market_mail\`.
