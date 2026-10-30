@@ -117,6 +117,18 @@ async function showApp() {
       else if (tab === "settings") { await loadSettingsForm(); await loadAllMasterData(); }
       else if (tab === "markets") { await loadMarketNotes(); await loadMarketMail(); }
     });
+    // iOS, in the installed app: after the keyboard (or a date or select
+    // picker) closes, the tab bar fixed along the bottom of a phone can stay
+    // up where the keyboard's top edge was, halfway up the screen over the
+    // cards. Scrolling to where the page already is, once the keyboard is
+    // gone, makes iOS place it at the bottom again. Skipped while focus moves
+    // to another field, so tabbing through a form doesn't jump. The same fix
+    // as Boord Packhouse's bottom menu (its v0.60).
+    document.addEventListener("focusout", () => setTimeout(() => {
+      if (!document.activeElement || !document.activeElement.matches("input, textarea, select")) {
+        window.scrollTo(window.scrollX, window.scrollY);
+      }
+    }, 400));
   }
 
   try { await loadSettingsForm(); } catch (e) { /* offline - keep defaults */ }
