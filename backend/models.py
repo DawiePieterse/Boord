@@ -197,6 +197,14 @@ class Lot(SQLModel, table=True):
     # staff can tell this pickup was part of a multi-load session and the rest
     # may arrive (or has already arrived) separately.
     split_from_slip_number: Optional[str] = None
+    # Set only by an admin correction of the slip itself (routers/lots.py
+    # edit_lot), never by a field device. A tablet that queued its "Send
+    # Picking Slip" offline replays the same POST hours later, with the
+    # driver, time and totals it had at dispatch; once this is set,
+    # upsert_lot keeps the office's values over the replay, the way a
+    # corrected crate's edited_at does in routers/sync.py.
+    edited_at: Optional[datetime] = None
+    edited_by: Optional[str] = None  # always "admin" - see routers/harvest_records
 
 
 class HarvestRecord(SQLModel, table=True):

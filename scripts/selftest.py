@@ -813,6 +813,7 @@ ADMIN_ONLY_ROUTES = {
     ("GET", "/api/suppliers/{supplier_id}/billing"),
     ("GET", "/api/workers/export"),
     ("PATCH", "/api/harvest-records/{record_uuid}"),
+    ("PATCH", "/api/lots/{lot_id}"),
     ("POST", "/api/backups"),
     ("POST", "/api/blocks"),
     ("POST", "/api/blocks/import"),
@@ -1258,6 +1259,109 @@ def test_a_replayed_dispatch_cannot_undo_receiving():
                 except HTTPException as e:
                     assert e.status_code == 400
             assert create_external_lot(ExternalLotIn(supplier_id=own_id, total_crates=5, total_kg=100.0), s).id
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_a_received_slip_is_corrected_whole_and_a_replay_keeps_it():
+    """The office corrects a received slip from one paper note - its block
+    (every crate's), driver, times, the gate's numbers - and a tablet's
+    replayed dispatch afterwards can no longer put the old values back."""
+    from datetime import timedelta, timezone  # noqa: E402
+    from models import Lot, LotStatus, ReceivingRecord  # noqa: E402
+    from routers.lots import (ExternalLotIn, LotEdit, LotIn, create_external_lot,  # noqa: E402
+                              edit_lot, get_lot, list_received, upsert_lot)
+    from routers.receiving import ReceivingRecordIn, confirm_receipt  # noqa: E402
+    from routers.sync import HarvestSyncBatch, sync_harvest  # noqa: E402
+
+    tmp = tempfile.mkdtemp()
+    try:
+        eng, own_id = _farm(tmp)
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        with Session(eng) as s:
+            other = Supplier(name="Neighbour")
+            s.add_all([Block(id="8a"), Block(id="9", active=False), other])
+            s.commit()
+            s.refresh(other)
+
+            def crate(i):
+                return {"uuid": f"c{i}", "timestamp": now, "worker_id": "001", "block_id": "1",
+                        "weight_kg": 20.0, "device_id": "dev1", "slip_number": "S1"}
+
+            def dispatch():
+                return upsert_lot(LotIn(slip_number="S1", timestamp=now, device_id="dev1", driver="Piet",
+                                        total_crates=2, total_kg=40, status="in_transit"), s)
+
+            def refused(body, lot_id, why):
+                try:
+                    edit_lot(lot_id, body, s)
+                    raise AssertionError(why)
+                except HTTPException as e:
+                    assert e.status_code == 400, why
+
+            sync_harvest(HarvestSyncBatch(records=[crate(1), crate(2)]), s)
+            lot = dispatch()
+            # Not received yet: the field still owns it.
+            refused(LotEdit(driver="Koos"), lot.id, "a slip in transit was corrected by the office")
+
+            confirm_receipt(ReceivingRecordIn(lot_id=lot.id, timestamp=now, expected_crates=2,
+                                              actual_crates=2, received_by="Sipho"), s)
+
+            # Validation: unknown or retired block, unknown supplier, totals on
+            # a slip that adds its crates up, a blank name at the gate.
+            refused(LotEdit(block_id="99"), lot.id, "an unknown block was accepted")
+            refused(LotEdit(block_id="9"), lot.id, "a slip was moved onto an inactive block")
+            refused(LotEdit(supplier_id=999), lot.id, "an unknown supplier was accepted")
+            refused(LotEdit(total_crates=5), lot.id, "typed totals were accepted on a slip with crates")
+            refused(LotEdit(received_by="  "), lot.id, "the receiver's name was blanked")
+            refused(LotEdit(transport_crates=3), lot.id, "more crates sent than picked")
+
+            later = now + timedelta(hours=2)
+            result = edit_lot(lot.id, LotEdit(
+                block_id="8a", driver="Koos", supplier_id=other.id, timestamp=now - timedelta(hours=1),
+                received_at=later, transport_crates=1, notes="written up wrong",
+                expected_crates=2, actual_crates=1, condition="Wet", waste_kg=3.25,
+                received_by="Elsa", receiving_notes="one crate short"), s)
+            assert result["blocks"] == ["8a"], f"the slip's crates were not moved: {result['blocks']}"
+            assert all(c.block_id == "8a" and c.edited_at for c in result["crates"]), (
+                "a moved crate was left unstamped - a replay would move it back")
+            saved = s.get(Lot, lot.id)
+            assert (saved.driver, saved.supplier_id, saved.transport_crates, saved.notes) == (
+                "Koos", other.id, 1, "written up wrong")
+            assert saved.received_at == later.replace(tzinfo=None), "received_at was not moved"
+            assert saved.timestamp == (now - timedelta(hours=1)).replace(tzinfo=None)
+            assert saved.edited_at is not None and saved.edited_by == "admin"
+            receipt = result["receiving"]
+            assert (receipt.actual_crates, receipt.discrepancy, receipt.condition, receipt.waste_kg,
+                    receipt.received_by, receipt.notes) == (1, -1, "Wet", 3.2, "Elsa", "one crate short")
+            assert receipt.timestamp == saved.received_at, "the receipt's time and received_at drifted apart"
+            assert get_lot(lot.id, s)["receiving"].id == receipt.id, "get_lot does not return the receipt"
+
+            # The tablet replays its dispatch (driver Piet, the old time) and
+            # the crates with their old block: the correction stands.
+            replayed = dispatch()
+            assert replayed.status == LotStatus.received
+            sync_harvest(HarvestSyncBatch(records=[crate(1), crate(2)]), s)
+            s.expire_all()
+            saved = s.get(Lot, lot.id)
+            assert saved.driver == "Koos", "a replayed dispatch put the old driver back"
+            assert saved.timestamp == (now - timedelta(hours=1)).replace(tzinfo=None), (
+                "a replayed dispatch put the old dispatch time back")
+            assert saved.supplier_id == other.id, "a replayed dispatch put the old supplier back"
+            assert saved.transport_crates == 1
+            row = next(r for r in list_received(session=s) if r["id"] == lot.id)
+            assert row["blocks"] == ["8a"], "a replayed sync moved the crates back to the old block"
+
+            # An external delivery has no crates: its typed totals are what
+            # the office corrects, and there is no block to move.
+            ext = create_external_lot(ExternalLotIn(supplier_id=other.id, total_crates=5, total_kg=100.0), s)
+            confirm_receipt(ReceivingRecordIn(lot_id=ext.id, timestamp=now, expected_crates=5,
+                                              actual_crates=5, received_by="Sipho"), s)
+            refused(LotEdit(block_id="8a"), ext.id, "a block was set on a slip with no crates")
+            refused(LotEdit(total_kg=-1.0), ext.id, "a negative delivery was accepted")
+            edited = edit_lot(ext.id, LotEdit(total_crates=6, total_kg=120.04), s)["lot"]
+            assert (edited.total_crates, edited.total_kg) == (6, 120.0)
+            assert len(s.exec(select(ReceivingRecord)).all()) == 2, "a correction wrote a second receipt"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1957,6 +2061,7 @@ def main():
 
     section("Receiving and wages")
     for fn in (test_a_replayed_dispatch_cannot_undo_receiving,
+               test_a_received_slip_is_corrected_whole_and_a_replay_keeps_it,
                test_rerunning_wages_takes_back_what_a_correction_took_away,
                test_a_zero_wage_rate_is_refused):
         check(fn.__name__, fn)
