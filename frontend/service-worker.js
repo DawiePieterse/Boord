@@ -7,7 +7,7 @@
 // PWA hit that dead end. This caches the root shell so the page always loads;
 // index.html then routes an already-configured device from its cached config.
 const CACHE_PREFIX = "boord-root-";
-const CACHE = "boord-root-v7";
+const CACHE = "boord-root-v8";
 const REVALIDATE_TIMEOUT_MS = 10000;
 const SHELL = [
   "./",

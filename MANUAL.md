@@ -1967,8 +1967,7 @@ One row per active block of the farm's own (suppliers' blocks are not
 planned here), in block order. The **checkbox in front of the block** says
 whether it is picked this week: an unticked block stays in the list with its
 figures, greyed, its days hidden and nothing of it in the totals. A new week
-starts with the ticks of the last planned week, so a block finished in
-October is not unticked again every Monday. Columns:
+starts with every block unticked: tick the ones picked this week. Columns:
 
 - **Estimate** - the owner's kg for the block. A dash means the owner has
   not estimated that block, and it has no remaining or percentage figures;
