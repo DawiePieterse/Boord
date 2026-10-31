@@ -1679,17 +1679,24 @@ function renderPlannerDelivery() {
     return;
   }
   // Two header rows: the pack (with the weight of the unit Packhouse counts
-  // it in), then the two figures Packhouse doesn't keep, typed here: how
-  // many of its units make a carton (4 punnets for Pre-pac) and how many
-  // cartons make a pallet.
+  // it in), then the two figures Packhouse doesn't keep, typed here, one
+  // under the other so a pack column stays narrow: how many of its units
+  // make a carton (4 punnets for Pre-pac) and how many cartons make a
+  // pallet. The receiver's totals sit beside its name, before the packs,
+  // so they stay in view when the pack columns run off a small screen.
+  // The packs come from the server already in order: Pre-pac, then by
+  // carton size (planner.pack_sort_key), the same order as the exports.
   const unitKg = (p) => `${Boord.fmtNum(p.carton_kg, 2)} kg${(p.units_per_carton || 1) > 1 ? ` × ${p.units_per_carton}` : ""}/carton`;
   head.innerHTML = `<tr class="text-left border-b bg-slate-50">
       <th class="p-2" rowspan="2">Receiver</th>
-      ${v.packs.map((p) => `<th class="p-2 text-center">${esc(p.name)}<div class="text-[10px] font-normal text-slate-400" data-plan-unitkg="${esc(p.name)}">${unitKg(p)}${p.active ? "" : " · retired"}</div></th>`).join("")}
       <th class="p-2 text-right" rowspan="2">Cartons</th><th class="p-2 text-right" rowspan="2">Kg</th><th class="p-2 text-right" rowspan="2">Pallets</th>
+      ${v.packs.map((p) => `<th class="p-2 text-center">${esc(p.name)}<div class="text-[10px] font-normal text-slate-400" data-plan-unitkg="${esc(p.name)}">${unitKg(p)}${p.active ? "" : " · retired"}</div></th>`).join("")}
     </tr>
     <tr class="text-left border-b bg-slate-50 text-[11px] font-normal text-slate-500">
-      ${v.packs.map((p) => `<th class="p-1 text-center font-normal whitespace-nowrap"><input type="number" min="1" step="1" class="planner-cartons planner-pct" data-plan-percarton="${esc(p.name)}" value="${p.units_per_carton || 1}" title="Packhouse units (punnets) per carton"> /carton &nbsp; <input type="number" min="0" step="1" class="planner-cartons" data-plan-perpallet="${esc(p.name)}" value="${p.cartons_per_pallet || ""}" placeholder="?" title="Cartons per pallet"> /pallet</th>`).join("")}
+      ${v.packs.map((p) => `<th class="p-1 text-center font-normal whitespace-nowrap">
+        <div><input type="number" min="1" step="1" class="planner-cartons planner-pct" data-plan-percarton="${esc(p.name)}" value="${p.units_per_carton || 1}" title="Packhouse units (punnets) per carton"> /carton</div>
+        <div class="mt-1"><input type="number" min="0" step="1" class="planner-cartons planner-pct" data-plan-perpallet="${esc(p.name)}" value="${p.cartons_per_pallet || ""}" placeholder="?" title="Cartons per pallet"> /pallet</div>
+      </th>`).join("")}
     </tr>`;
   let lastGroup = null;
   const body = [];
@@ -1709,19 +1716,19 @@ function renderPlannerDelivery() {
     }).join("");
     body.push(`<tr class="border-b">
       <td class="p-2 font-medium">${esc(r.name)}${r.market ? `<div class="text-xs text-slate-400 font-normal">${esc(r.market)}</div>` : ""}</td>
-      ${cells}
       <td class="p-2 text-right" data-plan-cell="rcartons:${rid}"></td>
       <td class="p-2 text-right" data-plan-cell="rkg:${rid}"></td>
       <td class="p-2 text-right" data-plan-cell="rpallets:${rid}"></td>
+      ${cells}
     </tr>`);
   }
   rows.innerHTML = body.length ? body.join("") : `<tr><td colspan="${v.packs.length + 4}" class="p-3 text-sm text-slate-500">No receivers in Boord Packhouse's settings yet.</td></tr>`;
   document.getElementById("plannerDeliveryFoot").innerHTML = `<tr class="font-semibold bg-slate-50">
       <td class="p-2">Total</td>
-      ${v.packs.map((p) => `<td class="p-2 text-center" data-plan-cell="pack:${esc(p.name)}"></td>`).join("")}
       <td class="p-2 text-right" data-plan-cell="delivery_cartons"></td>
       <td class="p-2 text-right" data-plan-cell="delivery_kg"></td>
       <td class="p-2 text-right" data-plan-cell="delivery_pallets"></td>
+      ${v.packs.map((p) => `<td class="p-2 text-center" data-plan-cell="pack:${esc(p.name)}"></td>`).join("")}
     </tr>`;
 
   rows.querySelectorAll("[data-plan-cartons]").forEach((inp) => {

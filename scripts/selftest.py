@@ -1726,6 +1726,14 @@ def test_planner_blocks_sort_naturally():
     assert sorted(ids, key=planner.block_sort_key) == ["7", "8a", "8b", "10a", "10b", "15"]
 
 
+def test_planner_packs_sort_prepac_then_by_carton_size():
+    import planner  # noqa: E402
+
+    names = ["2kg XL", "1kg L", "Rhino 4.5 kg XL", "Pre-pac", "1kg XXL", "Juice bin", "10kg bulk"]
+    assert sorted(names, key=planner.pack_sort_key) == [
+        "Pre-pac", "1kg L", "1kg XXL", "2kg XL", "Rhino 4.5 kg XL", "10kg bulk", "Juice bin"]
+
+
 def test_planner_spread_rebalances_the_untouched_days():
     import planner  # noqa: E402
 
@@ -1891,10 +1899,11 @@ def test_planner_tables_are_built_from_the_same_derived_figures():
     assert [r[0] for r in rows] == ["Block 17", "Block 7", "Block 9"]
     assert total[-1] == 350.0 and total[9:16] == [130.0, 90.0, 40.0, 40.0, 50.0, 0.0, 0.0]
     headers, rows, total = _delivery_rows(view)
-    assert headers[2:5] == ["Pre-pac YTD", "Pre-pac last wk", "Pre-pac this wk"]
+    # The receiver's totals come right after its name, then the packs.
+    assert headers[2:8] == ["Cartons", "Kg", "Pallets", "Pre-pac YTD", "Pre-pac last wk", "Pre-pac this wk"]
     toro = next(r for r in rows if r[1] == "Toro")
-    assert toro[2:5] == [2000, 300, 500] and toro[-3:] == [600, 350.0, 1]
-    assert total[-3:] == [650, 405.0, 1]
+    assert toro[2:5] == [600, 350.0, 1] and toro[5:8] == [2000, 300, 500]
+    assert total[2:5] == [650, 405.0, 1]
     grand = dict((label.split(" (")[0], value) for label, value in _grand_rows(view))
     assert grand["Short kg"] == 107 and grand["Deliverable kg"] == 298
     # The PDF's compact tables: block, the days and the total, blocks with
@@ -1907,8 +1916,8 @@ def test_planner_tables_are_built_from_the_same_derived_figures():
     assert [r[0] for r in _harvest_rows(view, compact=True)[1]] == ["Block 7", "Block 9"]
     assert [r[0] for r in _harvest_rows(view)[1]] == ["Block 17", "Block 7", "Block 9"]
     headers, rows, total = _delivery_rows(view, compact=True)
-    assert headers == ["Market", "Receiver", "Pre-pac", "1kg XXL", "Cartons", "Kg", "Pallets"]
-    assert next(r for r in rows if r[1] == "Toro")[2:] == [500, 100, 600, 350, 1] and total[2:] == [500, 150, 650, 405, 1]
+    assert headers == ["Market", "Receiver", "Cartons", "Kg", "Pallets", "Pre-pac", "1kg XXL"]
+    assert next(r for r in rows if r[1] == "Toro")[2:] == [600, 350, 1, 500, 100] and total[2:] == [650, 405, 1, 500, 150]
     assert [label for label, _ in _grand_rows(view, compact=True)][1] == "Juice and loss %"
 
 

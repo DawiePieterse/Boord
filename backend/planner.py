@@ -18,6 +18,7 @@ up to the Sunday before the chosen week: when the week being planned is the
 current one, counting its own Monday and Tuesday in YTD would shrink
 "remaining" and make the default for "available this week" double-count.
 """
+import re
 from datetime import date, timedelta
 from typing import Dict, List, Optional
 
@@ -69,6 +70,22 @@ def block_sort_key(block_id: str) -> tuple:
     num = "".join(ch for ch in block_id if ch.isdigit())
     suffix = block_id[len(num):] if num else block_id
     return (int(num) if num else 0, suffix.lower())
+
+
+def pack_sort_key(name: str) -> tuple:
+    """Pack order for the delivery table and its exports: Pre-pac first, then
+    the carton sizes by weight (1kg, 2kg, 4.5 kg ...), and within a size by
+    name. Packhouse's own `sort` is the order its settings list them in,
+    which the office does not maintain, so the planner reads the size off
+    the name instead: the first number in it, in kg. A name with no number
+    goes last, alphabetically."""
+    name = name or ""
+    if name.lower().replace("-", "").replace(" ", "").startswith("prepac"):
+        return (0, 0.0, name.lower())
+    m = re.search(r"\d+(?:[.,]\d+)?", name)
+    if not m:
+        return (2, 0.0, name.lower())
+    return (1, float(m.group(0).replace(",", ".")), name.lower())
 
 
 def spread(available_kg: float, days: List[int], fixed: Dict[int, float]) -> Dict[int, float]:
