@@ -2,7 +2,7 @@
 // still loads if the connection briefly drops. Data (queue, receiving)
 // always goes over the network when available.
 const CACHE_PREFIX = "boord-packhouse-";
-const CACHE = "boord-packhouse-v24";
+const CACHE = "boord-packhouse-v25";
 const SHELL = [
   "./",
   "./index.html",

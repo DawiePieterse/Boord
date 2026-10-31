@@ -195,19 +195,6 @@ def _seasons(session: Session, month: int, day: int, current: int) -> List[int]:
     return list(range(lo, hi + 1))
 
 
-def _default_on(session: Session, week_start: date, block_ids: List[str]) -> Dict[str, bool]:
-    """Which blocks a week with no plan yet starts with: the ones that were
-    on in the most recent earlier plan, so a block switched off in October
-    stays off in November without being switched off every Monday. With no
-    earlier plan, every block is on."""
-    prev = session.exec(select(HarvestPlan).where(HarvestPlan.week_start < week_start)
-                        .order_by(HarvestPlan.week_start.desc())).first()
-    if not prev:
-        return {b: True for b in block_ids}
-    saved = {p["block_id"]: bool(p.get("on", True)) for p in json.loads(prev.blocks or "[]")}
-    return {b: saved.get(b, True) for b in block_ids}
-
-
 def build_week(session: Session, week_start: date) -> dict:
     """Everything the Planner screen, the spreadsheet and the PDF need for
     one week, figures and saved plan together, with the derived totals."""
@@ -230,7 +217,6 @@ def build_week(session: Session, week_start: date) -> dict:
 
     plan = session.get(HarvestPlan, week_start)
     saved_blocks = {p["block_id"]: p for p in json.loads(plan.blocks or "[]")} if plan else {}
-    default_on = {} if plan else _default_on(session, week_start, [b.id for b in blocks])
 
     out_blocks = []
     for b in blocks:
@@ -240,7 +226,7 @@ def build_week(session: Session, week_start: date) -> dict:
             "estimate_kg": estimate["blocks"].get(b.id),
             "ytd_kg": ytd.get(b.id, 0.0), "last_week_kg": last_week.get(b.id, 0.0),
             "actual": actuals.get(b.id, [0.0] * 7),
-            "on": bool(p.get("on", default_on.get(b.id, True))),
+            "on": bool(p.get("on", False)),  # a week not yet planned starts with every block off
             "available_kg": p.get("available_kg"),
             "days": [d for d in (p.get("days") or []) if isinstance(d, int) and 0 <= d <= 6],
             "fixed": {str(k): v for k, v in (p.get("fixed") or {}).items()},
