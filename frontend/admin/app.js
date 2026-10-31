@@ -683,7 +683,17 @@ function bindMasterData() {
       const el = document.getElementById("editModalFields").querySelector(`[data-key="${f.key}"]`);
       values[f.key] = f.type === "checkbox" ? el.checked : el.value;
     });
-    await editContext.onSave(values);
+    // A save the server refused (a 403 once Tailscale dropped, a team id
+    // that doesn't exist) used to reject into nowhere: the modal stayed
+    // open, no toast, and Save looked dead. Say what happened, and keep the
+    // modal - and everything typed into it - open to fix and save again.
+    try {
+      await editContext.onSave(values);
+    } catch (e) {
+      Boord.toast(Boord.isNetworkError(e) ? "No connection - not saved, try again"
+                                          : Boord.errorDetail(e, "Could not save"));
+      return;
+    }
     closeEditModal();
   });
 
@@ -729,8 +739,18 @@ async function handleAction(action) {
   if (action === "new-supplier") return editSupplier();
 }
 
+// Every download on the admin screen. A failed one - offline, or a 403 once
+// Tailscale has dropped - rejected silently before, so the button looked
+// like it had done nothing.
 async function exportFile(path, filename) {
-  const blob = await Boord.api(path, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+  let blob;
+  try {
+    blob = await Boord.api(path, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+  } catch (e) {
+    Boord.toast(Boord.isNetworkError(e) ? `No connection - could not download ${filename}`
+                                        : Boord.errorDetail(e, `Could not download ${filename}`));
+    return;
+  }
   Boord.downloadBlob(blob, filename);
 }
 
@@ -1176,8 +1196,8 @@ async function exportPayments() {
   const end = document.getElementById("payEnd").value;
   const supplierId = document.getElementById("paySupplierFilter").value;
   const supplierParam = supplierId ? `&supplier_id=${supplierId}` : "";
-  const blob = await Boord.api(`/api/payments/export?period_start=${start}&period_end=${end}${supplierParam}&fmt=xlsx`);
-  Boord.downloadBlob(blob, `Wages_${start}_${end}.xlsx`);
+  await exportFile(`/api/payments/export?period_start=${start}&period_end=${end}${supplierParam}&fmt=xlsx`,
+                   `Wages_${start}_${end}.xlsx`);
 }
 
 // ---------------------------------------------------------------------
@@ -2062,7 +2082,16 @@ async function saveSystemSettings() {
     gps_lon: lon,
     weather_station_id: document.getElementById("setWeatherStationId").value.trim() || null,
   };
-  await Boord.api("/api/system-settings", { method: "PUT", body: newSettings });
+  // A rejected save has to say so. Without the catch, Save on a phone whose
+  // Tailscale had dropped did nothing visible at all, and the admin walked
+  // away believing the thresholds or the GPS were saved.
+  try {
+    await Boord.api("/api/system-settings", { method: "PUT", body: newSettings });
+  } catch (e) {
+    Boord.toast(Boord.isNetworkError(e) ? "No connection - settings not saved"
+                                        : Boord.errorDetail(e, "Settings not saved"));
+    return;
+  }
   _systemSettings = { ..._systemSettings, ...newSettings };
   updateBannerPackhouseName();
   updateSeasonYearLabel();
@@ -2070,15 +2099,26 @@ async function saveSystemSettings() {
 }
 
 async function saveRateSettings() {
-  await Boord.api("/api/rate-settings", {
-    method: "POST",
-    body: {
-      effective_date: Boord.localDateStr(),
-      rate_type: "per_kg",
-      default_rate_per_kg: parseFloat(document.getElementById("setRatePerKg").value) || 0,
-      tier_rates_json: "{}",
-    },
-  });
+  const rate = parseFloat(document.getElementById("setRatePerKg").value);
+  // A blank or zero field used to be saved as a rate of R0.00/kg, which
+  // Calculate Wages then applied without complaint: a whole wage sheet at
+  // R0.00 that looked like a finished run. The server refuses it too now.
+  if (!(rate > 0)) { Boord.toast("Enter a rate per kg above zero"); return; }
+  try {
+    await Boord.api("/api/rate-settings", {
+      method: "POST",
+      body: {
+        effective_date: Boord.localDateStr(),
+        rate_type: "per_kg",
+        default_rate_per_kg: rate,
+        tier_rates_json: "{}",
+      },
+    });
+  } catch (e) {
+    Boord.toast(Boord.isNetworkError(e) ? "No connection - rate not saved"
+                                        : Boord.errorDetail(e, "Rate not saved"));
+    return;
+  }
   Boord.toast("Rate saved");
 }
 

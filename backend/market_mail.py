@@ -435,11 +435,28 @@ def fetch_once() -> dict:
                 for uid in (found[0] or b"").split():
                     _, fetched = imap.uid("FETCH", uid, "(RFC822)")
                     msg = email.message_from_bytes(fetched[0][1])
-                    with Session(engine) as session:
-                        lines = _handle_message(msg, cfg, session)
-                    # Labelled only once handled: a database error above
-                    # leaves the message to be tried again next time.
-                    imap.uid("STORE", uid, "+X-GM-LABELS", f"({DONE_LABEL})")
+                    try:
+                        with Session(engine) as session:
+                            lines = _handle_message(msg, cfg, session)
+                    except Exception as e:  # noqa: BLE001 - one email must not stop the inbox
+                        # Something _handle_message does not expect: a zip
+                        # Python cannot open (encrypted, an odd compression),
+                        # a PDF that trips pypdf outside pdf_text, a database
+                        # error. Letting it out of this loop ended the whole
+                        # pass, and since the message stayed unlabelled the
+                        # next pass hit it first and ended the same way -
+                        # every invoice behind it went unread, every 15
+                        # minutes, with only "FAILED" on the Reports tab to
+                        # say so. It is still left unlabelled, so a passing
+                        # fault is tried again, but it is listed by subject
+                        # so one that fails every pass can be found and
+                        # labelled by hand in Gmail.
+                        lines = [f"Failed \"{str(msg.get('Subject', ''))[:80]}\" from "
+                                 f"{parseaddr(msg.get('From', ''))[1]}: {type(e).__name__}: {e}"]
+                    else:
+                        # Labelled only once handled: a database error above
+                        # leaves the message to be tried again next time.
+                        imap.uid("STORE", uid, "+X-GM-LABELS", f"({DONE_LABEL})")
                     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
                     status["log"] += [f"{stamp}  {line}" for line in lines]
                     for line in lines:
