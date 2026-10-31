@@ -11,8 +11,8 @@ from market_mail import start_market_mail_scheduler
 from migrate import run_migrations
 from version import prime as prime_version
 from routers import (backups, dashboard, devices, harvest_records, master_data, lots,
-                      payments, processing, receiving, reports, setup, suppliers, sync, version,
-                      weather)
+                      payments, planner, processing, receiving, reports, setup, suppliers, sync,
+                      version, weather)
 from security import ADMIN_ONLY_MESSAGE, is_admin_client
 
 app = FastAPI(title="Boord Harvest & Receiving")
@@ -35,6 +35,7 @@ app.include_router(reports.router)
 app.include_router(sync.router)
 app.include_router(processing.router)
 app.include_router(dashboard.router)
+app.include_router(planner.router)
 app.include_router(weather.router)
 app.include_router(backups.router)
 app.include_router(setup.router)

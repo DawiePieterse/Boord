@@ -351,3 +351,41 @@ class MarketProduct(SQLModel, table=True):
     its own name."""
     product: str = Field(primary_key=True)
     pack: str
+
+
+# ---------------------------------------------------------------------------
+# Weekly harvest planner (Admin -> Planner)
+# ---------------------------------------------------------------------------
+
+class HarvestPlan(SQLModel, table=True):
+    """One week's harvest plan: which blocks are picked this week, how much
+    of each, on which days, and the cartons each receiver is to get. Keyed by
+    the week's Monday (ISO weeks); one plan per week, edited in place, the
+    last save wins. The figures it is planned against - the owner's estimate
+    (Boord Owner's owner.db), what has been picked (this database) and what
+    went out (Boord Packhouse's delivery notes) - are read fresh each time
+    the week is opened, never copied in, so the plan always sits beside the
+    latest truth. blocks is a JSON list of {block_id, on, available_kg (null
+    = whatever remains), days ([0..6], Monday 0), fixed ({"2": kg} for the
+    days typed by hand; the rest share the remainder)}; deliveries is JSON
+    {receiver_id: {pack name: cartons}}. loss_pct, when set, overrides the
+    season's measured juice-and-loss share."""
+    week_start: date = Field(primary_key=True)
+    season_year: int = Field(index=True)
+    blocks: str = "[]"
+    deliveries: str = "{}"
+    loss_pct: Optional[float] = None
+    updated_at: datetime
+
+
+class PlannerPack(SQLModel, table=True):
+    """What the planner needs to know about a Packhouse pack beyond what
+    Packhouse keeps: how many cartons make a pallet, and how many of
+    Packhouse's units make a carton. Packhouse counts a pack in the unit its
+    pallet lines are written in, which for Pre-pac is the punnet (0.48 kg),
+    four of which go in a carton; the office plans in cartons. The planner is
+    the only reader, so both live here, keyed by the pack's name as Packhouse
+    spells it. cartons_per_pallet 0 means not known yet."""
+    pack: str = Field(primary_key=True)
+    cartons_per_pallet: int = 0
+    units_per_carton: int = 1
