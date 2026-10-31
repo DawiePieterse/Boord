@@ -1684,6 +1684,19 @@ def test_planner_tables_are_built_from_the_same_derived_figures():
     assert total[-3:] == [650, 405.0, 1]
     grand = dict((label.split(" (")[0], value) for label, value in _grand_rows(view))
     assert grand["Short kg"] == 107 and grand["Deliverable kg"] == 298
+    # The PDF's compact tables: block, the days and the total, blocks with
+    # nothing planned left out; this week's cartons only; no loss source.
+    headers, rows, total = _harvest_rows(view, compact=True)
+    assert headers == ["Block", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Total kg"]
+    assert [r[0] for r in rows] == ["Block 17", "Block 7", "Block 9"] and total[-1] == 350
+    view["blocks"][0]["days"] = []          # block 17 planned for no day: off the PDF, still on the sheet
+    view["derived"] = planner.derive(view)
+    assert [r[0] for r in _harvest_rows(view, compact=True)[1]] == ["Block 7", "Block 9"]
+    assert [r[0] for r in _harvest_rows(view)[1]] == ["Block 17", "Block 7", "Block 9"]
+    headers, rows, total = _delivery_rows(view, compact=True)
+    assert headers == ["Market", "Receiver", "Pre-pac", "1kg XXL", "Cartons", "Kg", "Pallets"]
+    assert next(r for r in rows if r[1] == "Toro")[2:] == [500, 100, 600, 350, 1] and total[2:] == [500, 150, 650, 405, 1]
+    assert [label for label, _ in _grand_rows(view, compact=True)][1] == "Juice and loss %"
 
 
 def main():

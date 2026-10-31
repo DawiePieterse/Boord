@@ -397,38 +397,49 @@ def _pct_text(v) -> str:
     return "" if v is None else f"{int(round(v))}%"
 
 
-def _harvest_rows(view: dict) -> tuple:
+def _harvest_rows(view: dict, compact: bool = False) -> tuple:
     """Headers and rows of the harvest section, blocks that are on only, with
-    a totals row, shared by the sheet and the PDF."""
+    a totals row. The sheet gets everything the screen shows; the PDF
+    (`compact`) is the sheet pinned up for the week - block, the days and
+    the total, and only blocks with something planned - because the office
+    reads estimate, YTD and remaining on the screen, not on paper."""
     d = view["derived"]
     derived = {b["block_id"]: b for b in d["blocks"]}
-    headers = (["Block", "Estimate kg", "YTD kg", "YTD %", "Last wk kg", "Last wk %", "Remaining kg",
-                "Remaining %", "Available kg"] + planner.WEEKDAYS + ["Total kg"])
+    detail = ["Estimate kg", "YTD kg", "YTD %", "Last wk kg", "Last wk %", "Remaining kg", "Remaining %",
+              "Available kg"]
+    headers = ["Block"] + ([] if compact else detail) + planner.WEEKDAYS + ["Total kg"]
     rows = []
     for b in view["blocks"]:
-        if not b["on"]:
-            continue
         x = derived[b["block_id"]]
-        rows.append([b["name"], _num(b["estimate_kg"]), _num(b["ytd_kg"]), _pct_text(x["ytd_pct"]),
-                     _num(b["last_week_kg"]), _pct_text(x["last_week_pct"]), _num(x["remaining_kg"]),
-                     _pct_text(x["remaining_pct"]), _num(x["available_kg"])]
-                    + [_num(x["per_day"].get(str(i))) for i in range(7)] + [_num(x["total_kg"])])
+        if not b["on"] or (compact and not x["total_kg"]):
+            continue
+        row = [b["name"]]
+        if not compact:
+            row += [_num(b["estimate_kg"]), _num(b["ytd_kg"]), _pct_text(x["ytd_pct"]),
+                    _num(b["last_week_kg"]), _pct_text(x["last_week_pct"]), _num(x["remaining_kg"]),
+                    _pct_text(x["remaining_pct"]), _num(x["available_kg"])]
+        rows.append(row + [_num(x["per_day"].get(str(i))) for i in range(7)] + [_num(x["total_kg"])])
     on = [b for b in view["blocks"] if b["on"]]
-    total = ["Total",
-             _num(sum(b["estimate_kg"] or 0 for b in on)) if any(b["estimate_kg"] is not None for b in on) else "",
-             _num(sum(b["ytd_kg"] for b in on)), "", _num(sum(b["last_week_kg"] for b in on)), "",
-             _num(sum((derived[b["block_id"]]["remaining_kg"] or 0) for b in on)), "",
-             _num(sum(derived[b["block_id"]]["available_kg"] for b in on))]
+    total = ["Total"]
+    if not compact:
+        total += [
+            _num(sum(b["estimate_kg"] or 0 for b in on)) if any(b["estimate_kg"] is not None for b in on) else "",
+            _num(sum(b["ytd_kg"] for b in on)), "", _num(sum(b["last_week_kg"] for b in on)), "",
+            _num(sum((derived[b["block_id"]]["remaining_kg"] or 0) for b in on)), "",
+            _num(sum(derived[b["block_id"]]["available_kg"] for b in on))]
     total += [_num(t) for t in d["day_totals"]] + [_num(d["harvest_kg"])]
     return headers, rows, total
 
 
-def _delivery_rows(view: dict) -> tuple:
+def _delivery_rows(view: dict, compact: bool = False) -> tuple:
+    """The delivery section. The sheet has YTD and last week beside this
+    week's cartons for each pack; the PDF (`compact`) has this week's only."""
     d = view["derived"]
     packs = view["packs"]
     headers = ["Market", "Receiver"]
     for p in packs:
-        headers += [f"{p['name']} YTD", f"{p['name']} last wk", f"{p['name']} this wk"]
+        headers += ([p["name"]] if compact
+                    else [f"{p['name']} YTD", f"{p['name']} last wk", f"{p['name']} this wk"])
     headers += ["Cartons", "Kg", "Pallets"]
     rows = []
     derived = {str(r["id"]): r for r in d["receivers"]}
@@ -436,31 +447,36 @@ def _delivery_rows(view: dict) -> tuple:
         x = derived[str(r["id"])]
         row = [GROUP_LABEL[r["group"]], r["name"]]
         for p in packs:
-            done = (view["delivered"].get(str(r["id"])) or {}).get(p["name"]) or {}
-            upc = p.get("units_per_carton") or 1
-            row += [planner.units_to_cartons(done.get("ytd", 0), upc),
-                    planner.units_to_cartons(done.get("last_week", 0), upc), x["cells"][p["name"]]["cartons"]]
+            if not compact:
+                done = (view["delivered"].get(str(r["id"])) or {}).get(p["name"]) or {}
+                upc = p.get("units_per_carton") or 1
+                row += [planner.units_to_cartons(done.get("ytd", 0), upc),
+                        planner.units_to_cartons(done.get("last_week", 0), upc)]
+            row.append(x["cells"][p["name"]]["cartons"])
         row += [x["cartons"], _num(x["kg"]), x["pallets"]]
         rows.append(row)
     total = ["Total", ""]
     for p in packs:
-        cells = [(view["delivered"].get(str(r["id"])) or {}).get(p["name"]) or {} for r in view["receivers"]]
-        upc = p.get("units_per_carton") or 1
-        total += [planner.units_to_cartons(sum(c.get("ytd", 0) for c in cells), upc),
-                  planner.units_to_cartons(sum(c.get("last_week", 0) for c in cells), upc),
-                  d["pack_totals"][p["name"]]["cartons"]]
+        if not compact:
+            cells = [(view["delivered"].get(str(r["id"])) or {}).get(p["name"]) or {} for r in view["receivers"]]
+            upc = p.get("units_per_carton") or 1
+            total += [planner.units_to_cartons(sum(c.get("ytd", 0) for c in cells), upc),
+                      planner.units_to_cartons(sum(c.get("last_week", 0) for c in cells), upc)]
+        total.append(d["pack_totals"][p["name"]]["cartons"])
     total += [d["delivery_cartons"], _num(d["delivery_kg"]), d["delivery_pallets"]]
     return headers, rows, total
 
 
-def _grand_rows(view: dict) -> list:
+def _grand_rows(view: dict, compact: bool = False) -> list:
+    """The grand totals. The sheet says where the loss % came from; the PDF
+    (`compact`) just gives the figure."""
     d = view["derived"]
     loss = view["loss"]
     source = ("typed" if loss.get("override_pct") is not None
               else "season to date" if loss.get("season_pct") is not None else "none yet")
     return [
         ["Planned harvest kg", _num(d["harvest_kg"])],
-        [f"Juice and loss % ({source})", _num(d["loss_pct"])],
+        ["Juice and loss %" if compact else f"Juice and loss % ({source})", _num(d["loss_pct"])],
         ["Deliverable kg", _num(d["deliverable_kg"])],
         ["Planned delivery kg", _num(d["delivery_kg"])],
         ["Surplus kg" if d["balance_kg"] >= 0 else "Short kg", _num(abs(d["balance_kg"]))],
@@ -587,15 +603,14 @@ def export_pdf(week_start: date, session: Session = Depends(get_session)):
     if not view["packhouse"]["available"]:
         text(view["packhouse"].get("reason", ""), 8)
     pdf.ln(2)
-    text("Harvest this week", 11, "B", 7)
-    table(*_harvest_rows(view))
+    text("Harvest this week (kg)", 11, "B", 7)
+    table(*_harvest_rows(view, compact=True), first_col=50)
     text("Delivery this week (cartons)", 11, "B", 7)
-    h, r, t = _delivery_rows(view)
-    table(h, r, t, first_col=22)
+    h, r, t = _delivery_rows(view, compact=True)
+    table(h, r, t, first_col=28)
     text("Grand totals", 11, "B", 7)
-    d = view["derived"]
     pdf.set_font("Helvetica", "", 10)
-    for label, value in _grand_rows(view):
+    for label, value in _grand_rows(view, compact=True):
         short = label.startswith("Short")
         if label.startswith(("Short", "Surplus")):
             pdf.set_text_color(185, 28, 28) if short else pdf.set_text_color(21, 128, 61)

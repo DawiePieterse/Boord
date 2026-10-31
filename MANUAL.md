@@ -2020,10 +2020,14 @@ retired in Packhouse still shows while a note this season used it.
 
 ### Export
 
-**Excel** and **PDF** download the whole page for the week - the harvest
-grid (blocks that are on), the delivery grid with YTD, last week and this
-week per pack, and the grand totals - as `Harvest_Plan_<season>_week_<n>`.
-A copy is kept in `data\reports\` with the other reports.
+**Excel** downloads the whole page for the week - the harvest grid (blocks
+that are on, with estimate, YTD, last week, remaining and available), the
+delivery grid with YTD, last week and this week per pack, and the grand
+totals. **PDF** is the sheet to pin up: each block with something planned
+and its kg per day, each receiver's cartons per pack for the week with kg
+and pallets, and the grand totals. Both are named
+`Harvest_Plan_<season>_week_<n>`, and a copy is kept in `data\reports\`
+with the other reports.
 
 ---
 
