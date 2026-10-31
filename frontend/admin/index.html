@@ -266,6 +266,7 @@
     <button class="tab-btn" data-tab="payments"><i class="fa-solid fa-money-bill-wave"></i><span>Payments</span></button>
     <button class="tab-btn" data-tab="markets"><i class="fa-solid fa-store"></i><span>Markets</span></button>
     <button class="tab-btn" data-tab="reports"><i class="fa-solid fa-chart-column"></i><span>Reports</span></button>
+    <button class="tab-btn" data-tab="planner"><i class="fa-solid fa-calendar-week"></i><span>Planner</span></button>
     <button class="tab-btn" data-tab="settings"><i class="fa-solid fa-gear"></i><span>Settings</span></button>
   </nav>
 
@@ -470,6 +471,89 @@
           <div class="font-semibold text-sm">Full Manual</div>
           <div class="text-xs text-slate-400">User and admin manual (PDF)</div>
         </a>
+      </div>
+    </div>
+
+    <!-- PLANNER: the week's harvest plan against the owner's estimate (Boord
+         Owner), what has been picked (this app) and the cartons the
+         receivers are waiting for (Boord Packhouse). Drawn by app.js from
+         GET /api/planner/week; every edit saves itself. Built for the office
+         PC: the two grids are wide and scroll sideways inside their cards. -->
+    <div id="tab-planner" class="tab-content hidden space-y-4">
+      <div class="bg-white rounded-xl shadow p-4 flex flex-wrap gap-3 items-end">
+        <div><label class="text-xs text-slate-500 block">Season</label><select id="plannerSeason" class="border border-slate-300 rounded-lg p-2 text-sm"></select></div>
+        <div>
+          <label class="text-xs text-slate-500 block">Week</label>
+          <div class="flex items-center gap-1">
+            <button id="plannerPrevWeek" class="px-3 py-2 bg-slate-200 rounded-lg text-sm" title="Previous week"><i class="fa-solid fa-chevron-left"></i></button>
+            <select id="plannerWeek" class="border border-slate-300 rounded-lg p-2 text-sm"></select>
+            <button id="plannerNextWeek" class="px-3 py-2 bg-slate-200 rounded-lg text-sm" title="Next week"><i class="fa-solid fa-chevron-right"></i></button>
+            <button id="plannerThisWeek" class="px-3 py-2 bg-slate-200 rounded-lg text-sm">This week</button>
+          </div>
+        </div>
+        <div class="flex-1"></div>
+        <div class="flex items-center gap-2">
+          <span id="plannerSaveState" class="text-xs text-slate-400"></span>
+          <button id="plannerExportXlsx" class="px-3 py-2 bg-slate-200 rounded-lg text-sm"><i class="fa-solid fa-file-excel text-green-700"></i> Excel</button>
+          <button id="plannerExportPdf" class="px-3 py-2 bg-slate-200 rounded-lg text-sm"><i class="fa-solid fa-file-pdf text-red-700"></i> PDF</button>
+        </div>
+      </div>
+
+      <div id="plannerError" class="hidden bg-white rounded-xl shadow p-4 text-sm text-slate-600"></div>
+
+      <!-- Harvest: one row per block that is on. Estimate, YTD and last week
+           are read; available and the day figures are typed. -->
+      <div class="bg-white rounded-xl shadow">
+        <div class="p-3 border-b">
+          <span class="font-semibold">Harvest this week</span>
+          <span class="text-xs text-slate-500 ml-2">Tick the blocks picked this week, then the days. YTD is up to the Sunday before this week.</span>
+          <!-- Which estimate the figures are measured against, and whether
+               Owner or Packhouse was found on this PC. -->
+          <div class="text-xs text-slate-500 mt-1" id="plannerSources"></div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm planner-table" id="plannerHarvest">
+            <thead><tr class="text-left border-b bg-slate-50">
+              <th class="p-2">Harvest · Block</th>
+              <th class="p-2 text-right">Estimate</th>
+              <th class="p-2 text-right">YTD</th>
+              <th class="p-2 text-right">Last wk</th>
+              <th class="p-2 text-right">Remaining</th>
+              <th class="p-2 text-right">Available this week</th>
+              <th class="p-2 text-center" data-day="0">M</th>
+              <th class="p-2 text-center" data-day="1">T</th>
+              <th class="p-2 text-center" data-day="2">W</th>
+              <th class="p-2 text-center" data-day="3">T</th>
+              <th class="p-2 text-center" data-day="4">F</th>
+              <th class="p-2 text-center" data-day="5">S</th>
+              <th class="p-2 text-center" data-day="6">S</th>
+              <th class="p-2 text-right">Total</th>
+            </tr></thead>
+            <tbody id="plannerHarvestRows"></tbody>
+            <tfoot id="plannerHarvestFoot"></tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- Delivery: receivers down the side, Packhouse's packs across. -->
+      <div class="bg-white rounded-xl shadow">
+        <div class="p-3 border-b">
+          <span class="font-semibold">Delivery this week</span>
+          <span class="text-xs text-slate-500 ml-2">cartons per receiver and pack, from Boord Packhouse. Type the cartons for this week; kg and pallets follow.</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm planner-table" id="plannerDelivery">
+            <thead id="plannerDeliveryHead"></thead>
+            <tbody id="plannerDeliveryRows"></tbody>
+            <tfoot id="plannerDeliveryFoot"></tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- Grand totals: does the week's picking cover the week's cartons? -->
+      <div class="bg-white rounded-xl shadow p-4">
+        <div class="font-semibold mb-3">Grand totals</div>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3" id="plannerGrand"></div>
       </div>
     </div>
 

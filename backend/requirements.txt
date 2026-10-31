@@ -13,3 +13,6 @@ pandas==2.2.3
 # Reads the market agents' emailed invoices (market_mail.py). Pure Python,
 # so nothing to compile on the farm PC; 5.1.0 still runs on Python 3.9.
 pypdf==5.1.0
+# The Planner's PDF export (routers/planner.py). Pure Python, the same pin as
+# Boord Packhouse's delivery note PDF; 2.8.2 still runs on Python 3.9.
+fpdf2==2.8.2

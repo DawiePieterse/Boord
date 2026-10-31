@@ -248,6 +248,38 @@ Transport**, and use the Reports tab's dates:
 
 ---
 
+## Planner — the week's harvest plan
+
+The **Planner** tab is the Monday whiteboard: what is left to pick per block,
+how much of it this week and on which days, and whether that covers the
+cartons the receivers want. Best on the office PC. It saves as you type.
+
+1. Pick the **season** and the **week** (the arrows step a week; **This
+   week** jumps to today's).
+2. **Harvest this week:** every block is listed. **Tick the box in front of
+   a block** to pick it this week (an unticked block is greyed and left out
+   of the totals). Each shows the owner's estimate (from Boord Owner), what
+   has been picked so far (YTD, up to last Sunday), last week, and what
+   remains. **Available this week** starts at all that remains; change it as
+   kg or %. Tick the **days** (M T W T F S S) the block is picked and the kg
+   is shared over them. Type under a day to hold that day's figure (bold);
+   the other days share the rest.
+3. **Delivery this week:** type the **cartons** per receiver and pack. YTD
+   and last week under each cell are from Packhouse's delivery notes. In
+   the header, type once per pack how many of Packhouse's units make a
+   carton (Pre-pac: 4 punnets, already set) and how many cartons make a
+   pallet, so kg and pallets come out right. Pallets are whole and rounded
+   up per receiver: a part-filled pallet still goes on the truck.
+4. **Grand totals:** planned harvest, the juice-and-loss % (the season's
+   own figure, or type one), what is deliverable after it, the planned
+   delivery, and **Surplus** (green) or **Short** (red).
+5. **Excel** or **PDF** downloads the whole week.
+
+If the top of the page says Owner or Packhouse was not found, the plan
+still works without those figures — ask whoever looks after the server.
+
+---
+
 ## Settings
 
 - **Data Backup** — **Backup Now** creates an immediate downloadable

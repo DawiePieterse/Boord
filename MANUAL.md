@@ -25,8 +25,9 @@ This manual is for everyone who touches the app:
 8. [Admin - Master Data](#8-admin---master-data)
 9. [Admin - Payments](#9-admin---payments)
 10. [Admin - Reports](#10-admin---reports)
-11. [Admin - Settings](#11-admin---settings)
-12. [Troubleshooting / FAQ](#12-troubleshooting--faq)
+11. [Admin - Planner](#11-admin---planner)
+12. [Admin - Settings](#12-admin---settings)
+13. [Troubleshooting / FAQ](#13-troubleshooting--faq)
     - [Annexe A: Data Field Reference](#annexe-a-data-field-reference)
 
 ---
@@ -64,7 +65,7 @@ app use the same "traffic light" idea to make that visible at a glance:
 
 - The **pack house's incoming queue** shows the oldest (longest-waiting)
   load first, colored **green → yellow → red** as it ages past the
-  thresholds set in Settings (see [chapter 11](#11-admin---settings)).
+  thresholds set in Settings (see [chapter 12](#12-admin---settings)).
 - The **admin Dashboard's Harvesting and In Transit lists** use the exact
   same coloring, so the office can see at a glance whether fruit is moving
   through fast enough.
@@ -330,7 +331,7 @@ ask it to. Double-click **`setup_update_check.bat`** once and a Scheduled
 Task ("Boord Update Check") runs `update_server.bat --check` every morning
 at 07:30. That looks for a newer signed release, verifies its signature,
 and records what it found - **it installs nothing**. When there is one,
-[Settings → Server](#11-admin---settings) in the admin app says so, and
+[Settings → Server](#12-admin---settings) in the admin app says so, and
 installing it stays a double-click of `update_server.bat` at a time that
 suits the pack house.
 
@@ -714,7 +715,7 @@ Then set Windows to run it automatically on startup:
    End task on every `python.exe`. From here on the scheduled task owns the
    server - starting `start_server.bat` by hand as well is what leaves two
    instances running on different ports (see
-   [chapter 12](#12-troubleshooting--faq)).
+   [chapter 13](#13-troubleshooting--faq)).
 2. Open **Task Scheduler** (search for it in the Start menu).
 3. Click **Create Basic Task…** and name it exactly **Boord Server**, Next.
 
@@ -1005,7 +1006,7 @@ Nothing needs retyping.
 However it's started, leave it running continuously during harvest
 season - the app expects to be a long-lived local service, not something
 started and stopped around each use. (The automatic nightly backup,
-[chapter 11](#11-admin---settings), only fires if the server happens to
+[chapter 12](#12-admin---settings), only fires if the server happens to
 be running at 02:00 - see that chapter's note on this limitation.
 Separately, a night on which nothing changed is skipped on purpose and
 adds no backup - that's normal, not a fault.)
@@ -1048,7 +1049,7 @@ see step 6 of [the installer](#2-initial-server-setup).
 
 **No wage rate.** Nothing is seeded, and **Calculate** under
 [Payments](#9-admin---payments) refuses with "No wage rate has been set"
-until you enter one under [Settings](#11-admin---settings). A wrong block
+until you enter one under [Settings](#12-admin---settings). A wrong block
 list is obvious the moment somebody opens the Field app; a wrong wage rate
 produces a perfectly ordinary-looking payslip at the wrong number, and the
 person most likely to notice is the one being underpaid. So the app will
@@ -1230,14 +1231,14 @@ server itself has been updated, until its cache is refreshed.
 
 **After deploying an update:** check the version number on a few devices.
 If one is behind, do a normal open-close-reopen of the app icon (see
-[chapter 12](#12-troubleshooting--faq) - same fix as a stuck "Camera
+[chapter 13](#13-troubleshooting--faq) - same fix as a stuck "Camera
 unavailable" screen); a full close and reopen is what lets the app notice
 and install the new cached version in the background, then show it on the
 next open.
 
 **What the server itself is running** is a separate question, and the
 header cannot answer it - the header says what *that browser* loaded, which
-is exactly what goes stale. [Settings → Server](#11-admin---settings) in
+is exactly what goes stale. [Settings → Server](#12-admin---settings) in
 the admin app asks the server directly and shows both, so "the update did
 not apply" and "this one device is showing an old cached copy" stop looking
 the same.
@@ -1469,7 +1470,7 @@ Every load currently on its way (dispatched from a field station, or
 logged as an external delivery - see below) appears here, **oldest
 first**, colored green/yellow/red by how long it's been in transit (the
 same thresholds as [chapter 1](#1-overview--concepts), configurable in
-[Settings](#11-admin---settings)). Each card shows the slip number, farm/
+[Settings](#12-admin---settings)). Each card shows the slip number, farm/
 supplier, team, driver, crate count, and total kg.
 
 If a load is part of a **split** (see [chapter 4](#4-field-app---capturing-the-harvest)),
@@ -1543,7 +1544,7 @@ what's happening right now, all scoped to a shared filter bar at the top.
   "All suppliers"
 - **Period start / Period end**, plus quick-fill buttons **Today**,
   **This Week**, **Season**. The season is a recurring start date (a month
-  and a day) set in [Settings](#11-admin---settings); **Season** fills the
+  and a day) set in [Settings](#12-admin---settings); **Season** fills the
   twelve months from that date, and the season is labelled by the year it
   starts in. Or set custom dates directly. Whichever preset matches the
   dates currently selected is highlighted, so it's clear at a glance
@@ -1922,7 +1923,130 @@ back up anything else in `data\`.
 
 ---
 
-## 11. Admin - Settings
+## 11. Admin - Planner
+
+The **Planner** tab, between Reports and Settings, is the week's harvest
+plan: of what the owner expected each block to give this season, how much
+is left, how much of that is picked this week and on which days, and
+whether that picking covers the cartons the receivers are waiting for. It
+replaces the whiteboard the office drew every Monday. It is built for the
+PC screen - the two grids are wide and scroll sideways on a phone.
+
+Every figure on it is a whole number: kg, cartons, pallets and
+percentages. The one exception is a pack's unit weight (0,48 kg for a
+Pre-pac punnet), which is Packhouse's and shown as Packhouse has it.
+
+It reads three places and writes one:
+
+- **Boord Owner's estimate** (its `data\owner.db`, read-only, the version
+  saved or edited last for the season) gives each block's estimated kg.
+- **This app's crates** give what each block has been picked so far.
+- **Boord Packhouse** (its `data\packhouse.db`, read-only) gives the
+  receivers, the packs and the delivery notes already loaded.
+- **The plan itself** is saved in Boord as you type - there is no Save
+  button. The top right reads "Saving…" then "Saved" with the time. One plan
+  per week; the last save wins.
+
+If Owner or Packhouse is not on this PC, or has nothing for the season yet,
+the Planner says so in amber at the top and shows the rest. The server finds
+their databases beside this one (`C:\BoordOwner` and `C:\Boord-packhouse`);
+anywhere else, set `BOORD_OWNER_DB` and `BOORD_PACKHOUSE_DB`.
+
+### Choosing the week
+
+Pick the **season** (labelled by the year it starts in, from the season
+anchor in Settings) and the **week** - ISO week numbers, Monday to Sunday,
+so the first weeks of January still belong to the 2026 season, each shown
+with its Monday and Sunday. The arrows step a week at a time, **This week**
+jumps back to today's. A week with a plan
+saved is marked ● in the list.
+
+### Harvest this week
+
+One row per active block of the farm's own (suppliers' blocks are not
+planned here), in block order. The **checkbox in front of the block** says
+whether it is picked this week: an unticked block stays in the list with its
+figures, greyed, its days hidden and nothing of it in the totals. A new week
+starts with the ticks of the last planned week, so a block finished in
+October is not unticked again every Monday. Columns:
+
+- **Estimate** - the owner's kg for the block. A dash means the owner has
+  not estimated that block, and it has no remaining or percentage figures;
+  its typed kg still count in the totals.
+- **YTD** - net kg (weight less deductions) picked from the season's start
+  **up to the Sunday before this week**, with its share of the estimate.
+  Deliberately not "up to today": counting this week's Monday in YTD would
+  shrink what remains and double-count the default below.
+- **Last wk** - the previous week's kg and share.
+- **Remaining** - estimate less YTD, and how much of the estimate is left.
+- **Available this week** - how much of the remaining kg to pick this week,
+  as kg or as a % of remaining. It starts at everything that remains; type
+  either box to change it, clear the kg box to go back to the default.
+- **M T W T F S S** - each day with its date, today's marked; tick the days
+  the block is picked. The available kg is
+  shared equally over the ticked days. Type a figure under a day to hold it
+  (it goes bold) and the other ticked days share what is left; clear it to
+  let it share again. If every ticked day is typed and they no longer add
+  up to what is available, the Total turns amber and says so. Under each
+  day, "picked 207" is what was really picked that day once the week runs.
+  In red when the day was not ticked for that block (or the block is off):
+  picking went off plan.
+- **Total** - the block's planned kg for the week.
+
+### Delivery this week
+
+The receivers from Packhouse's Settings down the side, grouped USA, EU and
+Local the way Packhouse groups them; its packs across the top with the
+weight Packhouse gives each. In each cell, type the **cartons** that
+receiver gets of that pack this week. Under it, **YTD** and **last wk** are
+the cartons on delivery notes already loaded. The row's **Cartons**, **Kg**
+and **Pallets** follow.
+
+The second header row holds two figures per pack that Packhouse does not
+keep, so the Planner does:
+
+- **/carton** - how many of Packhouse's units make a carton. Packhouse
+  counts Pre-pac in punnets (its 0,48 kg is the punnet), and four punnets
+  go in a carton, so Pre-pac starts at 4 and every other pack at 1. Kg is
+  units × unit weight (500 Pre-pac cartons = 2 000 punnets = 960 kg), and
+  Packhouse's delivered punnets read back as cartons.
+- **/pallet** - how many cartons make a pallet. Until it is typed that
+  pack's pallets show a dash. Pallets are counted
+whole and rounded up, per receiver and pack: each receiver's fruit travels
+to its own destination, so 20 cartons of a pack is still a pallet on the
+truck, and 3 001 cartons of a 1 500-carton pack is three. A receiver or pack
+retired in Packhouse still shows while a note this season used it.
+
+### Grand totals
+
+- **Planned harvest** - the blocks' totals added up.
+- **Juice and loss %** - the share of picked kg that does not go out as
+  fruit on a delivery note (juice bins, rejects, give-away). It starts at
+  the season's own figure so far: everything picked before this week against
+  the fruit kg loaded before it, shown underneath. Type a figure to override
+  it for the week; clear the box to use the season's figure again. Early in
+  a season it can be odd (even negative, when a note was loaded for fruit
+  picked the week before) and is shown rather than hidden.
+- **Deliverable** - planned harvest after that loss.
+- **Planned delivery** - the receivers' cartons as kg, with cartons and
+  pallets.
+- **Surplus** (green) or **Short** (red) - deliverable less planned
+  delivery. Red means the picking planned is short of the cartons.
+
+### Export
+
+**Excel** downloads the whole page for the week - the harvest grid (blocks
+that are on, with estimate, YTD, last week, remaining and available), the
+delivery grid with YTD, last week and this week per pack, and the grand
+totals. **PDF** is the sheet to pin up: each block with something planned
+and its kg per day, each receiver's cartons per pack for the week with kg
+and pallets, and the grand totals. Both are named
+`Harvest_Plan_<season>_week_<n>`, and a copy is kept in `data\reports\`
+with the other reports.
+
+---
+
+## 12. Admin - Settings
 
 ### Server
 
@@ -2096,7 +2220,7 @@ check of conditions without leaving the app.
 
 ---
 
-## 12. Troubleshooting / FAQ
+## 13. Troubleshooting / FAQ
 
 **The version in the corner and the server disagree**
 Settings → Server shows what the server is running; the header shows what

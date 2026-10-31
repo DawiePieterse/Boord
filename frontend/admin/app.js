@@ -1,4 +1,4 @@
-// Admin app: master data, payments, reports, settings.
+// Admin app: master data, payments, reports, planner, settings.
 
 let _systemSettings = null;
 
@@ -103,6 +103,7 @@ async function showApp() {
     bindReports();
     bindMarkets();
     bindMarketModal();
+    bindPlanner();
     bindSettings();
     bindSuppliers();
 
@@ -116,6 +117,7 @@ async function showApp() {
       // Master Data now lives inside the Settings tab.
       else if (tab === "settings") { await loadSettingsForm(); await loadAllMasterData(); }
       else if (tab === "markets") { await loadMarketNotes(); await loadMarketMail(); }
+      else if (tab === "planner") await loadPlanner(_plan ? { week_start: _plan.week_start } : {});
     });
     // iOS, in the installed app: after the keyboard (or a date or select
     // picker) closes, the tab bar fixed along the bottom of a phone can stay
@@ -1360,6 +1362,567 @@ async function downloadReport(key) {
     } else {
       Boord.toast("Could not generate report - see browser console for details");
     }
+  }
+}
+
+// ---------------------------------------------------------------------
+// Planner: the week's harvest plan. One screen, three sources - the owner's
+// estimate (Boord Owner), what has been picked (this app) and what the
+// receivers have had and are waiting for (Boord Packhouse) - and one record
+// of our own, the plan, which saves itself as the office types. The server
+// (backend/routers/planner.py) fetches and derives everything; the copy of
+// the arithmetic below (plannerDerive, a port of backend/planner.py's
+// derive) only keeps the figures moving while a number is being typed, so
+// the screen never waits for a round trip to show a total. The saved answer
+// is always the server's.
+// ---------------------------------------------------------------------
+let _plan = null;          // GET /api/planner/week, the whole view
+let _planSaveTimer = null;
+let _planPacksTimer = null;
+let _planPending = false;  // an edit not yet sent
+
+const PLAN_GROUP_LABEL = { usa: "USA", eu: "EU", local: "Local" };
+const PLAN_GROUP_CLASS = { usa: "bg-blue-50 text-blue-800", eu: "bg-violet-50 text-violet-800", local: "bg-green-50 text-green-800" };
+
+function plannerPct(part, whole) {
+  if (whole == null || !whole) return null;
+  return Math.round(100 * (part || 0) / whole);
+}
+
+function plannerSpread(available, days, fixed) {
+  const ticked = [...new Set(days.filter((d) => d >= 0 && d <= 6))].sort();
+  const out = {};
+  let fixedTotal = 0;
+  const free = [];
+  for (const d of ticked) {
+    if (fixed[d] != null) { out[d] = Math.round(Number(fixed[d])); fixedTotal += out[d]; }
+    else free.push(d);
+  }
+  if (free.length) {
+    const share = Math.max(0, (Number(available) || 0) - fixedTotal) / free.length;
+    for (const d of free) out[d] = Math.round(share);
+  }
+  return out;
+}
+
+// backend/planner.py derive(), line for line. Change the two together.
+function plannerDerive(view) {
+  const r1 = (x) => Math.round(x);   // whole numbers, as backend/planner.py
+  const blocks = [];
+  let harvest = 0;
+  const dayTotals = [0, 0, 0, 0, 0, 0, 0];
+  for (const b of view.blocks) {
+    const est = b.estimate_kg;
+    const ytd = b.ytd_kg || 0;
+    const remaining = est != null ? r1(est - ytd) : null;
+    let available = b.available_kg;
+    if (available == null) available = remaining != null ? Math.max(0, remaining) : 0;
+    const fixed = {};
+    for (const [k, v] of Object.entries(b.fixed || {})) fixed[parseInt(k, 10)] = v;
+    const perDay = b.on ? plannerSpread(available, b.days || [], fixed) : {};
+    const total = r1(Object.values(perDay).reduce((s, x) => s + x, 0));
+    if (b.on) { harvest += total; for (const [d, kg] of Object.entries(perDay)) dayTotals[d] += kg; }
+    blocks.push({
+      block_id: b.block_id, remaining_kg: remaining, remaining_pct: plannerPct(remaining, est),
+      ytd_pct: plannerPct(ytd, est), last_week_pct: plannerPct(b.last_week_kg, est),
+      available_kg: r1(available), available_pct: remaining ? plannerPct(available, remaining) : null,
+      per_day: perDay, total_kg: total,
+    });
+  }
+  const packs = {};
+  for (const p of view.packs || []) packs[p.name] = p;
+  const deliveries = view.plan_deliveries || {};
+  const receivers = [];
+  const packTotals = {};
+  for (const name of Object.keys(packs)) packTotals[name] = { cartons: 0, kg: 0, pallets: 0 };
+  let dKg = 0, dCartons = 0, dPallets = 0;
+  for (const r of view.receivers || []) {
+    const rid = String(r.id);
+    const cells = {};
+    let rc = 0, rk = 0, rp = 0;
+    for (const [name, p] of Object.entries(packs)) {
+      const cartons = parseInt((deliveries[rid] || {})[name] || 0, 10) || 0;
+      const units = cartons * (p.units_per_carton || 1);   // Packhouse's unit: a Pre-pac punnet
+      const kg = r1(units * (p.carton_kg || 0));
+      const perPallet = p.cartons_per_pallet || 0;
+      // Whole pallets, rounded up: a part-filled pallet still travels.
+      const pallets = perPallet ? (cartons ? Math.ceil(cartons / perPallet) : 0) : null;
+      cells[name] = { cartons, units, kg, pallets };
+      rc += cartons; rk += kg; rp += pallets || 0;
+      packTotals[name].cartons += cartons; packTotals[name].kg += kg; packTotals[name].pallets += pallets || 0;
+    }
+    receivers.push({ id: r.id, cells, cartons: rc, kg: r1(rk), pallets: rp });
+    dCartons += rc; dKg += rk; dPallets += rp;
+  }
+  for (const t of Object.values(packTotals)) { t.kg = r1(t.kg); }
+  const loss = view.loss || {};
+  let effLoss = loss.override_pct;
+  if (effLoss == null) effLoss = loss.season_pct;
+  if (effLoss == null) effLoss = 0;
+  harvest = r1(harvest);
+  const deliverable = r1(harvest * (1 - effLoss / 100));
+  dKg = r1(dKg);
+  return {
+    blocks, day_totals: dayTotals.map(r1), harvest_kg: harvest, receivers, pack_totals: packTotals,
+    delivery_cartons: dCartons, delivery_kg: dKg, delivery_pallets: dPallets,
+    loss_pct: r1(effLoss), deliverable_kg: deliverable, balance_kg: r1(deliverable - dKg),
+  };
+}
+
+function bindPlanner() {
+  document.getElementById("plannerSeason").addEventListener("change", (e) => {
+    flushPlannerSave();
+    loadPlanner({ season: e.target.value });
+  });
+  document.getElementById("plannerWeek").addEventListener("change", (e) => {
+    flushPlannerSave();
+    loadPlanner({ week_start: e.target.value });
+  });
+  const step = (n) => {
+    if (!_plan) return;
+    const idx = _plan.weeks.findIndex((w) => w.week_start === _plan.week_start);
+    const next = _plan.weeks[idx + n];
+    flushPlannerSave();
+    if (next) loadPlanner({ week_start: next.week_start });
+    else loadPlanner({ week_start: Boord.localDateStr(plannerAddDays(new Date(_plan.week_start), 7 * n)) });
+  };
+  document.getElementById("plannerPrevWeek").addEventListener("click", () => step(-1));
+  document.getElementById("plannerNextWeek").addEventListener("click", () => step(1));
+  document.getElementById("plannerThisWeek").addEventListener("click", () => { flushPlannerSave(); loadPlanner({}); });
+  document.getElementById("plannerExportXlsx").addEventListener("click", () => exportPlanner("xlsx"));
+  document.getElementById("plannerExportPdf").addEventListener("click", () => exportPlanner("pdf"));
+  // The figures (crates picked, notes loaded, a new estimate) change from
+  // outside, so the tab fetches again each time it opens, keeping the week.
+  document.querySelector('.tab-btn[data-tab="planner"]').addEventListener("click", () => {
+    loadPlanner(_plan ? { week_start: _plan.week_start } : {});
+  });
+  // An edit still waiting its 800 ms when the page closes goes out now.
+  window.addEventListener("pagehide", flushPlannerSave);
+}
+
+function plannerAddDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+
+function plannerDateLabel(iso, withYear = false) {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("en-ZA", withYear ? { day: "numeric", month: "short", year: "numeric" } : { day: "numeric", month: "short" });
+}
+
+async function loadPlanner({ week_start, season } = {}) {
+  const err = document.getElementById("plannerError");
+  const params = week_start ? `?week_start=${week_start}` : season ? `?season=${season}` : "";
+  try {
+    _plan = await Boord.api(`/api/planner/week${params}`);
+  } catch (e) {
+    err.textContent = Boord.errorDetail(e, "The planner could not be loaded");
+    err.classList.remove("hidden");
+    return;
+  }
+  err.classList.add("hidden");
+  _planPending = false;
+  renderPlanner();
+}
+
+function renderPlanner() {
+  const v = _plan;
+  // Season and week pickers.
+  const seasonSel = document.getElementById("plannerSeason");
+  seasonSel.innerHTML = v.seasons.map((y) => `<option value="${y}" ${y === v.season_year ? "selected" : ""}>${y} season</option>`).join("");
+  const weekSel = document.getElementById("plannerWeek");
+  // ISO weeks, Monday to Sunday, each option with its dates; a dot marks a
+  // week with a plan saved.
+  weekSel.innerHTML = v.weeks.map((w) => {
+    const end = Boord.localDateStr(plannerAddDays(new Date(w.week_start + "T00:00:00"), 6));
+    const marks = `${w.has_plan ? "● " : ""}${w.current ? "(this week) " : ""}`;
+    return `<option value="${w.week_start}" ${w.week_start === v.week_start ? "selected" : ""}>${marks}Week ${w.iso_week} · ${plannerDateLabel(w.week_start)} – ${plannerDateLabel(end)}</option>`;
+  }).join("");
+  // Where the figures come from, and what is missing.
+  const src = [];
+  if (v.estimate.available) src.push(`Estimate: ${esc(v.estimate.name || "latest")} (Boord Owner, ${Boord.fmtNum(v.estimate.total_kg, 0)} kg)`);
+  else src.push(`<span class="text-amber-700"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(v.estimate.reason)}</span>`);
+  if (!v.packhouse.available) src.push(`<span class="text-amber-700"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(v.packhouse.reason)}</span>`);
+  document.getElementById("plannerSources").innerHTML = src.join("<br>");
+  renderPlannerSaveState();
+  renderPlannerHarvest();
+  renderPlannerDelivery();
+  refreshPlannerDerived();
+}
+
+function renderPlannerSaveState() {
+  const el = document.getElementById("plannerSaveState");
+  if (_planPending) { el.textContent = "Saving…"; return; }
+  el.textContent = _plan && _plan.updated_at ? `Saved ${Boord.fmtDateTime(_plan.updated_at)}` : "Not saved yet";
+}
+
+// ----- Harvest grid -----
+
+function renderPlannerHarvest() {
+  const v = _plan;
+  const today = v.today;
+  // Day headings carry their date; today's column is marked.
+  document.querySelectorAll("#plannerHarvest thead th[data-day]").forEach((th) => {
+    const d = parseInt(th.dataset.day, 10);
+    const iso = Boord.localDateStr(plannerAddDays(new Date(v.week_start + "T00:00:00"), d));
+    const isToday = iso === today;
+    th.innerHTML = `<div class="text-base">${"MTWTFSS"[d]}</div><div class="text-[10px] font-normal ${isToday ? "text-blue-700 font-semibold" : "text-slate-400"}">${plannerDateLabel(iso)}</div>`;
+    th.classList.toggle("bg-blue-50", isToday);
+  });
+  const rows = document.getElementById("plannerHarvestRows");
+  const kg = (x) => (x == null ? "–" : Boord.fmtNum(x, 0));
+  // Every block of the farm's own is listed; the checkbox in front of its
+  // name says whether it is picked this week. An unticked block keeps its
+  // figures on screen (the office can see what remains there) but is greyed,
+  // its days are hidden and nothing of it reaches the totals.
+  rows.innerHTML = v.blocks.length ? v.blocks.map((b) => {
+    const id = esc(b.block_id);
+    const dis = b.on ? "" : "disabled";
+    const days = [0, 1, 2, 3, 4, 5, 6].map((d) => {
+      const ticked = b.on && (b.days || []).includes(d);
+      const fixed = b.fixed && b.fixed[String(d)] != null;
+      const actual = (b.actual || [])[d] || 0;
+      return `<td class="p-1 text-center align-top ${ticked ? "" : "planner-day-off"}">
+        <input type="checkbox" data-plan-day="${id}:${d}" ${ticked ? "checked" : ""} ${dis} title="Pick this block on this day">
+        <div class="${ticked ? "" : "hidden"}"><input type="number" min="0" step="1" inputmode="numeric" class="${fixed ? "planner-fixed" : ""}" data-plan-daykg="${id}:${d}" title="kg to pick. Type a figure to hold it; clear it to share the rest again"></div>
+        <div class="planner-actual ${actual && !ticked ? "planner-offplan" : ""}" data-plan-actual="${id}:${d}" title="${actual && !ticked ? "Picked on a day this block was not planned for" : ""}">${actual ? `picked ${Boord.fmtNum(actual, 0)}` : "&nbsp;"}</div>
+      </td>`;
+    }).join("");
+    return `<tr class="border-b ${b.on ? "" : "planner-block-off"}" data-plan-row="${id}">
+      <td class="p-2 font-medium whitespace-nowrap">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" class="w-5 h-5" data-plan-on="${id}" ${b.on ? "checked" : ""} title="Harvest this block this week">
+          <span>${esc(b.name)}${b.variety ? `<div class="text-xs text-slate-400 font-normal">${esc(b.variety)}</div>` : ""}</span>
+        </label>
+      </td>
+      <td class="p-2 text-right">${kg(b.estimate_kg)}</td>
+      <td class="p-2 text-right">${kg(b.ytd_kg)}<div class="text-xs text-slate-400" data-plan-cell="ytd_pct:${id}"></div></td>
+      <td class="p-2 text-right">${kg(b.last_week_kg)}<div class="text-xs text-slate-400" data-plan-cell="last_week_pct:${id}"></div></td>
+      <td class="p-2 text-right"><span data-plan-cell="remaining_kg:${id}"></span><div class="text-xs text-slate-400" data-plan-cell="remaining_pct:${id}"></div></td>
+      <td class="p-2 text-right whitespace-nowrap">
+        <input type="number" min="0" step="1" inputmode="numeric" data-plan-avail="${id}" ${dis} title="kg available to pick this week. Empty = all that remains"> kg
+        <input type="number" min="0" max="100" step="1" inputmode="numeric" class="planner-pct" data-plan-availpct="${id}" ${dis} title="as a % of what remains">%
+      </td>
+      ${days}
+      <td class="p-2 text-right font-semibold" data-plan-cell="total_kg:${id}"></td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="14" class="p-3 text-sm text-slate-500">No active blocks of the farm's own in Master Data.</td></tr>`;
+
+  // Listeners. `input` keeps the derived cells moving; `change` saves.
+  rows.querySelectorAll("[data-plan-day]").forEach((cb) => cb.addEventListener("change", () => {
+    const [bid, d] = cb.dataset.planDay.split(":");
+    const b = plannerBlock(bid);
+    const day = parseInt(d, 10);
+    b.days = (b.days || []).filter((x) => x !== day);
+    if (cb.checked) b.days.push(day);
+    delete b.fixed[String(day)];
+    const cell = cb.closest("td");
+    cell.classList.toggle("planner-day-off", !cb.checked);
+    cell.querySelector("div").classList.toggle("hidden", !cb.checked);
+    cell.querySelector("[data-plan-daykg]").classList.remove("planner-fixed");
+    const picked = (b.actual || [])[day] || 0;
+    const actual = cell.querySelector("[data-plan-actual]");
+    actual.classList.toggle("planner-offplan", !!picked && !cb.checked);
+    actual.title = picked && !cb.checked ? "Picked on a day this block was not planned for" : "";
+    refreshPlannerDerived();
+    schedulePlannerSave();
+  }));
+  rows.querySelectorAll("[data-plan-daykg]").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      const [bid, d] = inp.dataset.planDaykg.split(":");
+      const b = plannerBlock(bid);
+      if (inp.value === "") delete b.fixed[d];
+      else b.fixed[d] = Math.round(Math.max(0, parseFloat(inp.value) || 0));
+      inp.classList.toggle("planner-fixed", inp.value !== "");
+      refreshPlannerDerived();
+    });
+    inp.addEventListener("change", schedulePlannerSave);
+  });
+  rows.querySelectorAll("[data-plan-avail]").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      const b = plannerBlock(inp.dataset.planAvail);
+      b.available_kg = inp.value === "" ? null : Math.round(Math.max(0, parseFloat(inp.value) || 0));
+      refreshPlannerDerived();
+    });
+    inp.addEventListener("change", schedulePlannerSave);
+  });
+  rows.querySelectorAll("[data-plan-availpct]").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      const b = plannerBlock(inp.dataset.planAvailpct);
+      const d = plannerDerive(_plan).blocks.find((x) => x.block_id === b.block_id);
+      if (inp.value === "" || d.remaining_kg == null) b.available_kg = null;
+      else b.available_kg = Math.round(Math.max(0, d.remaining_kg) * (parseFloat(inp.value) || 0) / 100);
+      refreshPlannerDerived();
+    });
+    inp.addEventListener("change", schedulePlannerSave);
+  });
+  rows.querySelectorAll("[data-plan-on]").forEach((cb) => cb.addEventListener("change", () => {
+    plannerBlock(cb.dataset.planOn).on = cb.checked;
+    renderPlannerHarvest(); refreshPlannerDerived(); schedulePlannerSave();
+  }));
+}
+
+function plannerBlock(id) {
+  const b = _plan.blocks.find((x) => x.block_id === id);
+  if (!b.fixed) b.fixed = {};
+  if (!b.days) b.days = [];
+  return b;
+}
+
+// ----- Delivery grid -----
+
+function renderPlannerDelivery() {
+  const v = _plan;
+  const head = document.getElementById("plannerDeliveryHead");
+  const rows = document.getElementById("plannerDeliveryRows");
+  if (!v.packhouse.available) {
+    head.innerHTML = "";
+    rows.innerHTML = `<tr><td class="p-3 text-sm text-slate-500">${esc(v.packhouse.reason)}</td></tr>`;
+    document.getElementById("plannerDeliveryFoot").innerHTML = "";
+    return;
+  }
+  // Two header rows: the pack (with the weight of the unit Packhouse counts
+  // it in), then the two figures Packhouse doesn't keep, typed here: how
+  // many of its units make a carton (4 punnets for Pre-pac) and how many
+  // cartons make a pallet.
+  const unitKg = (p) => `${Boord.fmtNum(p.carton_kg, 2)} kg${(p.units_per_carton || 1) > 1 ? ` × ${p.units_per_carton}` : ""}/carton`;
+  head.innerHTML = `<tr class="text-left border-b bg-slate-50">
+      <th class="p-2" rowspan="2">Receiver</th>
+      ${v.packs.map((p) => `<th class="p-2 text-center">${esc(p.name)}<div class="text-[10px] font-normal text-slate-400" data-plan-unitkg="${esc(p.name)}">${unitKg(p)}${p.active ? "" : " · retired"}</div></th>`).join("")}
+      <th class="p-2 text-right" rowspan="2">Cartons</th><th class="p-2 text-right" rowspan="2">Kg</th><th class="p-2 text-right" rowspan="2">Pallets</th>
+    </tr>
+    <tr class="text-left border-b bg-slate-50 text-[11px] font-normal text-slate-500">
+      ${v.packs.map((p) => `<th class="p-1 text-center font-normal whitespace-nowrap"><input type="number" min="1" step="1" class="planner-cartons planner-pct" data-plan-percarton="${esc(p.name)}" value="${p.units_per_carton || 1}" title="Packhouse units (punnets) per carton"> /carton &nbsp; <input type="number" min="0" step="1" class="planner-cartons" data-plan-perpallet="${esc(p.name)}" value="${p.cartons_per_pallet || ""}" placeholder="?" title="Cartons per pallet"> /pallet</th>`).join("")}
+    </tr>`;
+  let lastGroup = null;
+  const body = [];
+  for (const r of v.receivers) {
+    if (r.group !== lastGroup) {
+      lastGroup = r.group;
+      body.push(`<tr><td colspan="${v.packs.length + 4}" class="px-2 py-1 text-xs font-semibold ${PLAN_GROUP_CLASS[r.group]}">${PLAN_GROUP_LABEL[r.group]}</td></tr>`);
+    }
+    const rid = esc(String(r.id));
+    const cells = v.packs.map((p) => {
+      const done = (v.delivered[String(r.id)] || {})[p.name] || {};
+      const planned = (v.plan_deliveries[String(r.id)] || {})[p.name] || "";
+      return `<td class="p-1 text-center align-top">
+        <input type="number" min="0" step="1" inputmode="numeric" class="planner-cartons" data-plan-cartons="${rid}:${esc(p.name)}" value="${planned}" placeholder="cartons" title="Cartons this week">
+        <div class="planner-actual" data-plan-done="${rid}:${esc(p.name)}" data-ytd="${done.ytd || 0}" data-lastweek="${done.last_week || 0}"></div>
+      </td>`;
+    }).join("");
+    body.push(`<tr class="border-b">
+      <td class="p-2 font-medium">${esc(r.name)}${r.market ? `<div class="text-xs text-slate-400 font-normal">${esc(r.market)}</div>` : ""}</td>
+      ${cells}
+      <td class="p-2 text-right" data-plan-cell="rcartons:${rid}"></td>
+      <td class="p-2 text-right" data-plan-cell="rkg:${rid}"></td>
+      <td class="p-2 text-right" data-plan-cell="rpallets:${rid}"></td>
+    </tr>`);
+  }
+  rows.innerHTML = body.length ? body.join("") : `<tr><td colspan="${v.packs.length + 4}" class="p-3 text-sm text-slate-500">No receivers in Boord Packhouse's settings yet.</td></tr>`;
+  document.getElementById("plannerDeliveryFoot").innerHTML = `<tr class="font-semibold bg-slate-50">
+      <td class="p-2">Total</td>
+      ${v.packs.map((p) => `<td class="p-2 text-center" data-plan-cell="pack:${esc(p.name)}"></td>`).join("")}
+      <td class="p-2 text-right" data-plan-cell="delivery_cartons"></td>
+      <td class="p-2 text-right" data-plan-cell="delivery_kg"></td>
+      <td class="p-2 text-right" data-plan-cell="delivery_pallets"></td>
+    </tr>`;
+
+  rows.querySelectorAll("[data-plan-cartons]").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      const [rid, pack] = inp.dataset.planCartons.split(/:(.*)/s);
+      const d = _plan.plan_deliveries[rid] || (_plan.plan_deliveries[rid] = {});
+      const n = parseInt(inp.value, 10);
+      if (inp.value === "" || !n) delete d[pack]; else d[pack] = Math.max(0, n);
+      refreshPlannerDerived();
+    });
+    inp.addEventListener("change", schedulePlannerSave);
+  });
+  const savePacks = () => {
+    clearTimeout(_planPacksTimer);
+    _planPacksTimer = setTimeout(async () => {
+      try {
+        await Boord.api("/api/planner/packs", { method: "PUT",
+          body: _plan.packs.map((p) => ({ pack: p.name, cartons_per_pallet: p.cartons_per_pallet || 0,
+                                          units_per_carton: p.units_per_carton || 1 })) });
+      } catch (e) { Boord.toast(Boord.errorDetail(e, "Pack settings not saved")); }
+    }, 500);
+  };
+  head.querySelectorAll("[data-plan-perpallet]").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      const p = _plan.packs.find((x) => x.name === inp.dataset.planPerpallet);
+      p.cartons_per_pallet = Math.max(0, parseInt(inp.value, 10) || 0);
+      refreshPlannerDerived();
+    });
+    inp.addEventListener("change", savePacks);
+  });
+  head.querySelectorAll("[data-plan-percarton]").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      const p = _plan.packs.find((x) => x.name === inp.dataset.planPercarton);
+      p.units_per_carton = Math.max(1, parseInt(inp.value, 10) || 1);
+      head.querySelector(`[data-plan-unitkg="${CSS.escape(p.name)}"]`).textContent = unitKg(p) + (p.active ? "" : " · retired");
+      refreshPlannerDerived();
+    });
+    inp.addEventListener("change", savePacks);
+  });
+}
+
+// Packhouse's count of a pack (punnets, for Pre-pac) shown as cartons.
+function plannerUnitsToCartons(units, perCarton) {
+  const per = perCarton || 1;
+  return per === 1 ? (units || 0) : Math.round((units || 0) / per);
+}
+
+// ----- Derived figures, written into the cells in place -----
+
+function refreshPlannerDerived() {
+  const v = _plan;
+  const d = plannerDerive(v);
+  v.derived = d;
+  const set = (key, text) => document.querySelectorAll(`[data-plan-cell="${CSS.escape(key)}"]`).forEach((el) => { el.textContent = text; });
+  const kg = (x) => (x == null ? "–" : Boord.fmtNum(x, 0));
+  const pc = (x) => (x == null ? "" : `${Boord.fmtNum(x, 0)}%`);
+  const focused = document.activeElement;
+  for (const b of d.blocks) {
+    const src = v.blocks.find((x) => x.block_id === b.block_id);
+    set(`ytd_pct:${b.block_id}`, pc(b.ytd_pct));
+    set(`last_week_pct:${b.block_id}`, pc(b.last_week_pct));
+    set(`remaining_kg:${b.block_id}`, kg(b.remaining_kg));
+    set(`remaining_pct:${b.block_id}`, b.remaining_pct == null ? "" : `${pc(b.remaining_pct)} left`);
+    set(`total_kg:${b.block_id}`, src.on ? kg(b.total_kg) : "");
+    const row = document.querySelector(`[data-plan-row="${CSS.escape(b.block_id)}"]`);
+    if (!row) continue;
+    if (!src.on) {
+      row.querySelector("[data-plan-avail]").value = "";
+      row.querySelector("[data-plan-availpct]").value = "";
+      continue;
+    }
+    // A derived figure fills an input only while the office isn't typing in
+    // it; a typed day figure (fixed) is left exactly as typed.
+    const avail = row.querySelector("[data-plan-avail]");
+    if (avail !== focused) avail.value = b.available_kg;
+    const availPct = row.querySelector("[data-plan-availpct]");
+    if (availPct !== focused) availPct.value = b.available_pct == null ? "" : Boord.fmtNum(b.available_pct, 0).replace(/\s/g, "");
+    row.querySelectorAll("[data-plan-daykg]").forEach((inp) => {
+      const day = inp.dataset.planDaykg.split(":")[1];
+      const fixed = src.fixed && src.fixed[day] != null;
+      if (inp === focused) return;
+      inp.value = fixed ? src.fixed[day] : (b.per_day[day] != null ? b.per_day[day] : "");
+    });
+    const total = row.querySelector(`[data-plan-cell="total_kg:${CSS.escape(b.block_id)}"]`);
+    // Every day typed by hand can leave the total away from what is
+    // available: say so in amber rather than silently.
+    const drift = b.total_kg !== b.available_kg && Object.keys(src.fixed || {}).length && (src.days || []).every((x) => src.fixed[String(x)] != null);
+    total.classList.toggle("text-amber-700", !!drift);
+    total.title = drift ? `Typed days add up to ${kg(b.total_kg)} against ${kg(b.available_kg)} available` : "";
+  }
+  const on = v.blocks.filter((b) => b.on);
+  const sum = (f) => on.reduce((s, b) => s + (f(b) || 0), 0);
+  const byId = Object.fromEntries(d.blocks.map((b) => [b.block_id, b]));
+  const anyEst = on.some((b) => b.estimate_kg != null);
+  document.getElementById("plannerHarvestFoot").innerHTML = on.length ? `<tr class="font-semibold bg-slate-50">
+      <td class="p-2">Total (${on.length} blocks)</td>
+      <td class="p-2 text-right">${anyEst ? kg(sum((b) => b.estimate_kg)) : "–"}</td>
+      <td class="p-2 text-right">${kg(sum((b) => b.ytd_kg))}</td>
+      <td class="p-2 text-right">${kg(sum((b) => b.last_week_kg))}</td>
+      <td class="p-2 text-right">${anyEst ? kg(sum((b) => byId[b.block_id].remaining_kg)) : "–"}</td>
+      <td class="p-2 text-right">${kg(sum((b) => byId[b.block_id].available_kg))}</td>
+      ${d.day_totals.map((t) => `<td class="p-2 text-center">${t ? kg(t) : ""}</td>`).join("")}
+      <td class="p-2 text-right">${kg(d.harvest_kg)}</td>
+    </tr>` : `<tr class="bg-slate-50"><td class="p-2 text-sm text-slate-500" colspan="14">No block ticked for this week yet.</td></tr>`;
+
+  // Delivery. What Packhouse has loaded, in cartons at the current units per carton.
+  const perCarton = Object.fromEntries((v.packs || []).map((p) => [p.name, p.units_per_carton || 1]));
+  document.querySelectorAll("[data-plan-done]").forEach((el) => {
+    const pack = el.dataset.planDone.split(/:(.*)/s)[1];
+    el.textContent = `YTD ${Boord.fmtNum(plannerUnitsToCartons(+el.dataset.ytd, perCarton[pack]), 0)} · last wk ${Boord.fmtNum(plannerUnitsToCartons(+el.dataset.lastweek, perCarton[pack]), 0)}`;
+  });
+  for (const r of d.receivers) {
+    set(`rcartons:${r.id}`, Boord.fmtNum(r.cartons, 0));
+    set(`rkg:${r.id}`, kg(r.kg));
+    set(`rpallets:${r.id}`, r.pallets ? Boord.fmtNum(r.pallets, 0) : "–");
+  }
+  for (const [name, t] of Object.entries(d.pack_totals)) {
+    set(`pack:${name}`, `${Boord.fmtNum(t.cartons, 0)} cartons${t.pallets ? ` · ${Boord.fmtNum(t.pallets, 0)} pal` : ""}`);
+  }
+  set("delivery_cartons", Boord.fmtNum(d.delivery_cartons, 0));
+  set("delivery_kg", kg(d.delivery_kg));
+  set("delivery_pallets", d.delivery_pallets ? Boord.fmtNum(d.delivery_pallets, 0) : "–");
+
+  // Grand totals.
+  const loss = v.loss || {};
+  const short = d.balance_kg < 0;
+  const lossInput = document.getElementById("plannerLossInput");
+  const lossValue = lossInput && lossInput === focused ? lossInput.value : (loss.override_pct == null ? "" : loss.override_pct);
+  const tile = (label, body, cls = "") => `<div class="rounded-xl p-3 ${cls || "bg-slate-50"}"><div class="text-xs text-slate-500">${label}</div>${body}</div>`;
+  document.getElementById("plannerGrand").innerHTML = [
+    tile("Planned harvest", `<div class="text-xl font-bold">${Boord.fmtNum(d.harvest_kg, 0) + " kg"}</div><div class="text-xs text-slate-400">${on.length} blocks on</div>`),
+    tile("Juice and loss", `<div class="flex items-center gap-1"><input type="number" id="plannerLossInput" min="-100" max="100" step="1" inputmode="numeric" class="border border-slate-300 rounded-lg p-1 w-20 text-right text-lg font-bold" placeholder="${loss.season_pct == null ? "–" : Boord.fmtNum(loss.season_pct, 0)}" value="${lossValue}" title="Type to override the season's share; clear to use it again"> <span class="text-lg font-bold">%</span></div>
+      <div class="text-xs text-slate-400">${loss.override_pct != null ? `typed · season ${loss.season_pct == null ? "–" : pc(loss.season_pct)}` : loss.season_pct != null ? `season so far: ${Boord.fmtNum(loss.harvested_kg, 0)} kg picked, ${Boord.fmtNum(loss.delivered_kg, 0)} kg delivered` : "no season figure yet"}</div>`),
+    tile("Deliverable", `<div class="text-xl font-bold">${Boord.fmtNum(d.deliverable_kg, 0) + " kg"}</div><div class="text-xs text-slate-400">after ${pc(d.loss_pct)} loss</div>`),
+    tile("Planned delivery", `<div class="text-xl font-bold">${Boord.fmtNum(d.delivery_kg, 0) + " kg"}</div><div class="text-xs text-slate-400">${Boord.fmtNum(d.delivery_cartons, 0)} cartons${d.delivery_pallets ? ` · ${Boord.fmtNum(d.delivery_pallets, 0)} pallets` : ""}</div>`),
+    tile(short ? "Short" : "Surplus", `<div class="text-xl font-bold ${short ? "text-red-700" : "text-green-700"}"><i class="fa-solid ${short ? "fa-arrow-down" : "fa-arrow-up"}"></i> ${Boord.fmtNum(Math.abs(d.balance_kg), 0) + " kg"}</div><div class="text-xs ${short ? "text-red-600" : "text-green-600"}">${short ? "picking planned is short of the cartons" : "picking planned covers the cartons"}</div>`,
+      short ? "bg-red-50" : "bg-green-50"),
+  ].join("");
+  const newLoss = document.getElementById("plannerLossInput");
+  newLoss.addEventListener("input", () => {
+    _plan.loss.override_pct = newLoss.value === "" ? null : Math.round(parseFloat(newLoss.value));
+    refreshPlannerDerived();
+  });
+  newLoss.addEventListener("change", schedulePlannerSave);
+  if (lossInput === focused) { newLoss.focus(); }
+}
+
+// ----- Saving -----
+
+function plannerBody() {
+  const v = _plan;
+  return {
+    loss_pct: v.loss.override_pct == null || Number.isNaN(v.loss.override_pct) ? null : v.loss.override_pct,
+    blocks: v.blocks.map((b) => ({ block_id: b.block_id, on: !!b.on, available_kg: b.available_kg,
+                                   days: b.days || [], fixed: b.fixed || {} })),
+    deliveries: v.plan_deliveries,
+  };
+}
+
+function schedulePlannerSave() {
+  _planPending = true;
+  renderPlannerSaveState();
+  clearTimeout(_planSaveTimer);
+  _planSaveTimer = setTimeout(savePlanner, 800);
+}
+
+async function savePlanner() {
+  clearTimeout(_planSaveTimer);
+  if (!_plan || !_planPending) return;
+  const weekStart = _plan.week_start;
+  try {
+    const fresh = await Boord.api(`/api/planner/week/${weekStart}`, { method: "PUT", body: plannerBody() });
+    // The office may have moved on to another week while this was in flight.
+    if (_plan && _plan.week_start === weekStart) { _plan.updated_at = fresh.updated_at; _planPending = false; }
+  } catch (e) {
+    document.getElementById("plannerSaveState").textContent = `Not saved: ${Boord.errorDetail(e, "server error")}`;
+    return;
+  }
+  renderPlannerSaveState();
+}
+
+// Leaving the page (or the week) before the save timer fires: send it now.
+// keepalive lets the request outlive the page.
+function flushPlannerSave() {
+  if (!_plan || !_planPending) return;
+  clearTimeout(_planSaveTimer);
+  _planPending = false;
+  fetch(`${API_BASE}/api/planner/week/${_plan.week_start}`, {
+    method: "PUT", keepalive: true, headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(plannerBody()),
+  }).catch(() => {});
+}
+
+async function exportPlanner(kind) {
+  if (!_plan) return;
+  await savePlanner();
+  try {
+    const blob = await Boord.api(`/api/planner/week/${_plan.week_start}/export.${kind}`, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+    Boord.downloadBlob(blob, `Harvest_Plan_${_plan.season_year}_week_${String(_plan.iso_week).padStart(2, "0")}.${kind}`);
+  } catch (e) {
+    Boord.toast(Boord.errorDetail(e, "Could not make the export"));
   }
 }
 

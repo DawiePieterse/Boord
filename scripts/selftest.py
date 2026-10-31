@@ -787,6 +787,9 @@ ADMIN_ONLY_ROUTES = {
     ("GET", "/api/lots/{lot_id}"),
     ("GET", "/api/payments"),
     ("GET", "/api/payments/export"),
+    ("GET", "/api/planner/week"),
+    ("GET", "/api/planner/week/{week_start}/export.pdf"),
+    ("GET", "/api/planner/week/{week_start}/export.xlsx"),
     ("GET", "/api/reports/block-harvest"),
     ("GET", "/api/reports/daily-harvest"),
     ("GET", "/api/reports/harvest-data"),
@@ -824,6 +827,8 @@ ADMIN_ONLY_ROUTES = {
     ("POST", "/api/workers"),
     ("POST", "/api/workers/import"),
     ("POST", "/api/workers/{worker_id}/photo"),
+    ("PUT", "/api/planner/packs"),
+    ("PUT", "/api/planner/week/{week_start}"),
     ("PUT", "/api/reports/market-notes/{note_uuid}"),
     ("PUT", "/api/reports/market-products"),
     ("PUT", "/api/system-settings"),
@@ -1688,6 +1693,225 @@ def test_the_boot_guard_is_actually_in_the_shared_library():
 
 
 
+# ---------------------------------------------------------------------------
+# Planner arithmetic (backend/planner.py): weeks, seasons, the spread of a
+# block's kg over its picking days, and the short-or-surplus balance. All
+# plain numbers; the database and the sibling apps' files never come into it.
+# ---------------------------------------------------------------------------
+
+def test_planner_weeks_are_iso_mondays_and_the_season_label_holds_past_new_year():
+    import planner  # noqa: E402
+    from datetime import date  # noqa: E402
+
+    assert planner.monday_of(date(2026, 10, 30)) == date(2026, 10, 26)   # a Friday
+    assert planner.monday_of(date(2026, 10, 26)) == date(2026, 10, 26)   # already Monday
+    # A season anchored on 1 October, labelled by the year it starts in: the
+    # first week of January is still the 2026 season.
+    assert planner.season_year_for(date(2027, 1, 3), 10, 1) == 2026
+    assert planner.season_year_for(date(2026, 10, 1), 10, 1) == 2026
+    assert planner.season_year_for(date(2026, 9, 30), 10, 1) == 2025
+    start, end = planner.season_bounds(2026, 10, 1)
+    assert (start, end) == (date(2026, 10, 1), date(2027, 9, 30))
+    weeks = planner.season_weeks(2026, 10, 1)
+    assert weeks[0] == date(2026, 9, 28) and all(w.weekday() == 0 for w in weeks)
+    assert weeks[-1] <= end < weeks[-1] + __import__("datetime").timedelta(days=7)
+    # 29 February in a non-leap year slides to 1 March rather than crashing.
+    assert planner.season_bounds(2026, 2, 29)[0] == date(2026, 3, 1)
+
+
+def test_planner_blocks_sort_naturally():
+    import planner  # noqa: E402
+
+    ids = ["10a", "7", "8b", "8a", "15", "10b"]
+    assert sorted(ids, key=planner.block_sort_key) == ["7", "8a", "8b", "10a", "10b", "15"]
+
+
+def test_planner_spread_rebalances_the_untouched_days():
+    import planner  # noqa: E402
+
+    # Three days, nothing typed: an equal share each.
+    assert planner.spread(300, [0, 1, 2], {}) == {0: 100.0, 1: 100.0, 2: 100.0}
+    # Tuesday typed at 150: Monday and Wednesday share the other 150.
+    assert planner.spread(300, [0, 1, 2], {1: 150}) == {0: 75.0, 1: 150.0, 2: 75.0}
+    # Typed figures beyond what is available leave the others at 0, never negative.
+    assert planner.spread(100, [0, 1], {0: 120}) == {0: 120.0, 1: 0.0}
+    # Every day typed: the total is simply their sum.
+    assert planner.spread(100, [0, 1], {0: 40, 1: 70}) == {0: 40.0, 1: 70.0}
+    # A typed figure for a day no longer ticked is ignored; days outside the week too.
+    assert planner.spread(100, [3, 9], {0: 50}) == {3: 100.0}
+    assert planner.spread(0, [], {}) == {}
+
+
+def test_planner_figures_are_whole_numbers():
+    """Kg, cartons, pallets and percentages all come out whole: the office
+    plans in whole kg, and the screen, the sheet and the PDF agree."""
+    import planner  # noqa: E402
+
+    assert planner.spread(100, [0, 1, 2], {}) == {0: 33, 1: 33, 2: 33}
+    view = _planner_view()
+    view["blocks"][0]["ytd_kg"] = 100.4
+    view["plan_deliveries"] = {"1": {"Pre-pac": 7}}    # 7 x 0.48 = 3.36 kg
+    d = planner.derive(view)
+    b17 = next(b for b in d["blocks"] if b["block_id"] == "17")
+    assert b17["remaining_kg"] == 100 and b17["per_day"] == {"0": 50, "1": 50}
+    toro = next(r for r in d["receivers"] if r["id"] == 1)
+    assert toro["kg"] == 3 and d["delivery_kg"] == 3
+    for value in (d["harvest_kg"], d["deliverable_kg"], d["balance_kg"], d["loss_pct"], *d["day_totals"]):
+        assert float(value).is_integer(), value
+
+
+def test_planner_percentages_and_loss_never_divide_by_nothing():
+    import planner  # noqa: E402
+
+    assert planner.pct(50, 200) == 25 and planner.pct(1, 3) == 33
+    assert planner.pct(50, None) is None and planner.pct(50, 0) is None
+    assert planner.loss_pct(1000, 850) == 15 and planner.loss_pct(1000, 834) == 17
+    assert planner.loss_pct(0, 0) is None
+    # A note loaded for last week's picking can make the share negative early on;
+    # it is reported, not hidden.
+    assert planner.loss_pct(100, 120) == -20.0
+
+
+def _planner_view():
+    return {
+        "blocks": [
+            {"block_id": "17", "estimate_kg": 200.0, "ytd_kg": 100.0, "last_week_kg": 40.0,
+             "on": True, "available_kg": None, "days": [0, 1], "fixed": {}},
+            {"block_id": "7", "estimate_kg": 500.0, "ytd_kg": 100.0, "last_week_kg": 0.0,
+             "on": True, "available_kg": 200.0, "days": [0, 1, 2, 3], "fixed": {"0": 80}},
+            {"block_id": "3", "estimate_kg": 300.0, "ytd_kg": 0.0, "last_week_kg": 0.0,
+             "on": False, "available_kg": None, "days": [0], "fixed": {}},
+            {"block_id": "9", "estimate_kg": None, "ytd_kg": 20.0, "last_week_kg": 20.0,
+             "on": True, "available_kg": 50.0, "days": [4], "fixed": {}},
+        ],
+        "packs": [{"name": "Pre-pac", "carton_kg": 0.48, "cartons_per_pallet": 1000, "units_per_carton": 1},
+                  {"name": "1kg XXL", "carton_kg": 1.1, "cartons_per_pallet": 0}],
+        "receivers": [{"id": 1, "name": "Toro", "group": "eu"}, {"id": 2, "name": "AgriLink", "group": "usa"}],
+        "plan_deliveries": {"1": {"Pre-pac": 500, "1kg XXL": 100}, "2": {"1kg XXL": 50}},
+        "loss": {"season_pct": 15.0, "override_pct": None},
+    }
+
+
+def test_planner_derive_adds_up_the_week():
+    import planner  # noqa: E402
+
+    d = planner.derive(_planner_view())
+    by_id = {b["block_id"]: b for b in d["blocks"]}
+    # Block 17: nothing saved, so available defaults to what remains (200 - 100),
+    # split over Monday and Tuesday.
+    assert by_id["17"]["remaining_kg"] == 100.0 and by_id["17"]["remaining_pct"] == 50.0
+    assert by_id["17"]["available_kg"] == 100.0 and by_id["17"]["per_day"] == {"0": 50.0, "1": 50.0}
+    assert by_id["17"]["ytd_pct"] == 50.0 and by_id["17"]["last_week_pct"] == 20.0
+    # Block 7: 200 available, Monday typed at 80, the other three share 120.
+    assert by_id["7"]["per_day"] == {"0": 80.0, "1": 40.0, "2": 40.0, "3": 40.0}
+    assert by_id["7"]["total_kg"] == 200.0 and by_id["7"]["available_pct"] == 50.0
+    # Block 3 is off: no days, nothing in the totals. Block 9 has no estimate:
+    # no remaining or percentages, but its typed 50 kg still counts.
+    assert by_id["3"]["per_day"] == {} and by_id["3"]["total_kg"] == 0
+    assert by_id["9"]["remaining_kg"] is None and by_id["9"]["ytd_pct"] is None
+    assert by_id["9"]["per_day"] == {"4": 50.0}
+    assert d["harvest_kg"] == 350.0
+    assert d["day_totals"] == [130.0, 90.0, 40.0, 40.0, 50.0, 0.0, 0.0]
+    # Deliveries: cartons x carton kg; pallets only where cartons per pallet is
+    # known, counted whole and rounded up: 500 of a 1000-carton pack is one
+    # pallet on the truck, a receiver with no cartons of it has none.
+    toro = next(r for r in d["receivers"] if r["id"] == 1)
+    assert toro["cartons"] == 600 and toro["kg"] == 350.0
+    assert toro["cells"]["Pre-pac"]["pallets"] == 1 and toro["cells"]["1kg XXL"]["pallets"] is None
+    agrilink = next(r for r in d["receivers"] if r["id"] == 2)
+    assert agrilink["cells"]["Pre-pac"]["pallets"] == 0 and agrilink["pallets"] == 0
+    assert d["delivery_cartons"] == 650 and d["delivery_kg"] == 405.0 and d["delivery_pallets"] == 1
+    assert d["pack_totals"]["1kg XXL"]["cartons"] == 150
+    # 15% loss on 350 kg picked leaves 298 kg (whole kg, 297.5 rounded) to
+    # deliver against 405 kg planned: short.
+    assert d["loss_pct"] == 15 and d["deliverable_kg"] == 298
+    assert d["balance_kg"] == -107
+
+
+def test_planner_pallets_are_whole_and_rounded_up():
+    import planner  # noqa: E402
+
+    view = _planner_view()
+    view["packs"] = [{"name": "Pre-pac", "carton_kg": 0.48, "cartons_per_pallet": 1500, "units_per_carton": 1}]
+    view["plan_deliveries"] = {"1": {"Pre-pac": 20}, "2": {"Pre-pac": 3001}}
+    d = planner.derive(view)
+    by_id = {r["id"]: r for r in d["receivers"]}
+    assert by_id[1]["pallets"] == 1      # 20 cartons: a pallet all the same
+    assert by_id[2]["pallets"] == 3      # 3001: two full and one with a carton on it
+    assert d["pack_totals"]["Pre-pac"]["pallets"] == 4 and d["delivery_pallets"] == 4
+
+
+def test_planner_prepac_cartons_hold_four_punnets():
+    """Packhouse counts Pre-pac in punnets (its carton_kg, 0.48, is the
+    punnet); the office plans in cartons of four. Kg follows the punnets,
+    pallets the cartons, and Packhouse's delivered counts read back as
+    cartons."""
+    import planner  # noqa: E402
+    from routers.planner import default_units_per_carton  # noqa: E402
+
+    view = _planner_view()
+    view["packs"] = [{"name": "Pre-pac", "carton_kg": 0.48, "cartons_per_pallet": 300, "units_per_carton": 4}]
+    view["plan_deliveries"] = {"1": {"Pre-pac": 500}}
+    d = planner.derive(view)
+    toro = next(r for r in d["receivers"] if r["id"] == 1)
+    assert toro["cells"]["Pre-pac"] == {"cartons": 500, "units": 2000, "kg": 960.0, "pallets": 2}
+    assert d["delivery_kg"] == 960.0 and d["delivery_cartons"] == 500
+    assert planner.units_to_cartons(2000, 4) == 500 and planner.units_to_cartons(10, 4) == 2
+    assert planner.units_to_cartons(17, 1) == 17
+    assert default_units_per_carton("Pre-pac") == 4 and default_units_per_carton("Prepac 0.48") == 4
+    assert default_units_per_carton("1kg XXL") == 1
+
+
+def test_planner_typed_loss_overrides_the_season_share():
+    import planner  # noqa: E402
+
+    view = _planner_view()
+    view["loss"] = {"season_pct": 15.0, "override_pct": 0.0}
+    d = planner.derive(view)
+    assert d["loss_pct"] == 0.0 and d["deliverable_kg"] == 350.0 and d["balance_kg"] == -55.0
+    view["loss"] = {"season_pct": None, "override_pct": None}
+    assert planner.derive(view)["loss_pct"] == 0.0
+
+
+def test_planner_tables_are_built_from_the_same_derived_figures():
+    """The sheet and the PDF draw the rows these two functions return, so a
+    block that is off stays out of both, and the totals row is the derived
+    week - not a second sum done in the export."""
+    import planner  # noqa: E402
+    from routers.planner import _delivery_rows, _grand_rows, _harvest_rows  # noqa: E402
+
+    view = _planner_view()
+    for b in view["blocks"]:
+        b.setdefault("name", "Block " + b["block_id"])
+        b.setdefault("actual", [0.0] * 7)
+    view["delivered"] = {"1": {"Pre-pac": {"ytd": 2000, "last_week": 300}}}
+    view["derived"] = planner.derive(view)
+    headers, rows, total = _harvest_rows(view)
+    assert len(headers) == len(total) == 17 and all(len(r) == 17 for r in rows)
+    assert [r[0] for r in rows] == ["Block 17", "Block 7", "Block 9"]
+    assert total[-1] == 350.0 and total[9:16] == [130.0, 90.0, 40.0, 40.0, 50.0, 0.0, 0.0]
+    headers, rows, total = _delivery_rows(view)
+    assert headers[2:5] == ["Pre-pac YTD", "Pre-pac last wk", "Pre-pac this wk"]
+    toro = next(r for r in rows if r[1] == "Toro")
+    assert toro[2:5] == [2000, 300, 500] and toro[-3:] == [600, 350.0, 1]
+    assert total[-3:] == [650, 405.0, 1]
+    grand = dict((label.split(" (")[0], value) for label, value in _grand_rows(view))
+    assert grand["Short kg"] == 107 and grand["Deliverable kg"] == 298
+    # The PDF's compact tables: block, the days and the total, blocks with
+    # nothing planned left out; this week's cartons only; no loss source.
+    headers, rows, total = _harvest_rows(view, compact=True)
+    assert headers == ["Block", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Total kg"]
+    assert [r[0] for r in rows] == ["Block 17", "Block 7", "Block 9"] and total[-1] == 350
+    view["blocks"][0]["days"] = []          # block 17 planned for no day: off the PDF, still on the sheet
+    view["derived"] = planner.derive(view)
+    assert [r[0] for r in _harvest_rows(view, compact=True)[1]] == ["Block 7", "Block 9"]
+    assert [r[0] for r in _harvest_rows(view)[1]] == ["Block 17", "Block 7", "Block 9"]
+    headers, rows, total = _delivery_rows(view, compact=True)
+    assert headers == ["Market", "Receiver", "Pre-pac", "1kg XXL", "Cartons", "Kg", "Pallets"]
+    assert next(r for r in rows if r[1] == "Toro")[2:] == [500, 100, 600, 350, 1] and total[2:] == [500, 150, 650, 405, 1]
+    assert [label for label, _ in _grand_rows(view, compact=True)][1] == "Juice and loss %"
+
+
 def main():
     print("Boord self-test")
     print("=" * 60)
@@ -1760,6 +1984,19 @@ def main():
                test_loopback_carrying_a_tailnet_host_still_gets_in,
                test_the_dev_escape_hatch_is_opt_in_and_off_by_default,
                test_a_request_with_no_peer_is_not_the_admin):
+        check(fn.__name__, fn)
+
+    section("Planner")
+    for fn in (test_planner_weeks_are_iso_mondays_and_the_season_label_holds_past_new_year,
+               test_planner_blocks_sort_naturally,
+               test_planner_spread_rebalances_the_untouched_days,
+               test_planner_figures_are_whole_numbers,
+               test_planner_percentages_and_loss_never_divide_by_nothing,
+               test_planner_derive_adds_up_the_week,
+               test_planner_pallets_are_whole_and_rounded_up,
+               test_planner_prepac_cartons_hold_four_punnets,
+               test_planner_typed_loss_overrides_the_season_share,
+               test_planner_tables_are_built_from_the_same_derived_figures):
         check(fn.__name__, fn)
 
     section("Setup state")
