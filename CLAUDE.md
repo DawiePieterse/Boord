@@ -171,11 +171,22 @@ Merging to `main` changes nothing on the farm. A release is a signed tag, and th
    ```sh
    scripts/ship.sh vX.Y        # signs, verifies and pushes the tag
    ```
+   Or, as one non-interactive command with the same checks: `scripts/deploy.sh vX.Y`. That is what "deploy" runs (see the section below).
    Never move or reuse a released tag. Fix a wrong one with the next version.
 4. **On the farm PC**, in `C:\Boord`, double-click **`update_server.bat`**. It verifies the signature, stops the server with `stop_server.ps1`, installs dependencies, copies and migrates the database, and starts it again. If it stops with an error, nothing has changed. Read the message; never check the tag out by hand.
 5. **If the release changed `install.ps1`** (its notes say "run install.bat once more"), double-click `install.bat` as well. The updater does not rewrite the launcher or the task.
 6. **Check from your Mac:** `curl -s https://bekfontein-server.taile32cb0.ts.net/api/version` should show `"tag":"vX.Y","state":"release"`.
 7. **Close and reopen the Field, Pack House and Admin apps on every tablet and phone (fully, not just backgrounded) so they load the new version. The version shows in each screen's header.**
+
+## When the user says "deploy"
+
+"Deploy" is explicit permission to release this app: sign the tag and push it to GitHub, without asking again. The release key lives only on the owner's Mac, so the signing step runs there and nowhere else.
+
+1. Before anything: `backend/.venv/bin/python3 scripts/selftest.py` must pass (there is no CI). `VERSION` in `frontend/shared/api.js` must already be the version being released, and if any frontend file changed since the last tag the service-worker `CACHE` must have been bumped with it. Fix and commit first if not; `deploy.sh` refuses otherwise.
+2. On the Mac, run `scripts/deploy.sh vX.Y`. It asks nothing except GnuPG's passphrase prompt. It stops at the first of these that fails and changes nothing: tag not shaped like `vX.Y`; tree not clean; not on `main`; `main` not fast-forwardable from origin; `VERSION` not equal to the tag; tag already existing locally or on origin; release key absent. Then it pushes `main` if ahead, signs the tag, verifies the signature is the release key's (and deletes the tag if not), pushes the tag, and prints the farm PC steps.
+3. Report the tag and remind the owner: run the updater on the farm PC (and `install.bat` if the release changed `install.ps1`), then fully close and reopen the app on every phone and tablet.
+
+In a session without the key (Claude Code on the web, any cloud container), do step 1, then hand over the `scripts/deploy.sh vX.Y` command to run on the Mac. Never push an unsigned tag: the updater picks the newest `v*` tag and stops when its signature fails, which blocks this app's updates on the farm PC until a higher signed tag lands. `deploy.sh` is the same file in every Boord repo apart from the configuration block at its top; a fix to it flows to all seven.
 
 ## Conventions
 
