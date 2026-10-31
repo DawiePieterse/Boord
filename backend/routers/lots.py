@@ -337,6 +337,18 @@ def upsert_lot(lot_in: LotIn, session: Session = Depends(get_session)):
         raise HTTPException(400, "transport_crates must be between 1 and total_crates")
     data = lot_in.model_dump()
     data["total_kg"] = round(data.get("total_kg", 0.0), 1)
+    # A dispatch only ever moves a lot forward. A field tablet that lost the
+    # response to its "Send Picking Slip" (or sat in a dead spot all day with
+    # the dispatch queued) replays the same POST hours later - by which time
+    # the truck has been checked in at the pack house. Writing the device's
+    # status=in_transit over a received lot put the load back in the
+    # receiving queue beside the day's real trucks, while it also stayed in
+    # the Received list because received_at was untouched. The replay is
+    # still answered 200 so the device stops retrying; it just can't undo
+    # what the gate has already recorded.
+    if existing and existing.status in (LotStatus.received, LotStatus.processing_complete) \
+            and lot_in.status in (LotStatus.created, LotStatus.in_transit):
+        data["status"] = existing.status
     if data.get("supplier_id") is None:
         # Keep the placeholder lot's supplier if sync.py already set one from
         # the device; otherwise resolve it from the device now.
@@ -349,7 +361,7 @@ def upsert_lot(lot_in: LotIn, session: Session = Depends(get_session)):
     # transition instead. Once a lot is in_transit, leave its weather alone -
     # a retried dispatch shouldn't overwrite the conditions at check-in.
     # Worked out before upsert() below, which updates `existing` in place.
-    dispatching = lot_in.status == LotStatus.in_transit and (
+    dispatching = data["status"] == LotStatus.in_transit and (
         not existing or existing.status != LotStatus.in_transit)
 
     # Only LotIn's fields are written, so server-owned columns it doesn't
@@ -460,6 +472,11 @@ def create_external_lot(lot_in: ExternalLotIn, session: Session = Depends(get_se
     supplier = session.get(Supplier, lot_in.supplier_id)
     if not supplier:
         raise HTTPException(404, "Supplier not found")
+    # The receiving screen checks for blank fields, but a minus sign typed
+    # on a number pad gets past it, and a lot of -5 crates then sits in the
+    # queue and is subtracted from every total and the supplier's bill.
+    if lot_in.total_crates <= 0 or lot_in.total_kg <= 0:
+        raise HTTPException(400, "Crates and kg must both be more than zero")
     timestamp = lot_in.timestamp or datetime.now(timezone.utc)
     slip_number = _external_slip_number(session, lot_in.supplier_id, timestamp)
     lot = Lot(
