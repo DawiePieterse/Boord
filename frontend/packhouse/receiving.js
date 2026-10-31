@@ -260,8 +260,18 @@ function closeModal() {
   selectedLot = null;
 }
 
+// One request per tap. Both confirm buttons go to the server, which on the
+// pack house Wi-Fi can take seconds to answer, and a second tap in that time
+// posted the receipt (or the external delivery) twice. Greyed out until the
+// answer is back, so the second tap has nothing to land on.
+function busy(btn, on) {
+  btn.disabled = on;
+  btn.classList.toggle("opacity-50", on);
+}
+
+let _confirming = false;
 async function confirmReceipt() {
-  if (!selectedLot) return;
+  if (!selectedLot || _confirming) return;
   const actualCrates = parseInt(document.getElementById("actualCrates").value, 10) || 0;
   const condition = Array.from(document.querySelectorAll("#conditionOptions input:checked")).map((cb) => cb.value).join(", ") || "Good";
   const notes = document.getElementById("notes").value;
@@ -269,6 +279,9 @@ async function confirmReceipt() {
   if (!receivedBy) { Boord.toast("Enter who received this lot"); return; }
   Boord.setLastReceivedBy(receivedBy);
 
+  const btn = document.getElementById("confirmReceiveBtn");
+  _confirming = true;
+  busy(btn, true);
   try {
     await Boord.api("/api/receiving", {
       method: "POST",
@@ -283,8 +296,16 @@ async function confirmReceipt() {
       },
     });
   } catch (e) {
-    Boord.toast("Could not confirm - check connection and retry");
+    // A server that answered said something worth reading - "Lot not found"
+    // when the office deleted the slip while this modal was open - and
+    // "check connection" would send the clerk looking at the Wi-Fi instead.
+    Boord.toast(Boord.isNetworkError(e)
+      ? "Could not confirm - check connection and retry"
+      : Boord.errorDetail(e, "The server did not accept this receipt"));
     return;
+  } finally {
+    _confirming = false;
+    busy(btn, false);
   }
 
   Boord.beepSaved();
@@ -313,15 +334,22 @@ function closeExternalLotModal() {
   document.getElementById("externalLotModal").classList.remove("flex");
 }
 
+let _loggingExternal = false;
 async function confirmExternalLot() {
+  if (_loggingExternal) return;
   const supplierId = parseInt(document.getElementById("extSupplierSelect").value, 10);
   const crates = parseInt(document.getElementById("extCrates").value, 10) || 0;
   const kg = parseFloat(document.getElementById("extKg").value) || 0;
   const driver = document.getElementById("extDriver").value.trim();
   const notes = document.getElementById("extNotes").value;
   if (!supplierId) { Boord.toast("Select a supplier"); return; }
-  if (!crates || !kg) { Boord.toast("Enter crates and kg"); return; }
+  // Not just "filled in": a minus sign from the number pad made a lot of -5
+  // crates, which the server now refuses too.
+  if (!(crates > 0) || !(kg > 0)) { Boord.toast("Enter crates and kg, both more than zero"); return; }
 
+  const btn = document.getElementById("confirmExternalLotBtn");
+  _loggingExternal = true;
+  busy(btn, true);
   try {
     await Boord.api("/api/lots/external", {
       method: "POST",
@@ -332,7 +360,12 @@ async function confirmExternalLot() {
     closeExternalLotModal();
     await refresh();
   } catch (e) {
-    Boord.toast("Could not log delivery - check connection and retry");
+    Boord.toast(Boord.isNetworkError(e)
+      ? "Could not log delivery - check connection and retry"
+      : Boord.errorDetail(e, "The server did not accept this delivery"));
+  } finally {
+    _loggingExternal = false;
+    busy(btn, false);
   }
 }
 

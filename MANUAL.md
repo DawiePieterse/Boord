@@ -1404,7 +1404,14 @@ next.
 > Splitting requires an active connection (the server needs to be the one
 > deciding which crates go on which slip). If offline, the app shows a
 > hint and asks you to either reconnect or just send everything on this
-> load instead of splitting.
+> load instead of splitting. Every crate on the slip also has to have
+> synced first: the app pushes anything pending when you tap Send, and if
+> a crate still hasn't reached the server it asks you to wait for the pill
+> to show synced (or send everything), so a crate saved seconds ago can't
+> end up on the load that just left.
+
+The Send button is greyed out while a slip is being sent, so a second tap
+can't dispatch the same slip twice.
 
 The pack house will see both resulting loads flagged as a **split load**
 with a link back to the other part, so receiving staff know part of this
@@ -1517,6 +1524,11 @@ Tapping a card opens the **Receive** modal, with fields in this order:
 Confirming moves the load's status to **received** and records the exact
 receiving time - this is what feeds the admin Dashboard/Reports' "Received"
 figures.
+
+A load is only ever received once. If the Wi-Fi drops the answer and you
+tap **Confirm Receipt** again (or the field tablet re-sends its picking
+slip hours later), the receipt already recorded stands: no second
+receiving row, and the load does not reappear in the queue.
 
 ---
 
@@ -1681,7 +1693,10 @@ Calculates and exports wages for a filtered period.
 - **Calculate Wages** builds the table below, **grouped by farm/supplier**
   (own farm first, then alphabetically), each group showing a summary row
   (worker count, total kg, total wages) followed by that group's workers
-  (name, kg, rate, amount due)
+  (name, kg, rate, amount due). Re-running it for the same period replaces
+  the earlier figures, and a worker who no longer has any crates in the
+  period (their only crate was deleted or moved to someone else) is taken
+  off the sheet rather than left at the old amount
 - **Export Wage Sheet** downloads the same grouped breakdown as an `.xlsx`
   file
 
@@ -2069,7 +2084,9 @@ and, when set, is used in preference to the GPS-based forecast.
 
 ### Harvest rate
 
-The per-kg wage rate used by [Payments](#9-admin---payments).
+The per-kg wage rate used by [Payments](#9-admin---payments). It must be
+more than zero - a blank or zero rate is refused, because Calculate Wages
+would otherwise produce a whole wage sheet at R0.00 that looks finished.
 
 ### Header weather
 

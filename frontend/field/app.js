@@ -461,7 +461,28 @@ async function splitAndAdopt(slip, keepCount) {
   return result;
 }
 
+// Send is one tap, once. A partial load waits on the server (the split), and
+// a second tap on Send while that is in flight started a second dispatch of
+// the same slip: both posted the lot, the slip was split twice, and
+// "Dispatched today" listed the load twice. The button is greyed out for the
+// duration so the second tap has nothing to land on.
+let _sendingSlip = false;
 async function sendPickingSlip() {
+  if (_sendingSlip) return;
+  _sendingSlip = true;
+  const btn = document.getElementById("confirmSlipBtn");
+  btn.disabled = true;
+  btn.classList.add("opacity-50");
+  try {
+    await _sendPickingSlip();
+  } finally {
+    _sendingSlip = false;
+    btn.disabled = false;
+    btn.classList.remove("opacity-50");
+  }
+}
+
+async function _sendPickingSlip() {
   const driver = document.getElementById("driverInput").value.trim();
   if (!driver) { Boord.toast("Enter the driver's name"); return; }
 
@@ -479,6 +500,19 @@ async function sendPickingSlip() {
     if (!navigator.onLine || Boord.isOffline()) {
       updateOfflineSplitHint();
       Boord.toast("Reconnect to send a partial load, or dispatch everything now.");
+      return;
+    }
+    // The server splits the crates IT holds, so every crate on this slip has
+    // to be there first. A crate saved in the last few seconds is still only
+    // on this device (the loop ticks every 10 s): the server would hold back
+    // its newest crates without knowing about that one, and the crate would
+    // then sync onto the OLD slip - a lot already on a truck, now carrying
+    // one more crate than its picking slip says. So push what is pending,
+    // and refuse the split while anything on the slip is still unsynced.
+    await syncLoop();
+    crates = await IDB.getBySlip(slip);
+    if (crates.some((c) => !c.synced)) {
+      Boord.toast("Some crates on this slip haven't reached the server yet - wait for the pill to show synced and try again, or send everything now");
       return;
     }
     try {

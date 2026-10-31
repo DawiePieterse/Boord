@@ -112,6 +112,19 @@ def calculate_payments(period_start: date, period_end: date, supplier_id: Option
         payment.amount_due = round(data["amount"], 2)
         session.add(payment)
         results.append(payment)
+    # A worker who had a row last time and no crates this time. The admin's
+    # crate correction (routers/harvest_records.py) tells the office to
+    # re-run Calculate Wages, and re-running must then take back what the
+    # correction took away: when a worker's only crate was deleted or moved
+    # onto another worker, the old row - the old amount - otherwise stayed
+    # on the wage sheet and in the export as if it were still owed. Only
+    # workers this run looked at: with a supplier filter on, the other
+    # suppliers' rows for the same period are not this run's to remove.
+    worker_ids = _worker_ids_for_supplier(session, supplier_id)
+    for worker_id, payment in existing_by_worker.items():
+        if worker_id in totals or (worker_ids is not None and worker_id not in worker_ids):
+            continue
+        session.delete(payment)
     session.commit()
     for p in results:
         session.refresh(p)

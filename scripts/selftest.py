@@ -1185,6 +1185,152 @@ def test_a_slip_sends_fewer_crates_than_were_picked_and_shows_its_blocks():
 
 
 # ---------------------------------------------------------------------------
+# Receiving and wages
+#
+# The two places a retry or a re-run is routine and used to change the
+# answer: the gate confirming a receipt again after the Wi-Fi ate the first
+# reply, and the office re-running Calculate Wages after correcting a crate.
+# Throwaway databases, like the checks above.
+# ---------------------------------------------------------------------------
+def _farm(tmp):
+    """A migrated throwaway database with one worker, one block and the
+    pack house's own supplier. Returns (engine, own supplier id)."""
+    eng = create_engine(f"sqlite:///{os.path.join(tmp, 't.db')}")
+    run_migrations(eng, snapshot=False)
+    with Session(eng) as s:
+        own = Supplier(name="Own fruit", is_own_farm=True)
+        s.add_all([Worker(id="001"), Block(id="1"), own])
+        s.commit()
+        s.refresh(own)
+        return eng, own.id
+
+
+def test_a_replayed_dispatch_cannot_undo_receiving():
+    from datetime import timedelta, timezone  # noqa: E402
+    from models import Lot, LotStatus, ReceivingRecord  # noqa: E402
+    from routers.lots import ExternalLotIn, LotIn, create_external_lot, upsert_lot  # noqa: E402
+    from routers.receiving import ReceivingRecordIn, confirm_receipt  # noqa: E402
+    from routers.sync import HarvestSyncBatch, sync_harvest  # noqa: E402
+
+    tmp = tempfile.mkdtemp()
+    try:
+        eng, own_id = _farm(tmp)
+        now = datetime.now(timezone.utc)
+        with Session(eng) as s:
+            sync_harvest(HarvestSyncBatch(records=[
+                {"uuid": f"c{i}", "timestamp": now, "worker_id": "001", "block_id": "1",
+                 "weight_kg": 20.0, "device_id": "dev1", "slip_number": "S1"} for i in (1, 2)]), s)
+
+            def dispatch():
+                return upsert_lot(LotIn(slip_number="S1", timestamp=now, device_id="dev1", total_crates=2,
+                                        total_kg=40, status="in_transit"), s)
+
+            lot = dispatch()
+            assert lot.status == LotStatus.in_transit
+
+            # The gate confirms, the reply is lost, the clerk confirms again
+            # with different numbers: the first receipt is the one that stands.
+            first = confirm_receipt(ReceivingRecordIn(lot_id=lot.id, timestamp=now, expected_crates=2,
+                                                      actual_crates=2, received_by="Sipho"), s)
+            again = confirm_receipt(ReceivingRecordIn(lot_id=lot.id, timestamp=now + timedelta(minutes=5),
+                                                      expected_crates=2, actual_crates=1, received_by="Sipho"), s)
+            assert (again.id, again.actual_crates) == (first.id, 2), "a second confirmation was recorded"
+            assert len(s.exec(select(ReceivingRecord)).all()) == 1, "a lot was received twice"
+            received_at = s.get(Lot, lot.id).received_at
+            assert received_at is not None
+
+            # The tablet replays its queued dispatch after the truck was
+            # checked in. Answered, but the lot stays received.
+            replayed = dispatch()
+            assert replayed.status == LotStatus.received, "a replayed dispatch put a received lot back in transit"
+            assert s.get(Lot, lot.id).received_at == received_at, "a replayed dispatch moved received_at"
+
+            # An external delivery needs real numbers, not a minus sign.
+            for bad in ({"total_crates": 0, "total_kg": 10.0}, {"total_crates": 5, "total_kg": -1.0}):
+                try:
+                    create_external_lot(ExternalLotIn(supplier_id=own_id, **bad), s)
+                    raise AssertionError(f"an external delivery of {bad} was accepted")
+                except HTTPException as e:
+                    assert e.status_code == 400
+            assert create_external_lot(ExternalLotIn(supplier_id=own_id, total_crates=5, total_kg=100.0), s).id
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_rerunning_wages_takes_back_what_a_correction_took_away():
+    from datetime import timezone  # noqa: E402
+    from models import Payment, RateSetting  # noqa: E402
+    from routers.harvest_records import HarvestRecordEdit, edit_harvest_record  # noqa: E402
+    from routers.payments import calculate_payments  # noqa: E402
+    from routers.sync import HarvestSyncBatch, sync_harvest  # noqa: E402
+    from timeutil import to_local  # noqa: E402
+
+    tmp = tempfile.mkdtemp()
+    try:
+        eng, own_id = _farm(tmp)
+        now = datetime.now(timezone.utc)
+        day = to_local(now).date()
+        with Session(eng) as s:
+            other = Supplier(name="Neighbour")
+            s.add(other)
+            s.commit()
+            s.refresh(other)
+            s.add_all([Worker(id="002", supplier_id=own_id), Worker(id="003", supplier_id=other.id),
+                       RateSetting(effective_date=day, default_rate_per_kg=3.0)])
+            s.get(Worker, "001").supplier_id = own_id
+            s.commit()
+            sync_harvest(HarvestSyncBatch(records=[
+                {"uuid": "a", "timestamp": now, "worker_id": "001", "block_id": "1", "weight_kg": 20.0,
+                 "device_id": "dev1", "slip_number": "S1"},
+                {"uuid": "c", "timestamp": now, "worker_id": "003", "block_id": "1", "weight_kg": 10.0,
+                 "device_id": "dev2", "slip_number": "S2"}]), s)
+
+            def sheet(supplier_id=None):
+                return {p.worker_id: p.amount_due for p in calculate_payments(day, day, supplier_id, s)}
+
+            def stored():
+                return {p.worker_id: p.amount_due for p in s.exec(select(Payment)).all()}
+
+            assert sheet() == {"001": 60.0, "003": 30.0}
+            # The office moves 001's only crate onto 002 and, as the Dashboard
+            # tells it to, re-runs Calculate Wages - for its own farm only.
+            edit_harvest_record("a", HarvestRecordEdit(worker_id="002"), s)
+            assert sheet(own_id) == {"002": 60.0}
+            assert stored() == {"002": 60.0, "003": 30.0}, (
+                "the old worker's row stayed on the wage sheet, or the other supplier's was taken off")
+            assert sheet() == {"002": 60.0, "003": 30.0}
+            assert stored() == {"002": 60.0, "003": 30.0}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_a_zero_wage_rate_is_refused():
+    from models import RateSetting  # noqa: E402
+    from routers.master_data import RateSettingIn, create_rate_setting  # noqa: E402
+
+    tmp = tempfile.mkdtemp()
+    try:
+        eng, _ = _farm(tmp)
+        today = datetime.now().date()
+        with Session(eng) as s:
+            for bad in (dict(default_rate_per_kg=0), dict(default_rate_per_kg=-2.5),
+                        dict(rate_type="per_crate_tier", tier_rates_json="{}"),
+                        dict(rate_type="per_crate_tier", tier_rates_json="not json"),
+                        dict(rate_type="per_crate_tier", tier_rates_json='{"1": 0, "2": 3.5}')):
+                try:
+                    create_rate_setting(RateSettingIn(effective_date=today, **bad), s)
+                    raise AssertionError(f"a wage rate of {bad} was saved")
+                except HTTPException as e:
+                    assert e.status_code == 400
+            create_rate_setting(RateSettingIn(effective_date=today, default_rate_per_kg=3.5), s)
+            create_rate_setting(RateSettingIn(effective_date=today, rate_type="per_crate_tier",
+                                              tier_rates_json='{"1": 2.5, "1.5": 3.5}'), s)
+            assert len(s.exec(select(RateSetting)).all()) == 2, "a good rate was refused"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
 # Markets & Transport
 #
 # What a market paid is money the farm reports on: the sums from a typed-in
@@ -1328,6 +1474,73 @@ def test_a_boere_trust_account_sale_is_read_and_added_up():
         raise AssertionError("an account sale that doesn't add up was read")
     except ValueError:
         pass
+
+
+def test_one_bad_email_does_not_stop_the_inbox():
+    """One email the handler cannot cope with (a zip Python can't open, a
+    database error) must not end the pass: everything behind it in the inbox
+    still gets read and labelled, the bad one is left unlabelled to be tried
+    again, and the Reports tab is told which message it was. A fake Gmail
+    with two messages; nothing here touches the network or the live
+    database."""
+    import market_mail  # noqa: E402
+    from email.message import EmailMessage  # noqa: E402
+
+    def raw(subject):
+        m = EmailMessage()
+        m["From"] = "sales@dapper.co.za"
+        m["Subject"] = subject
+        m.set_content("invoice attached")
+        return m.as_bytes()
+
+    class FakeImap:
+        labelled = []
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def login(self, *args):
+            pass
+
+        def select(self, *args):
+            pass
+
+        def logout(self):
+            pass
+
+        def uid(self, cmd, *args):
+            if cmd == "SEARCH":
+                return "OK", [b"1 2"]
+            if cmd == "FETCH":
+                return "OK", [(b"", raw("boom" if args[0] == b"1" else "fine"))]
+            FakeImap.labelled.append(args[0])  # STORE
+            return "OK", []
+
+    def handle(msg, cfg, session):
+        if msg["Subject"] == "boom":
+            raise RuntimeError("That compression method is not supported")
+        return ["Skipped \"fine\" from sales@dapper.co.za: no PDF attached"]
+
+    tmp = tempfile.mkdtemp()
+    saved = (market_mail.imaplib.IMAP4_SSL, market_mail._handle_message, market_mail.read_config,
+             market_mail.MAIL_DIR, market_mail.STATUS_PATH)
+    try:
+        market_mail.imaplib.IMAP4_SSL = FakeImap
+        market_mail._handle_message = handle
+        market_mail.read_config = lambda: {"address": "farm@example.com", "app_password": "x",
+                                           "senders": ["dapper.co.za"]}
+        market_mail.MAIL_DIR = tmp
+        market_mail.STATUS_PATH = os.path.join(tmp, "status.json")
+        status = market_mail.fetch_once()
+        assert FakeImap.labelled == [b"2"], f"wrong messages labelled done: {FakeImap.labelled}"
+        assert status["last_error"] == "", f"one bad email failed the whole pass: {status['last_error']}"
+        assert any('Failed "boom"' in line and "RuntimeError" in line for line in status["log"]), status["log"]
+        assert any('Skipped "fine"' in line for line in status["log"]), "the message behind the bad one was not read"
+        assert market_mail.read_status()["log"] == status["log"], "the status file was not written"
+    finally:
+        (market_mail.imaplib.IMAP4_SSL, market_mail._handle_message, market_mail.read_config,
+         market_mail.MAIL_DIR, market_mail.STATUS_PATH) = saved
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_onderbergs_juice_advice_is_one_invoice_per_load():
@@ -1509,11 +1722,18 @@ def main():
                test_a_slip_sends_fewer_crates_than_were_picked_and_shows_its_blocks):
         check(fn.__name__, fn)
 
+    section("Receiving and wages")
+    for fn in (test_a_replayed_dispatch_cannot_undo_receiving,
+               test_rerunning_wages_takes_back_what_a_correction_took_away,
+               test_a_zero_wage_rate_is_refused):
+        check(fn.__name__, fn)
+
     section("Markets & Transport")
     for fn in (test_a_market_statement_sums_to_what_the_market_paid,
                test_an_emailed_market_invoice_is_read_checked_and_added_up,
                test_onderbergs_juice_advice_is_one_invoice_per_load,
-               test_a_boere_trust_account_sale_is_read_and_added_up):
+               test_a_boere_trust_account_sale_is_read_and_added_up,
+               test_one_bad_email_does_not_stop_the_inbox):
         check(fn.__name__, fn)
 
     section("Backups")

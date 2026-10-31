@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shutil
@@ -282,6 +283,24 @@ def current_rate_setting(session: Session = Depends(get_session)):
 @router.post("/rate-settings")
 def create_rate_setting(setting_in: RateSettingIn, session: Session = Depends(get_session),
                          _admin=Depends(require_admin_client)):
+    # payments.calculate_payments refuses to run with NO rate row, because a
+    # wage sheet at R0.00 looks like a finished wage run. A rate row holding
+    # zero - a blank Settings field saved, which the form turned into 0 -
+    # slipped past that and produced exactly those zero payslips, so the
+    # refusal has to happen here too. Tier rates are checked the same way:
+    # json.loads() on a typo would otherwise 500 inside every wage run.
+    if setting_in.rate_type == RateType.per_kg:
+        if not setting_in.default_rate_per_kg > 0:
+            raise HTTPException(400, "The rate per kg must be more than zero")
+    else:
+        try:
+            tiers = json.loads(setting_in.tier_rates_json)
+            ok = isinstance(tiers, dict) and tiers and all(
+                float(k) >= 0 and isinstance(v, (int, float)) and v > 0 for k, v in tiers.items())
+        except (ValueError, TypeError):
+            ok = False
+        if not ok:
+            raise HTTPException(400, "Tier rates must be a list of crate weights with a rate above zero for each")
     setting = RateSetting(**setting_in.model_dump())
     session.add(setting)
     session.commit()
