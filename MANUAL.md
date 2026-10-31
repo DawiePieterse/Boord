@@ -1995,14 +1995,15 @@ starts with every block unticked: tick the ones picked this week. Columns:
 ### Delivery this week
 
 The receivers from Packhouse's Settings down the side, grouped USA, EU and
-Local the way Packhouse groups them; its packs across the top with the
-weight Packhouse gives each. In each cell, type the **cartons** that
-receiver gets of that pack this week. Under it, **YTD** and **last wk** are
-the cartons on delivery notes already loaded. The row's **Cartons**, **Kg**
-and **Pallets** follow.
+Local the way Packhouse groups them, each with its **Cartons**, **Kg** and
+**Pallets** for the week beside its name; then Packhouse's packs across,
+Pre-pac first and the rest by carton size (1kg, 2kg ...), with the weight
+Packhouse gives each. In each pack cell, type the **cartons** that receiver
+gets of that pack this week. Under it, **YTD** and **last wk** are the
+cartons on delivery notes already loaded.
 
 The second header row holds two figures per pack that Packhouse does not
-keep, so the Planner does:
+keep, so the Planner does, one under the other:
 
 - **/carton** - how many of Packhouse's units make a carton. Packhouse
   counts Pre-pac in punnets (its 0,48 kg is the punnet), and four punnets
@@ -2036,10 +2037,11 @@ retired in Packhouse still shows while a note this season used it.
 
 **Excel** downloads the whole page for the week - the harvest grid (blocks
 that are on, with estimate, YTD, last week, remaining and available), the
-delivery grid with YTD, last week and this week per pack, and the grand
-totals. **PDF** is the sheet to pin up: each block with something planned
-and its kg per day, each receiver's cartons per pack for the week with kg
-and pallets, and the grand totals. Both are named
+delivery grid with each receiver's cartons, kg and pallets beside its name
+and then YTD, last week and this week per pack, and the grand totals.
+**PDF** is the sheet to pin up: each block with something planned and its
+kg per day, each receiver's cartons, kg and pallets for the week and then
+its cartons per pack, and the grand totals. Both are named
 `Harvest_Plan_<season>_week_<n>`, and a copy is kept in `data\reports\`
 with the other reports.
 

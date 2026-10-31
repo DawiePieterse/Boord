@@ -179,6 +179,7 @@ def _packhouse(season_start: date, week_start: date) -> dict:
     for name, kg in used_packs.items():
         if name and name not in known:
             out_packs.append({"name": name, "carton_kg": kg, "active": False})
+    out_packs.sort(key=lambda p: planner.pack_sort_key(p["name"]))
     return {"available": True, "receivers": out_receivers, "packs": out_packs, "delivered": delivered,
             "delivered_kg": round(delivered_kg, 1)}
 
@@ -419,19 +420,21 @@ def _harvest_rows(view: dict, compact: bool = False) -> tuple:
 
 def _delivery_rows(view: dict, compact: bool = False) -> tuple:
     """The delivery section. The sheet has YTD and last week beside this
-    week's cartons for each pack; the PDF (`compact`) has this week's only."""
+    week's cartons for each pack; the PDF (`compact`) has this week's only.
+    The receiver's Cartons, Kg and Pallets come right after its name, before
+    the packs, as on the screen: with many packs the row runs wide and the
+    totals would otherwise sit far from the receiver they belong to."""
     d = view["derived"]
     packs = view["packs"]
-    headers = ["Market", "Receiver"]
+    headers = ["Market", "Receiver", "Cartons", "Kg", "Pallets"]
     for p in packs:
         headers += ([p["name"]] if compact
                     else [f"{p['name']} YTD", f"{p['name']} last wk", f"{p['name']} this wk"])
-    headers += ["Cartons", "Kg", "Pallets"]
     rows = []
     derived = {str(r["id"]): r for r in d["receivers"]}
     for r in view["receivers"]:
         x = derived[str(r["id"])]
-        row = [GROUP_LABEL[r["group"]], r["name"]]
+        row = [GROUP_LABEL[r["group"]], r["name"], x["cartons"], _num(x["kg"]), x["pallets"]]
         for p in packs:
             if not compact:
                 done = (view["delivered"].get(str(r["id"])) or {}).get(p["name"]) or {}
@@ -439,9 +442,8 @@ def _delivery_rows(view: dict, compact: bool = False) -> tuple:
                 row += [planner.units_to_cartons(done.get("ytd", 0), upc),
                         planner.units_to_cartons(done.get("last_week", 0), upc)]
             row.append(x["cells"][p["name"]]["cartons"])
-        row += [x["cartons"], _num(x["kg"]), x["pallets"]]
         rows.append(row)
-    total = ["Total", ""]
+    total = ["Total", "", d["delivery_cartons"], _num(d["delivery_kg"]), d["delivery_pallets"]]
     for p in packs:
         if not compact:
             cells = [(view["delivered"].get(str(r["id"])) or {}).get(p["name"]) or {} for r in view["receivers"]]
@@ -449,7 +451,6 @@ def _delivery_rows(view: dict, compact: bool = False) -> tuple:
             total += [planner.units_to_cartons(sum(c.get("ytd", 0) for c in cells), upc),
                       planner.units_to_cartons(sum(c.get("last_week", 0) for c in cells), upc)]
         total.append(d["pack_totals"][p["name"]]["cartons"])
-    total += [d["delivery_cartons"], _num(d["delivery_kg"]), d["delivery_pallets"]]
     return headers, rows, total
 
 
