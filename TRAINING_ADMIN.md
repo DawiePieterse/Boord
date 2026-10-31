@@ -106,6 +106,17 @@ banner says so — re-run **Calculate Wages** in Payments for that period
 afterward, since a correction doesn't rewrite a wage sheet that's
 already been run.
 
+### Correcting a received slip
+
+The same window shows the slip's own details under its title — supplier,
+team, driver, dispatched and received times, notes, and the gate's
+receipt. **Edit slip** (top right) changes any of them in one form. Pick
+a **Block** there to move every crate on the slip to it — the fix for a
+whole load written up against the wrong block. Crates picked and kg are
+added up from the crates, so those are locked unless the slip is an
+external delivery with no crates. A field tablet replaying its old
+picking slip can't undo what you corrected.
+
 ---
 
 ## Season analysis — in the Owner app, not here

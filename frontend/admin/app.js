@@ -213,6 +213,7 @@ function bindDashboard() {
   document.getElementById("dashSupplierFilter").addEventListener("change", refreshDashboard);
 
   document.getElementById("closeLotCratesBtn").addEventListener("click", closeLotCratesModal);
+  document.getElementById("editSlipBtn").addEventListener("click", editSlip);
 }
 
 async function refreshDashboard() {
@@ -437,6 +438,7 @@ function renderLotCratesModal() {
   document.getElementById("lotCratesTitle").textContent = `Lot ${lot.slip_number}`;
   document.getElementById("lotCratesMeta").textContent =
     `${blocksLabelFor([...new Set(crates.map((c) => c.block_id).filter(Boolean))].sort())}${_crateText(lot)} / ${Boord.fmtKg(lot.total_kg)} - received ${Boord.fmtDateTime(lot.received_at)}`;
+  renderLotSlipDetails();
 
   document.getElementById("lotCratesRows").innerHTML = crates.map((c) => {
     const net = Boord.fmtNum(c.weight_kg - (c.deduction_kg || 0));
@@ -469,6 +471,183 @@ function renderLotCratesModal() {
       const crate = _lotCratesContext.crates.find((c) => c.uuid === btn.dataset.deleteCrate);
       if (crate) deleteCrate(crate);
     });
+  });
+}
+
+// The slip's own fields and its receipt, under the title: what Edit slip
+// changes. A field that is blank on the slip is still listed, so the office
+// can see it is blank rather than wonder whether the screen dropped it.
+function renderLotSlipDetails() {
+  const { lot, receiving } = _lotCratesContext;
+  const supplier = (window._suppliersCache || []).find((s) => s.id === lot.supplier_id);
+  const team = (window._teamsCache || []).find((x) => x.id === lot.team_id);
+  const edited = lot.edited_at
+    ? `<div class="col-span-full text-[11px] text-amber-700">slip edited by ${esc(lot.edited_by || "admin")}, ${Boord.fmtDateTime(lot.edited_at)}</div>`
+    : "";
+  const item = (label, value) =>
+    `<div><span class="text-slate-400">${label}</span> ${esc(value === null || value === undefined || value === "" ? "-" : String(value))}</div>`;
+  const receipt = receiving ? [
+    item("Expected", receiving.expected_crates),
+    item("Received", `${receiving.actual_crates}${receiving.discrepancy ? ` (${receiving.discrepancy > 0 ? "+" : ""}${receiving.discrepancy})` : ""}`),
+    item("Condition", receiving.condition),
+    item("Waste", Boord.fmtKg(receiving.waste_kg || 0)),
+    item("Received by", receiving.received_by),
+    item("Receiving notes", receiving.notes),
+  ].join("") : `<div class="col-span-full text-slate-400">No receipt recorded</div>`;
+  document.getElementById("lotSlipDetails").innerHTML = [
+    item("Supplier", supplier ? supplier.name : lot.supplier_id),
+    item("Team", team ? team.name : lot.team_id),
+    item("Driver", lot.driver),
+    item("Dispatched", Boord.fmtDateTime(lot.timestamp)),
+    item("Received", Boord.fmtDateTime(lot.received_at)),
+    item("Slip notes", lot.notes),
+    receipt,
+    edited,
+  ].join("");
+}
+
+// "YYYY-MM-DDTHH:MM" in the browser's local time, for a datetime-local
+// input; the server's naive-UTC stamp comes in through parseServerDate.
+function _toLocalInput(value) {
+  const d = Boord.parseServerDate(value);
+  if (!d) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// The input's local time back to an ISO instant for the server; null when
+// the field was cleared, so a patch leaves the stored time alone.
+function _fromLocalInput(s) {
+  const d = s ? new Date(s) : null;
+  return d && !isNaN(d.getTime()) ? d.toISOString() : null;
+}
+
+// Edit the slip itself - the fields a paper picking note and the gate's
+// receipt carry - including its block, which is really every crate's block
+// (PATCH /api/lots/{id}; see LotEdit in routers/lots.py). Crates, weights
+// and workers stay per crate, in editCrate.
+function editSlip() {
+  if (!_lotCratesContext) return;
+  const { lot, crates, receiving } = _lotCratesContext;
+  // From the crates as they are now, not the `blocks` the open fetched: a
+  // crate edited since then (editCrate) has moved in the context's crates only.
+  const blocks = [...new Set(crates.map((c) => c.block_id).filter(Boolean))].sort();
+  const hasCrates = crates.length > 0;
+  const fields = [];
+  const initial = {
+    ...lot,
+    timestamp: _toLocalInput(lot.timestamp),
+    received_at: _toLocalInput(lot.received_at),
+    transport_crates: lot.transport_crates ?? "",
+    team_id: lot.team_id || "",
+    expected_crates: receiving ? receiving.expected_crates : "",
+    actual_crates: receiving ? receiving.actual_crates : "",
+    condition: receiving ? receiving.condition : "",
+    waste_kg: receiving ? receiving.waste_kg : "",
+    received_by: receiving ? receiving.received_by : "",
+    receiving_notes: receiving ? receiving.notes : "",
+  };
+
+  if (hasCrates) {
+    // The slip's block is whichever block its crates were captured against.
+    // Picking one here moves every crate; a slip across two blocks starts on
+    // "(as captured)" so that Save with nothing chosen changes no crate.
+    const current = blocks.length === 1 ? blocks[0] : "";
+    const blockOptions = (window._blocksCache || [])
+      .filter((b) => b.active || blocks.includes(b.id))
+      .map((b) => ({ value: b.id, label: `${b.name || b.id}${b.active ? "" : " - inactive"}` }));
+    if (!current || !blockOptions.some((o) => o.value === current)) {
+      blockOptions.unshift({ value: current, label: blocks.length
+        ? `${blocks.join(", ")} (as captured${blocks.length > 1 ? ", mixed" : ""})` : "(no block recorded)" });
+    }
+    initial.block_id = current;
+    fields.push({ key: "block_id", label: "Block (every crate on this slip)", type: "select", options: blockOptions });
+  }
+
+  const supplierOptions = (window._suppliersCache || [])
+    .filter((s) => s.active || s.id === lot.supplier_id)
+    .map((s) => ({ value: s.id, label: `${s.name}${s.active ? "" : " - inactive"}` }));
+  if (!supplierOptions.some((o) => o.value === lot.supplier_id)) {
+    supplierOptions.unshift({ value: lot.supplier_id ?? "", label: lot.supplier_id ? String(lot.supplier_id) : "(no supplier)" });
+  }
+  const teamOptions = [{ value: "", label: "(no team)" }].concat((window._teamsCache || [])
+    .filter((x) => x.active || x.id === lot.team_id)
+    .map((x) => ({ value: x.id, label: `${x.name || x.id}${x.active ? "" : " - inactive"}` })));
+  if (lot.team_id && !teamOptions.some((o) => o.value === lot.team_id)) {
+    teamOptions.push({ value: lot.team_id, label: lot.team_id });
+  }
+
+  fields.push(
+    { key: "supplier_id", label: "Supplier", type: "select", options: supplierOptions },
+    { key: "team_id", label: "Team", type: "select", options: teamOptions },
+    { key: "driver", label: "Driver", type: "text" },
+    { key: "timestamp", label: "Dispatched", type: "datetime-local" },
+    { key: "received_at", label: "Received", type: "datetime-local" },
+    // A slip with crates adds them up; only an external delivery has typed
+    // totals. The server refuses typed totals on a slip with crates, so the
+    // inputs are shown but locked rather than hidden.
+    { key: "total_crates", label: hasCrates ? "Crates picked (added up from the crates below)" : "Crates", type: "number", disabled: hasCrates },
+    { key: "transport_crates", label: "Crates sent (blank = same as picked)", type: "number" },
+    { key: "total_kg", label: hasCrates ? "Kg (added up from the crates below)" : "Kg", type: "number", disabled: hasCrates },
+    { key: "notes", label: "Slip notes", type: "text" },
+  );
+  if (receiving) {
+    fields.push(
+      { key: "expected_crates", label: "Receiving: crates expected", type: "number" },
+      { key: "actual_crates", label: "Receiving: crates received", type: "number" },
+      { key: "condition", label: "Receiving: condition", type: "text" },
+      { key: "waste_kg", label: "Receiving: waste (kg)", type: "number" },
+      { key: "received_by", label: "Received by", type: "text" },
+      { key: "receiving_notes", label: "Receiving notes", type: "text" },
+    );
+  }
+
+  openEditModal(`Edit Slip ${lot.slip_number}`, fields, initial, async (values) => {
+    const num = (v, parse = parseFloat) => (v === "" || v === null || v === undefined ? null : parse(v));
+    const body = {
+      supplier_id: num(values.supplier_id, (v) => parseInt(v, 10)),
+      team_id: values.team_id ?? "",
+      driver: values.driver,
+      timestamp: _fromLocalInput(values.timestamp),
+      received_at: _fromLocalInput(values.received_at),
+      // Blank means "same as picked"; the server reads 0 as clearing it.
+      transport_crates: values.transport_crates === "" ? 0 : parseInt(values.transport_crates, 10),
+      notes: values.notes,
+    };
+    if (hasCrates) {
+      if (values.block_id) body.block_id = values.block_id; // "" = as captured, no move
+    } else {
+      body.total_crates = num(values.total_crates, (v) => parseInt(v, 10));
+      body.total_kg = num(values.total_kg);
+    }
+    if (receiving) {
+      Object.assign(body, {
+        expected_crates: num(values.expected_crates, (v) => parseInt(v, 10)),
+        actual_crates: num(values.actual_crates, (v) => parseInt(v, 10)),
+        condition: values.condition,
+        waste_kg: num(values.waste_kg),
+        received_by: values.received_by,
+        receiving_notes: values.receiving_notes,
+      });
+    }
+    // A null is a field left blank: patch semantics, the server keeps what
+    // it has. (team_id "" and transport_crates 0 are deliberate clears.)
+    Object.keys(body).forEach((k) => { if (body[k] === null || Number.isNaN(body[k])) delete body[k]; });
+
+    let result;
+    try {
+      result = await Boord.api(`/api/lots/${lot.id}`, { method: "PATCH", body });
+    } catch (e) {
+      if (Boord.isAuthError(e)) { accessRefused(e); return; }
+      Boord.toast("Could not save: " + Boord.errorDetail(e, "Unknown error"));
+      throw e; // keeps the modal open, as editCrate does
+    }
+    Boord.toast("Slip updated");
+    if (_lotCratesContext && _lotCratesContext.lot.id === lot.id) {
+      _lotCratesContext = result;
+      renderLotCratesModal();
+    }
+    await refreshDashboard(); // Received row, KPIs, Blocks all move together
   });
 }
 
@@ -922,6 +1101,9 @@ function supplierName(id) {
 // Blocks
 async function loadBlocks() {
   const blocks = await Boord.api("/api/blocks");
+  // The crate and slip editors' Block pickers read this. It was never
+  // filled, so Edit Crate offered only the crate's own block.
+  window._blocksCache = blocks;
   document.getElementById("blocksTable").innerHTML = blocks.map((b) => `
     <tr class="border-b ${b.active ? "" : "opacity-50"}">
       <td class="p-2">${esc(b.id)}</td><td class="p-2">${esc(b.variety)}</td><td class="p-2">${esc(b.trees)}</td>

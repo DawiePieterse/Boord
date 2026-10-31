@@ -1627,6 +1627,40 @@ deleting:
 > original capture. A deleted crate is remembered for the same reason, so a
 > retry can't bring it back.
 
+### Correcting a received slip
+
+The same load window shows the slip's own details under its title -
+supplier, team, driver, when it was dispatched and received, its notes,
+and the gate's receipt (crates expected and received, condition, waste
+kg, who received it, receiving notes). **Edit slip**, top right, changes
+any of them in one form, from the paper picking note:
+
+- **Block (every crate on this slip)** - a slip has no block of its own;
+  its block is whichever block its crates were captured against. Choosing
+  a block here moves *every* crate on the slip to it, which is what "the
+  whole load was block 8a, not 8" means. A slip picked across two blocks
+  starts on "(as captured, mixed)", and saving with that left alone moves
+  nothing. One crate on the wrong block is a crate edit (above) instead.
+- **Supplier**, **Team**, **Driver**, **Dispatched**, **Received**,
+  **Crates sent** (blank means the same as picked) and **Slip notes**.
+- **Crates picked** and **Kg** are locked on a slip with crates: they are
+  added up from the crates below, so correct the crates. On an external
+  delivery (slip `EXT-...`), which has no crates, they are typed here.
+- **Receiving: crates expected / received / condition / waste (kg)**,
+  **Received by** (can't be blank) and **Receiving notes**. The receipt's
+  time follows **Received**.
+
+Saving redraws the window, the Received list, the Dashboard KPIs and the
+Blocks table; the supplier billing and every report read the corrected
+values. The slip then shows "slip edited by admin" with the time, and
+each moved crate shows the same stamp. Only a received slip can be
+corrected here - one still Harvesting or In Transit belongs to the field.
+
+> A field tablet that queued its "Send Picking Slip" offline replays it
+> later, with the driver, time and totals it had at dispatch. A corrected
+> slip keeps the office's values over that replay, the way a corrected
+> crate does.
+
 ---
 
 

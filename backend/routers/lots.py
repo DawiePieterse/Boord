@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, SQLModel, func, select
 
 from db import get_session, supplier_id_for_device, supplier_map, upsert
-from models import (DeletedHarvestRecord, HarvestRecord, Lot, LotStatus, PrePackRecord,
-                    ReceivingRecord, Supplier, SystemSetting)
+from models import (Block, DeletedHarvestRecord, HarvestRecord, Lot, LotStatus, PrePackRecord,
+                    ReceivingRecord, Supplier, SystemSetting, Team)
 from security import require_admin_client
 from timeutil import as_utc, day_bounds
 from weather import current_farm_weather
@@ -47,6 +47,57 @@ class ExternalLotIn(SQLModel):
     total_crates: int
     total_kg: float
     notes: str = ""
+
+
+class LotEdit(SQLModel):
+    """PATCH body for an admin correction of a received slip - patch
+    semantics, only the fields being changed need to be sent.
+
+    Everything the slip and its receipt carry is here, in one body, because
+    the office fixes a slip from one paper picking note: the block the
+    induna wrote, the driver, the time, the numbers the gate typed. The
+    crates' own numbers (worker, weight, deduction) stay per crate, in
+    routers/harvest_records.py, because they are wages."""
+    # A slip has no block of its own - its block is whatever its crates were
+    # captured against (blocks_by_lot). Setting this moves EVERY crate on the
+    # slip to the block, which is what "the whole slip was block 8a, not 8"
+    # means on paper. One crate on the wrong block is a crate edit instead.
+    block_id: Optional[str] = None
+    timestamp: Optional[datetime] = None  # dispatched
+    received_at: Optional[datetime] = None
+    supplier_id: Optional[int] = None
+    team_id: Optional[str] = None  # "" clears it
+    driver: Optional[str] = None
+    notes: Optional[str] = None
+    # Only a slip with no crates (an external delivery, "EXT-...") carries
+    # typed totals; a slip with crates adds its crates up, and these are
+    # refused for it so the Received list can never disagree with the
+    # crates below it.
+    total_crates: Optional[int] = None
+    total_kg: Optional[float] = None
+    transport_crates: Optional[int] = None  # 0 clears it (same as picked)
+    # The receipt (ReceivingRecord). Its timestamp follows received_at.
+    expected_crates: Optional[int] = None
+    actual_crates: Optional[int] = None
+    condition: Optional[str] = None
+    waste_kg: Optional[float] = None
+    received_by: Optional[str] = None
+    receiving_notes: Optional[str] = None
+
+
+# What the office owns once it has corrected a slip (Lot.edited_at set). A
+# field tablet's replayed dispatch (upsert_lot) can no longer write these;
+# it can still move status forward, which is all a dispatch is for.
+ADMIN_OWNED_LOT_FIELDS = ("timestamp", "driver", "notes", "team_id", "supplier_id",
+                          "total_crates", "total_kg", "transport_crates")
+
+
+def _naive_utc(dt: datetime) -> datetime:
+    """A request timestamp as the database stores it: UTC, no tzinfo. The
+    admin screen sends an ISO string with a zone; SQLite keeps none."""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def blocks_by_lot(session: Session, lot_ids: list) -> dict:
@@ -312,10 +363,142 @@ def get_lot(lot_id: int, session: Session = Depends(get_session), _admin=Depends
     lot = session.get(Lot, lot_id)
     if not lot:
         raise HTTPException(404, "Lot not found")
+    return _lot_detail(session, lot)
+
+
+def _lot_detail(session: Session, lot: Lot) -> dict:
+    """The admin edit screen's view of one slip: the lot, its crates in
+    capture order, the blocks they span, and its receipt (None until the
+    gate has checked it in). get_lot and edit_lot both answer with this, so
+    the screen redraws from a save exactly as it drew from the open."""
     crates = session.exec(
-        select(HarvestRecord).where(HarvestRecord.lot_id == lot_id).order_by(HarvestRecord.timestamp)
+        select(HarvestRecord).where(HarvestRecord.lot_id == lot.id).order_by(HarvestRecord.timestamp)
     ).all()
-    return {"lot": lot, "crates": crates, "blocks": sorted({c.block_id for c in crates if c.block_id})}
+    receiving = session.exec(select(ReceivingRecord).where(ReceivingRecord.lot_id == lot.id)
+                             .order_by(ReceivingRecord.id)).first()
+    return {"lot": lot, "crates": crates, "blocks": sorted({c.block_id for c in crates if c.block_id}),
+            "receiving": receiving}
+
+
+@router.patch("/{lot_id}")
+def edit_lot(lot_id: int, body: LotEdit, session: Session = Depends(get_session),
+             _admin=Depends(require_admin_client)):
+    """Admin correction of a received slip - the slip's own fields and its
+    receipt, and its block (every crate's). Until now only the crates could
+    be fixed after the fact, so a slip the induna wrote against the wrong
+    block, or that the gate received with the wrong count, stayed wrong on
+    every report and on the supplier's bill.
+
+    Received slips only. A slip still being picked or still on the road is
+    the tablet's and the gate's: the field is still adding crates to it and
+    the receipt doesn't exist yet. Once received, nothing in the orchard or
+    the pack house writes to it again except a replayed dispatch, which
+    upsert_lot now holds back from a corrected slip."""
+    lot = session.get(Lot, lot_id)
+    if not lot:
+        raise HTTPException(404, "Lot not found")
+    if lot.received_at is None:
+        raise HTTPException(400, "Only a received slip can be corrected here - "
+                                 "a slip still being picked or in transit belongs to the field")
+
+    crates = session.exec(select(HarvestRecord).where(HarvestRecord.lot_id == lot.id)).all()
+    now = datetime.now(timezone.utc)
+
+    if body.block_id is not None:
+        block = session.get(Block, body.block_id)
+        if not block:
+            raise HTTPException(400, "Unknown block")
+        if not block.active:
+            raise HTTPException(400, f"Block {block.name or block.id} is not active")
+        if not crates:
+            raise HTTPException(400, "This slip has no crates to move - its block comes from its crates")
+        for crate in crates:
+            if crate.block_id != body.block_id:
+                crate.block_id = body.block_id
+                # The same stamp a per-crate correction leaves, for the same
+                # reason: routers/sync.py keeps a stamped crate's block over
+                # the device's replayed payload.
+                crate.edited_at = now
+                crate.edited_by = "admin"
+                session.add(crate)
+
+    if body.supplier_id is not None:
+        if not session.get(Supplier, body.supplier_id):
+            raise HTTPException(400, "Unknown supplier")
+        lot.supplier_id = body.supplier_id
+    if body.team_id is not None:
+        team_id = body.team_id.strip()
+        if team_id and not session.get(Team, team_id):
+            raise HTTPException(400, "Unknown team")
+        lot.team_id = team_id or None
+    if body.driver is not None:
+        lot.driver = body.driver.strip()
+    if body.notes is not None:
+        lot.notes = body.notes.strip()
+    if body.timestamp is not None:
+        lot.timestamp = _naive_utc(body.timestamp)
+    if body.received_at is not None:
+        lot.received_at = _naive_utc(body.received_at)
+
+    if body.total_crates is not None or body.total_kg is not None:
+        if crates:
+            raise HTTPException(400, "This slip's crates and kg are added up from its crates - "
+                                     "correct the crates instead")
+        total_crates = body.total_crates if body.total_crates is not None else lot.total_crates
+        total_kg = body.total_kg if body.total_kg is not None else lot.total_kg
+        # The same floor create_external_lot holds: a minus sign on a number
+        # pad must not become a negative delivery on the supplier's bill.
+        if total_crates <= 0 or total_kg <= 0:
+            raise HTTPException(400, "Crates and kg must both be more than zero")
+        lot.total_crates = total_crates
+        lot.total_kg = round(total_kg, 1)
+    if body.transport_crates is not None:
+        sent = body.transport_crates or None
+        if sent is not None and not 1 <= sent <= max(lot.total_crates, 1):
+            raise HTTPException(400, "Crates sent must be between 1 and the crates picked")
+        lot.transport_crates = sent
+
+    receiving = session.exec(select(ReceivingRecord).where(ReceivingRecord.lot_id == lot.id)
+                             .order_by(ReceivingRecord.id)).first()
+    receipt_fields = (body.expected_crates, body.actual_crates, body.condition,
+                      body.waste_kg, body.received_by, body.receiving_notes)
+    if any(f is not None for f in receipt_fields) and receiving is None:
+        # received_at without a receipt happens only in a hand-built
+        # database; the gate's confirm_receipt always writes both together.
+        raise HTTPException(400, "This slip has no receipt to correct")
+    if receiving is not None:
+        if body.expected_crates is not None:
+            receiving.expected_crates = body.expected_crates
+        if body.actual_crates is not None:
+            receiving.actual_crates = body.actual_crates
+        if receiving.expected_crates < 0 or receiving.actual_crates < 0:
+            raise HTTPException(400, "Crates expected and received can't be negative")
+        receiving.discrepancy = receiving.actual_crates - receiving.expected_crates
+        if body.condition is not None:
+            receiving.condition = body.condition.strip() or "Good"
+        if body.waste_kg is not None:
+            if body.waste_kg < 0:
+                raise HTTPException(400, "Waste kg can't be negative")
+            receiving.waste_kg = round(body.waste_kg, 1)
+        if body.received_by is not None:
+            if not body.received_by.strip():
+                # The gate screen requires a name; the office can't take it away.
+                raise HTTPException(400, "Received by is needed")
+            receiving.received_by = body.received_by.strip()
+        if body.receiving_notes is not None:
+            receiving.notes = body.receiving_notes.strip()
+        # One receiving time, not two: the receipt's timestamp is what the
+        # Lot & Receiving report prints, received_at is what the Received
+        # list and the supplier's bill filter on.
+        receiving.timestamp = lot.received_at
+        session.add(receiving)
+
+    lot.edited_at = now
+    lot.edited_by = "admin"
+    session.add(lot)
+    session.commit()
+    session.refresh(lot)
+    return _lot_detail(session, lot)
 
 
 @router.post("")
@@ -349,6 +532,13 @@ def upsert_lot(lot_in: LotIn, session: Session = Depends(get_session)):
     if existing and existing.status in (LotStatus.received, LotStatus.processing_complete) \
             and lot_in.status in (LotStatus.created, LotStatus.in_transit):
         data["status"] = existing.status
+    # A slip the office has corrected (edit_lot) keeps the office's driver,
+    # time, totals and supplier over a tablet's replayed dispatch, which
+    # still carries whatever the tablet had when "Send Picking Slip" was
+    # tapped. The replay is still answered so the device stops retrying.
+    if existing and existing.edited_at is not None:
+        for key in ADMIN_OWNED_LOT_FIELDS:
+            data.pop(key, None)
     if data.get("supplier_id") is None:
         # Keep the placeholder lot's supplier if sync.py already set one from
         # the device; otherwise resolve it from the device now.
