@@ -1620,10 +1620,11 @@ function plannerDerive(view) {
   let dKg = 0, dCartons = 0, dPallets = 0;
   for (const r of view.receivers || []) {
     const rid = String(r.id);
+    const on = r.on !== false;   // an unticked receiver counts for nothing
     const cells = {};
     let rc = 0, rk = 0, rp = 0;
     for (const [name, p] of Object.entries(packs)) {
-      const cartons = parseInt((deliveries[rid] || {})[name] || 0, 10) || 0;
+      const cartons = on ? parseInt((deliveries[rid] || {})[name] || 0, 10) || 0 : 0;
       const units = cartons * (p.units_per_carton || 1);   // Packhouse's unit: a Pre-pac punnet
       const kg = r1(units * (p.carton_kg || 0));
       const perPallet = p.cartons_per_pallet || 0;
@@ -1888,16 +1889,25 @@ function renderPlannerDelivery() {
       body.push(`<tr><td colspan="${v.packs.length + 4}" class="px-2 py-1 text-xs font-semibold ${PLAN_GROUP_CLASS[r.group]}">${PLAN_GROUP_LABEL[r.group]}</td></tr>`);
     }
     const rid = esc(String(r.id));
+    const dis = r.on ? "" : "disabled";
     const cells = v.packs.map((p) => {
       const done = (v.delivered[String(r.id)] || {})[p.name] || {};
       const planned = (v.plan_deliveries[String(r.id)] || {})[p.name] || "";
       return `<td class="p-1 text-center align-top">
-        <input type="number" min="0" step="1" inputmode="numeric" class="planner-cartons" data-plan-cartons="${rid}:${esc(p.name)}" value="${planned}" placeholder="cartons" title="Cartons this week">
+        <input type="number" min="0" step="1" inputmode="numeric" class="planner-cartons" data-plan-cartons="${rid}:${esc(p.name)}" value="${planned}" placeholder="cartons" title="Cartons this week" ${dis}>
         <div class="planner-actual" data-plan-done="${rid}:${esc(p.name)}" data-ytd="${done.ytd || 0}" data-lastweek="${done.last_week || 0}"></div>
       </td>`;
     }).join("");
-    body.push(`<tr class="border-b">
-      <td class="p-2 font-medium">${esc(r.name)}${r.market ? `<div class="text-xs text-slate-400 font-normal">${esc(r.market)}</div>` : ""}</td>
+    // The receiver's checkbox works as the block's does: unticked, its typed
+    // cartons stay (greyed, kept for when it is ticked again) but count for
+    // nothing and leave it off the sheet and the PDF.
+    body.push(`<tr class="border-b ${r.on ? "" : "planner-block-off"}">
+      <td class="p-2 font-medium">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" class="w-5 h-5" data-plan-ron="${rid}" ${r.on ? "checked" : ""} title="Deliver to this receiver this week">
+          <span>${esc(r.name)}${r.market ? `<div class="text-xs text-slate-400 font-normal">${esc(r.market)}</div>` : ""}</span>
+        </label>
+      </td>
       <td class="p-2 text-right" data-plan-cell="rcartons:${rid}"></td>
       <td class="p-2 text-right" data-plan-cell="rkg:${rid}"></td>
       <td class="p-2 text-right" data-plan-cell="rpallets:${rid}"></td>
@@ -1913,6 +1923,10 @@ function renderPlannerDelivery() {
       ${v.packs.map((p) => `<td class="p-2 text-center" data-plan-cell="pack:${esc(p.name)}"></td>`).join("")}
     </tr>`;
 
+  rows.querySelectorAll("[data-plan-ron]").forEach((cb) => cb.addEventListener("change", () => {
+    _plan.receivers.find((x) => String(x.id) === cb.dataset.planRon).on = cb.checked;
+    renderPlannerDelivery(); refreshPlannerDerived(); schedulePlannerSave();
+  }));
   rows.querySelectorAll("[data-plan-cartons]").forEach((inp) => {
     inp.addEventListener("input", () => {
       const [rid, pack] = inp.dataset.planCartons.split(/:(.*)/s);
@@ -2023,9 +2037,10 @@ function refreshPlannerDerived() {
     el.textContent = `YTD ${Boord.fmtNum(plannerUnitsToCartons(+el.dataset.ytd, perCarton[pack]), 0)} · last wk ${Boord.fmtNum(plannerUnitsToCartons(+el.dataset.lastweek, perCarton[pack]), 0)}`;
   });
   for (const r of d.receivers) {
-    set(`rcartons:${r.id}`, Boord.fmtNum(r.cartons, 0));
-    set(`rkg:${r.id}`, kg(r.kg));
-    set(`rpallets:${r.id}`, r.pallets ? Boord.fmtNum(r.pallets, 0) : "–");
+    const on = v.receivers.find((x) => x.id === r.id).on;
+    set(`rcartons:${r.id}`, on ? Boord.fmtNum(r.cartons, 0) : "");
+    set(`rkg:${r.id}`, on ? kg(r.kg) : "");
+    set(`rpallets:${r.id}`, on ? (r.pallets ? Boord.fmtNum(r.pallets, 0) : "–") : "");
   }
   for (const [name, t] of Object.entries(d.pack_totals)) {
     set(`pack:${name}`, `${Boord.fmtNum(t.cartons, 0)} cartons${t.pallets ? ` · ${Boord.fmtNum(t.pallets, 0)} pal` : ""}`);
@@ -2067,6 +2082,7 @@ function plannerBody() {
     blocks: v.blocks.map((b) => ({ block_id: b.block_id, on: !!b.on, available_kg: b.available_kg,
                                    days: b.days || [], fixed: b.fixed || {} })),
     deliveries: v.plan_deliveries,
+    receivers_on: v.receivers.filter((r) => r.on).map((r) => String(r.id)),
   };
 }
 

@@ -2023,6 +2023,12 @@ def test_planner_tables_are_built_from_the_same_derived_figures():
     assert headers == ["Market", "Receiver", "Cartons", "Kg", "Pallets", "Pre-pac", "1kg XXL"]
     assert next(r for r in rows if r[1] == "Toro")[2:] == [600, 350, 1, 500, 100] and total[2:] == [650, 405, 1, 500, 150]
     assert [label for label, _ in _grand_rows(view, compact=True)][1] == "Juice and loss %"
+    # A receiver unticked for the week counts for nothing and leaves both exports.
+    next(r for r in view["receivers"] if r["name"] == "Toro")["on"] = False
+    view["derived"] = planner.derive(view)
+    for compact in (False, True):
+        assert "Toro" not in [r[1] for r in _delivery_rows(view, compact)[1]]
+    assert view["derived"]["delivery_cartons"] == 50
 
 
 def main():

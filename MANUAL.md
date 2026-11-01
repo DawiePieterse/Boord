@@ -2036,6 +2036,13 @@ Packhouse gives each. In each pack cell, type the **cartons** that receiver
 gets of that pack this week. Under it, **YTD** and **last wk** are the
 cartons on delivery notes already loaded.
 
+Tick the box in front of each receiver that gets fruit this week, as you
+tick the blocks. An unticked receiver is greyed, its cartons can't be typed
+and count for nothing in the totals, and it is left off the Excel and the
+PDF; anything already typed for it comes back when it is ticked again. A new
+week starts with none ticked. A week planned before the tick existed has
+every receiver with cartons ticked.
+
 The second header row holds two figures per pack that Packhouse does not
 keep, so the Planner does, one under the other:
 
@@ -2071,10 +2078,10 @@ retired in Packhouse still shows while a note this season used it.
 
 **Excel** downloads the whole page for the week - the harvest grid (blocks
 that are on, with estimate, YTD, last week, remaining and available), the
-delivery grid with each receiver's cartons, kg and pallets beside its name
+delivery grid with each ticked receiver's cartons, kg and pallets beside its name
 and then YTD, last week and this week per pack, and the grand totals.
 **PDF** is the sheet to pin up: each block with something planned and its
-kg per day, each receiver's cartons, kg and pallets for the week and then
+kg per day, each ticked receiver's cartons, kg and pallets for the week and then
 its cartons per pack, and the grand totals. Both are named
 `Harvest_Plan_<season>_week_<n>`, and a copy is kept in `data\reports\`
 with the other reports.

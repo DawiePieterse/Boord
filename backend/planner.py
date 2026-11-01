@@ -141,7 +141,7 @@ def derive(view: dict) -> dict:
 
     - per block: remaining, available (the saved figure or remaining), kg
       per ticked day, the block's planned total;
-    - per receiver and pack: planned cartons, Packhouse units (punnets for
+    - per receiver and pack (nothing for one not ticked): planned cartons, Packhouse units (punnets for
       Pre-pac), kg and whole pallets (rounded up: a part-filled pallet still
       goes on the truck);
     - the week: planned harvest kg, the loss % in force, deliverable kg
@@ -185,10 +185,13 @@ def derive(view: dict) -> dict:
     delivery_pallets = 0
     for r in view.get("receivers", []):
         rid = str(r["id"])
+        # An unticked receiver keeps its typed cartons (tick it again and
+        # they're back) but counts for nothing, like an unticked block.
+        on = r.get("on", True)
         cells = {}
         r_cartons, r_kg, r_pallets = 0, 0.0, 0
         for name, p in packs.items():
-            cartons = int((deliveries.get(rid) or {}).get(name) or 0)
+            cartons = int((deliveries.get(rid) or {}).get(name) or 0) if on else 0
             # Packhouse's carton_kg is the weight of the unit its pallet lines
             # count (a Pre-pac punnet, 0.48 kg); a carton holds units_per_carton
             # of them (4), so the kg is units x unit weight.
