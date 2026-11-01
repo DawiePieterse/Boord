@@ -2073,10 +2073,12 @@ every receiver with cartons ticked.
 
 **Pre-orders** (Settings -> Master Data -> Pre-orders, section 8) fill the cells of their
 pack day's week by themselves, in **purple**, with the target receivers
-behind them underneath ("PO Seasons Farm Fresh 1 440 · Solfruit 720"). A
+behind them underneath, one a line ("2 160 Seasons Farm Fresh", then
+"2 880 Solfruit"; a target with two pack days that week is added up, and
+pointing at the line shows the days). A
 new week also comes up with every receiver that has a pre-order in it
 ticked. Type in a purple cell to plan something else for the week: the cell
-goes plain and says "typed · PO 720", and **reset** hands it back to the
+goes plain and says "typed" over "PO 720", and **reset** hands it back to the
 pre-order. Type 0 to plan none at all. Clearing a cell does the same as
 reset. The pre-order itself is not changed; change or delete it in
 Settings. A pre-order added after a week was saved shows in purple on its
