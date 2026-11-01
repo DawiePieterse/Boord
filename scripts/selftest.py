@@ -2057,6 +2057,11 @@ def test_planner_preorders_fill_what_was_not_typed():
     assert cells[1]["cartons"] == 900 and not cells[1]["from_po"]
     assert cells[2]["cartons"] == 0 and not cells[2]["from_po"]
     assert "900 (PO 720)" in pdf_cells() and "0 (PO 300)" in pdf_cells()
+    # A receiver whose market field doesn't say USA is still grouped USA by its name.
+    from routers.planner import receiver_group  # noqa: E402
+    assert receiver_group({"name": "Agrilink USA Sea", "market": "Sea"}) == "usa"
+    assert receiver_group({"name": "Agrilink", "market": "EU Air"}) == "eu"
+    assert receiver_group({"name": "Boeretrust", "market": "Tshwane Mark"}) == "local"
 
 
 def main():
