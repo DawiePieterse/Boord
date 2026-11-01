@@ -2043,6 +2043,23 @@ PDF; anything already typed for it comes back when it is ticked again. A new
 week starts with none ticked. A week planned before the tick existed has
 every receiver with cartons ticked.
 
+**Pre-orders** (kept in Settings, see section 12) fill the cells of their
+pack day's week by themselves, in **purple**, with the target receivers
+behind them underneath ("PO Seasons Farm Fresh 1 440 · Solfruit 720"). A
+new week also comes up with every receiver that has a pre-order in it
+ticked. Type in a purple cell to plan something else for the week: the cell
+goes plain and says "typed · PO 720", and **reset** hands it back to the
+pre-order. Type 0 to plan none at all. Clearing a cell does the same as
+reset. The pre-order itself is not changed; change or delete it in
+Settings. A pre-order added after a week was saved shows in purple on its
+receiver's row, but doesn't tick that receiver for you.
+
+The link beside **Delivery this week** ("3 pre-orders this week · edit in
+Settings", or "Add a pre-order in Settings") saves the plan and opens the
+Pre-orders list in Settings, with that week's rows shaded and in view. **Add
+pre-order** there then starts on the week's Monday. Open the Planner again
+and the week shows the changes.
+
 The second header row holds two figures per pack that Packhouse does not
 keep, so the Planner does, one under the other:
 
@@ -2080,15 +2097,45 @@ retired in Packhouse still shows while a note this season used it.
 that are on, with estimate, YTD, last week, remaining and available), the
 delivery grid with each ticked receiver's cartons, kg and pallets beside its name
 and then YTD, last week and this week per pack, and the grand totals.
+A pre-order's cell is shaded purple, one typed over has a note with the
+pre-order's figure, and a list of the week's pre-orders follows the
+delivery grid.
 **PDF** is the sheet to pin up: each block with something planned and its
 kg per day, each ticked receiver's cartons, kg and pallets for the week and then
-its cartons per pack, and the grand totals. Both are named
+its cartons per pack, the week's pre-orders, and the grand totals. A
+pre-order's cell reads "720 PO" (shaded), one typed over "900 (PO 720)". Both are named
 `Harvest_Plan_<season>_week_<n>`, and a copy is kept in `data\reports\`
 with the other reports.
 
 ---
 
 ## 12. Admin - Settings
+
+### Pre-orders
+
+Cartons a target receiver books ahead from the export agent's schedule, like
+a forward contract: Sweet Seasons wants 720 cartons of Rhino 4kg packed on
+16 November, through Agrilink Sea. Type the schedule in once, one row per
+pack day, with **Add pre-order**:
+
+- **Pack day** - the day the fruit must be packed to make the truck. The
+  pre-order lands in the Planner's week of that day (**Wk**), the week the
+  fruit has to be picked.
+- **Receiver** - who the load goes to (Agrilink Sea, Agrilink Air, EU Sea).
+- **Target receiver** - who booked it overseas. Only the receiver's market's
+  (USA or EU) are offered; a local receiver has none.
+- **Pack** - starts on the last pack used, else Rhino 4kg.
+- **Cartons**, and a **Note** for the rest of the schedule's line: delivery
+  day and time, JNB-CPT, ETD, USDA samples.
+
+**Pallets** follow from the pack's cartons per pallet, as typed on the
+Planner. The pencil edits a row in place; the bin deletes it after asking.
+
+Receivers, target receivers and packs are Boord Packhouse's lists, not
+Boord's. **Edit lists in Packhouse** (and **edit list** under each dropdown
+while a row is open) opens Packhouse's Settings -> Delivery Note in a new
+tab: enter the PIN there to add, edit or delete one. Come back to Boord's
+tab and the dropdowns are read again, keeping the row you were typing.
 
 ### Server
 

@@ -376,7 +376,8 @@ class HarvestPlan(SQLModel, table=True):
     latest truth. blocks is a JSON list of {block_id, on, available_kg (null
     = whatever remains), days ([0..6], Monday 0), fixed ({"2": kg} for the
     days typed by hand; the rest share the remainder)}; deliveries is JSON
-    {receiver_id: {pack name: cartons}}; receivers_on is a JSON list of the
+    {receiver_id: {pack name: cartons}}, the cartons typed by hand (0
+    included, to cancel a PreOrder for the week); receivers_on is a JSON list of the
     receiver ids ticked for the week (null = a plan saved before the tick
     existed, read as every receiver with cartons planned). loss_pct, when
     set, overrides the season's measured juice-and-loss share."""
@@ -400,3 +401,25 @@ class PlannerPack(SQLModel, table=True):
     pack: str = Field(primary_key=True)
     cartons_per_pallet: int = 0
     units_per_carton: int = 1
+
+
+class PreOrder(SQLModel, table=True):
+    """Cartons a receiver has booked ahead, like a forward contract: an
+    export agent's schedule for the season, typed once in Settings. It lands
+    in the Planner's week its pack_day falls in - the day the fruit must be
+    packed to make the truck, which is the week it has to be picked - and
+    fills that receiver's cartons there until the office types over them
+    (HarvestPlan.deliveries holds only what was typed). receiver_id is
+    Packhouse's receiver id, as in deliveries - who the truck goes to (Agrilink
+    Sea, EU Air); target_receiver_id is Packhouse's TargetReceiver, who booked
+    it overseas (Sweet Seasons), none for a local receiver; pack is the pack's
+    name as Packhouse spells it. All three are picked from Packhouse's lists. note is free text for what the schedule says
+    beyond the cartons: delivery day, transport, ETD, USDA samples."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    pack_day: date = Field(index=True)
+    receiver_id: int
+    target_receiver_id: Optional[int] = None
+    pack: str
+    cartons: int
+    note: str = ""
+    updated_at: datetime
