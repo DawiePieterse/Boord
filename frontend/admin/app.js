@@ -1912,7 +1912,7 @@ function renderPlannerDelivery() {
       const planned = (v.plan_deliveries[String(r.id)] || {})[p.name] ?? "";
       return `<td class="p-1 text-center align-top">
         <input type="number" min="0" step="1" inputmode="numeric" class="planner-cartons" data-plan-cartons="${rid}:${esc(p.name)}" value="${planned}" placeholder="cartons" title="Cartons this week" ${dis}>
-        <div class="text-[11px] whitespace-nowrap" data-plan-po="${rid}:${esc(p.name)}"></div>
+        <div class="text-[11px] leading-tight max-w-[7.5rem] mx-auto mt-0.5" data-plan-po="${rid}:${esc(p.name)}"></div>
         <div class="planner-actual" data-plan-done="${rid}:${esc(p.name)}" data-ytd="${done.ytd || 0}" data-lastweek="${done.last_week || 0}"></div>
       </td>`;
     }).join("");
@@ -2065,11 +2065,22 @@ function refreshPlannerDerived() {
     const pack = el.dataset.planDone.split(/:(.*)/s)[1];
     el.textContent = `YTD ${Boord.fmtNum(plannerUnitsToCartons(+el.dataset.ytd, perCarton[pack]), 0)} · last wk ${Boord.fmtNum(plannerUnitsToCartons(+el.dataset.lastweek, perCarton[pack]), 0)}`;
   });
-  // Pre-orders: a cell filled by one is purple and says which pack days; one
-  // the office typed over keeps the pre-order's figure beside it, with a
-  // reset that hands the cell back to it.
+  // Pre-orders: a cell filled by one is purple and lists its target
+  // receivers under it, one a line (a target with two pack days that week
+  // added up, the days in its tooltip), so the column stays as narrow as
+  // its input. One the office typed over keeps the pre-order's figure under
+  // it, with a reset that hands the cell back to it.
   const poTargets = (rid, pack) => (((v.preorders || {})[rid] || {})[pack] || {}).targets || [];
   const shortDay = (iso) => new Date(`${iso}T00:00`).toLocaleDateString("en-ZA", { day: "2-digit", month: "short" });
+  const poLines = (targets) => {
+    const by = new Map();
+    for (const t of targets) {
+      const x = by.get(t.name) || { cartons: 0, days: [] };
+      x.cartons += t.cartons; x.days.push(shortDay(t.day));
+      by.set(t.name, x);
+    }
+    return [...by].map(([name, x]) => `<div title="Packed ${x.days.join(", ")}"><span class="font-semibold">${Boord.fmtNum(x.cartons, 0)}</span> ${esc(name || "pre-order")}</div>`).join("");
+  };
   for (const r of d.receivers) {
     for (const [pack, c] of Object.entries(r.cells)) {
       const key = `${r.id}:${pack}`;
@@ -2080,9 +2091,8 @@ function refreshPlannerDerived() {
       if (inp !== focused) inp.value = typed != null ? typed : (c.po || "");
       for (const cls of ["bg-violet-100", "border-violet-400", "text-violet-800"]) inp.classList.toggle(cls, c.from_po);
       note.innerHTML = !c.po ? ""
-        : c.from_po ? `<span class="text-violet-700">PO ${poTargets(String(r.id), pack).map((t) =>
-            `<span title="Packed ${shortDay(t.day)}">${esc(t.name || "")} ${Boord.fmtNum(t.cartons, 0)}</span>`).join(" · ")}</span>`
-        : `<span class="text-amber-700">typed · PO ${Boord.fmtNum(c.po, 0)}</span> <button type="button" class="underline text-violet-700" data-po-reset>reset</button>`;
+        : c.from_po ? `<div class="text-violet-700">${poLines(poTargets(String(r.id), pack))}</div>`
+        : `<div class="text-amber-700">typed</div><div class="text-violet-700">PO ${Boord.fmtNum(c.po, 0)} <button type="button" class="underline" data-po-reset>reset</button></div>`;
     }
   }
   for (const r of d.receivers) {
