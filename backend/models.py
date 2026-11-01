@@ -376,12 +376,15 @@ class HarvestPlan(SQLModel, table=True):
     latest truth. blocks is a JSON list of {block_id, on, available_kg (null
     = whatever remains), days ([0..6], Monday 0), fixed ({"2": kg} for the
     days typed by hand; the rest share the remainder)}; deliveries is JSON
-    {receiver_id: {pack name: cartons}}. loss_pct, when set, overrides the
-    season's measured juice-and-loss share."""
+    {receiver_id: {pack name: cartons}}; receivers_on is a JSON list of the
+    receiver ids ticked for the week (null = a plan saved before the tick
+    existed, read as every receiver with cartons planned). loss_pct, when
+    set, overrides the season's measured juice-and-loss share."""
     week_start: date = Field(primary_key=True)
     season_year: int = Field(index=True)
     blocks: str = "[]"
     deliveries: str = "{}"
+    receivers_on: Optional[str] = None
     loss_pct: Optional[float] = None
     updated_at: datetime
 

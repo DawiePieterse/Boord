@@ -218,6 +218,15 @@ def build_week(session: Session, week_start: date) -> dict:
 
     plan = session.get(HarvestPlan, week_start)
     saved_blocks = {p["block_id"]: p for p in json.loads(plan.blocks or "[]")} if plan else {}
+    plan_deliveries = json.loads(plan.deliveries or "{}") if plan else {}
+    # Like a block, a receiver is ticked for the week or not. A week not yet
+    # planned starts with none ticked; a plan saved before the tick existed
+    # has every receiver it planned cartons for ticked, so it reads as it did.
+    if plan and plan.receivers_on is not None:
+        receivers_on = set(json.loads(plan.receivers_on))
+    else:
+        receivers_on = set(plan_deliveries)
+    receivers = [dict(r, on=str(r["id"]) in receivers_on) for r in ph["receivers"]]
 
     out_blocks = []
     for b in blocks:
@@ -257,10 +266,10 @@ def build_week(session: Session, week_start: date) -> dict:
         "estimate": {k: v for k, v in estimate.items() if k != "blocks"},
         "packhouse": {"available": ph["available"], "reason": ph.get("reason")},
         "blocks": out_blocks,
-        "receivers": ph["receivers"],
+        "receivers": receivers,
         "packs": packs,
         "delivered": ph["delivered"],
-        "plan_deliveries": json.loads(plan.deliveries or "{}") if plan else {},
+        "plan_deliveries": plan_deliveries,
         "loss": {
             "harvested_kg": harvested_total, "delivered_kg": ph["delivered_kg"],
             "season_pct": planner.loss_pct(harvested_total, ph["delivered_kg"]) if ph["available"] else None,
@@ -315,6 +324,7 @@ class PlanIn(BaseModel):
     loss_pct: Optional[float] = Field(default=None, ge=-100, le=100)
     blocks: List[BlockPlanIn] = []
     deliveries: Dict[str, Dict[str, int]] = {}
+    receivers_on: List[str] = []
 
 
 @router.put("/week/{week_start}")
@@ -335,7 +345,8 @@ def save_week(week_start: date, body: PlanIn, session: Session = Depends(get_ses
     deliveries = {rid: cells for rid, cells in deliveries.items() if cells}
     session.merge(HarvestPlan(
         week_start=week_start, season_year=planner.season_year_for(week_start, month, day),
-        blocks=json.dumps(blocks), deliveries=json.dumps(deliveries), loss_pct=body.loss_pct,
+        blocks=json.dumps(blocks), deliveries=json.dumps(deliveries),
+        receivers_on=json.dumps(sorted(set(body.receivers_on))), loss_pct=body.loss_pct,
         updated_at=datetime.utcnow(),
     ))
     session.commit()
@@ -432,7 +443,10 @@ def _delivery_rows(view: dict, compact: bool = False) -> tuple:
                     else [f"{p['name']} YTD", f"{p['name']} last wk", f"{p['name']} this wk"])
     rows = []
     derived = {str(r["id"]): r for r in d["receivers"]}
-    for r in view["receivers"]:
+    # A receiver not ticked for the week is left off both, as an unticked
+    # block is, and out of the YTD and last-week totals below too.
+    on = [r for r in view["receivers"] if r.get("on", True)]
+    for r in on:
         x = derived[str(r["id"])]
         row = [GROUP_LABEL[r["group"]], r["name"], x["cartons"], _num(x["kg"]), x["pallets"]]
         for p in packs:
@@ -446,7 +460,7 @@ def _delivery_rows(view: dict, compact: bool = False) -> tuple:
     total = ["Total", "", d["delivery_cartons"], _num(d["delivery_kg"]), d["delivery_pallets"]]
     for p in packs:
         if not compact:
-            cells = [(view["delivered"].get(str(r["id"])) or {}).get(p["name"]) or {} for r in view["receivers"]]
+            cells = [(view["delivered"].get(str(r["id"])) or {}).get(p["name"]) or {} for r in on]
             upc = p.get("units_per_carton") or 1
             total += [planner.units_to_cartons(sum(c.get("ytd", 0) for c in cells), upc),
                       planner.units_to_cartons(sum(c.get("last_week", 0) for c in cells), upc)]
