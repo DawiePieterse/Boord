@@ -1848,13 +1848,14 @@ function renderPlannerHarvest() {
   }));
 }
 
-// The Planner's link to this week's pre-orders in Settings. The plan is
+// The Planner's link to this week's pre-orders in Settings -> Master Data. The plan is
 // saved first; coming back to the Planner reloads the week, pre-orders and all.
 function openPlannerPreorders() {
   if (!_plan) return;
   flushPlannerSave();
   _poWeek = { start: _plan.week_start, end: _plan.week_end };
   _poFromPlanner = true;
+  document.querySelector('.subtab-btn[data-subtab="preorders"]').click();
   document.querySelector('.tab-btn[data-tab="settings"]').click();
 }
 
@@ -2894,9 +2895,10 @@ function renderPreorders() {
     const receivers = _po.receivers.some((r) => r.id === po.receiver_id) || po.receiver_id == null ? _po.receivers
       : [..._po.receivers, { id: po.receiver_id, name: po.receiver_name, group: "" }];
     const group = (receivers.find((r) => r.id === po.receiver_id) || {}).group;
-    // Target receivers of the receiver's market (USA or EU); all of them
-    // until a receiver is picked, none to pick from for a local one.
-    let targets = _po.targets.filter((t) => !group || t.group === group);
+    // Target receivers of the receiver's market (USA or EU). All of them
+    // until a receiver is picked, and for one whose market Boord can't tell
+    // (backend receiver_group): better a longer list than an empty one.
+    let targets = _po.targets.filter((t) => !group || group === "local" || t.group === group);
     if (po.target_receiver_id && !targets.some((t) => t.id === po.target_receiver_id)) {
       targets = [...targets, { id: po.target_receiver_id, name: po.target_name || `Target ${po.target_receiver_id}` }];
     }
@@ -2906,7 +2908,7 @@ function renderPreorders() {
       <td class="p-1"><input type="date" class="${field}" data-po-f="pack_day" value="${po.pack_day || ""}"></td>
       <td class="p-1 text-slate-400">–</td>
       <td class="p-1"><select class="${field}" data-po-f="receiver_id"><option value="">Receiver…</option>${receivers.map((r) => `<option value="${r.id}" ${r.id === po.receiver_id ? "selected" : ""}>${esc(r.name)}</option>`).join("")}</select><div>${jump}</div></td>
-      <td class="p-1"><select class="${field}" data-po-f="target_receiver_id"><option value="">${group === "local" ? "– (local)" : "Target receiver…"}</option>${targets.map((t) => `<option value="${t.id}" ${t.id === po.target_receiver_id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select><div>${jump}</div></td>
+      <td class="p-1"><select class="${field}" data-po-f="target_receiver_id"><option value="">${group === "local" ? "– (none)" : "Target receiver…"}</option>${targets.map((t) => `<option value="${t.id}" ${t.id === po.target_receiver_id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select><div>${jump}</div></td>
       <td class="p-1"><select class="${field}" data-po-f="pack">${packs.map((p) => `<option ${p === (po.pack || _po.default_pack) ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></td>
       <td class="p-1 text-right"><input type="number" min="1" step="1" inputmode="numeric" class="${field} w-24 text-right" data-po-f="cartons" value="${po.cartons || ""}"></td>
       <td class="p-1"></td>
@@ -2938,7 +2940,8 @@ function bindPreorders() {
   document.getElementById("poAddBtn").addEventListener("click", () => {
     if (_po) { _poEdit = "new"; _poDraft = _poWeek ? { pack_day: _poWeek.start } : null; renderPreorders(); }
   });
-  // Opening Settings reads the pre-orders afresh. From the Planner's link,
+  // Opening Settings reads the pre-orders afresh (they sit under Master
+  // Data's Pre-orders button). From the Planner's link,
   // that week's rows are shaded and scrolled to; from the tab, none are.
   document.querySelector('.tab-btn[data-tab="settings"]').addEventListener("click", async () => {
     if (!_poFromPlanner) _poWeek = null;

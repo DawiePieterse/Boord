@@ -1666,7 +1666,7 @@ corrected here - one still Harvesting or In Transit belongs to the field.
 
 ## 8. Admin - Master Data
 
-Master Data is a section of the **Settings** tab, with five subtabs for the
+Master Data is a section of the **Settings** tab, with six subtabs for the
 pack house's reference data.
 
 ### Workers
@@ -1716,6 +1716,34 @@ own row (marked "(Own fruit)"). Each carries contact details, a **PUC**
 Billing** panel on this same subtab - pick a supplier and date range,
 tap **Calculate**, and see how much facility-use fee that supplier owes
 for fruit actually received (not still in transit) in that period.
+
+### Pre-orders
+
+Cartons a target receiver books ahead from the export agent's schedule, like
+a forward contract: Sweet Seasons wants 720 cartons of Rhino 4kg packed on
+16 November, through Agrilink Sea. Type the schedule in once, one row per
+pack day, with **Add pre-order**:
+
+- **Pack day** - the day the fruit must be packed to make the truck. The
+  pre-order lands in the Planner's week of that day (**Wk**), the week the
+  fruit has to be picked.
+- **Receiver** - who the load goes to (Agrilink Sea, Agrilink Air, EU Sea).
+- **Target receiver** - who booked it overseas. Only those of the
+  receiver's market (USA or EU) are offered. Boord reads the market from
+  the receiver's market in Packhouse, else from its name ("Agrilink USA
+  Sea"); when it can tell from neither, every target receiver is offered.
+- **Pack** - starts on the last pack used, else Rhino 4kg.
+- **Cartons**, and a **Note** for the rest of the schedule's line: delivery
+  day and time, JNB-CPT, ETD, USDA samples.
+
+**Pallets** follow from the pack's cartons per pallet, as typed on the
+Planner. The pencil edits a row in place; the bin deletes it after asking.
+
+Receivers, target receivers and packs are Boord Packhouse's lists, not
+Boord's. **Edit lists in Packhouse** (and **edit list** under each dropdown
+while a row is open) opens Packhouse's Settings -> Delivery Note in a new
+tab: enter the PIN there to add, edit or delete one. Come back to Boord's
+tab and the dropdowns are read again, keeping the row you were typing.
 
 ---
 
@@ -2043,7 +2071,7 @@ PDF; anything already typed for it comes back when it is ticked again. A new
 week starts with none ticked. A week planned before the tick existed has
 every receiver with cartons ticked.
 
-**Pre-orders** (kept in Settings, see section 12) fill the cells of their
+**Pre-orders** (Settings -> Master Data -> Pre-orders, section 8) fill the cells of their
 pack day's week by themselves, in **purple**, with the target receivers
 behind them underneath ("PO Seasons Farm Fresh 1 440 · Solfruit 720"). A
 new week also comes up with every receiver that has a pre-order in it
@@ -2056,7 +2084,7 @@ receiver's row, but doesn't tick that receiver for you.
 
 The link beside **Delivery this week** ("3 pre-orders this week · edit in
 Settings", or "Add a pre-order in Settings") saves the plan and opens the
-Pre-orders list in Settings, with that week's rows shaded and in view. **Add
+Pre-orders under Settings -> Master Data, with that week's rows shaded and in view. **Add
 pre-order** there then starts on the week's Monday. Open the Planner again
 and the week shows the changes.
 
@@ -2110,32 +2138,6 @@ with the other reports.
 ---
 
 ## 12. Admin - Settings
-
-### Pre-orders
-
-Cartons a target receiver books ahead from the export agent's schedule, like
-a forward contract: Sweet Seasons wants 720 cartons of Rhino 4kg packed on
-16 November, through Agrilink Sea. Type the schedule in once, one row per
-pack day, with **Add pre-order**:
-
-- **Pack day** - the day the fruit must be packed to make the truck. The
-  pre-order lands in the Planner's week of that day (**Wk**), the week the
-  fruit has to be picked.
-- **Receiver** - who the load goes to (Agrilink Sea, Agrilink Air, EU Sea).
-- **Target receiver** - who booked it overseas. Only the receiver's market's
-  (USA or EU) are offered; a local receiver has none.
-- **Pack** - starts on the last pack used, else Rhino 4kg.
-- **Cartons**, and a **Note** for the rest of the schedule's line: delivery
-  day and time, JNB-CPT, ETD, USDA samples.
-
-**Pallets** follow from the pack's cartons per pallet, as typed on the
-Planner. The pencil edits a row in place; the bin deletes it after asking.
-
-Receivers, target receivers and packs are Boord Packhouse's lists, not
-Boord's. **Edit lists in Packhouse** (and **edit list** under each dropdown
-while a row is open) opens Packhouse's Settings -> Delivery Note in a new
-tab: enter the PIN there to add, edit or delete one. Come back to Boord's
-tab and the dropdowns are read again, keeping the row you were typing.
 
 ### Server
 

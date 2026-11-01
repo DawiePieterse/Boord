@@ -562,16 +562,19 @@
     <div id="tab-settings" class="tab-content hidden space-y-4">
       <div id="masterdata-section" class="bg-white rounded-xl shadow p-4 space-y-4">
         <div class="font-semibold">Master Data</div>
-        <!-- Five equal buttons, icon over name, on a phone; a row of pills on a
-             wide screen (styles.css, .masterdata-tabs). A sideways-scrolling
-             row hid the last ones off the edge of a phone, and a wrapping one
-             left a ragged three-and-two. -->
-        <div class="masterdata-tabs">
+        <!-- Six equal buttons, icon over name, in two rows of three on a phone;
+             a row of pills on a wide screen (styles.css, .masterdata-tabs). A
+             sideways-scrolling row hid the last ones off the edge of a phone,
+             and a wrapping one left a ragged row. The three columns are set
+             here rather than in the shared styles.css, which the Field and
+             Pack House screens cache too. -->
+        <div class="masterdata-tabs" style="grid-template-columns: repeat(3, 1fr);">
           <button class="subtab-btn active" data-subtab="workers"><i class="fa-solid fa-users"></i><span>Workers</span></button>
           <button class="subtab-btn" data-subtab="teams"><i class="fa-solid fa-people-group"></i><span>Teams</span></button>
           <button class="subtab-btn" data-subtab="blocks"><i class="fa-solid fa-tree"></i><span>Blocks</span></button>
           <button class="subtab-btn" data-subtab="devices"><i class="fa-solid fa-tablet-screen-button"></i><span>Devices</span></button>
           <button class="subtab-btn" data-subtab="suppliers"><i class="fa-solid fa-truck"></i><span>Suppliers</span></button>
+          <button class="subtab-btn" data-subtab="preorders"><i class="fa-solid fa-file-signature"></i><span>Pre-orders</span></button>
         </div>
 
         <div id="subtab-workers" class="subtab-content space-y-3">
@@ -681,26 +684,22 @@
             </div>
           </div>
         </div>
-      </div>
-      <div class="bg-white rounded-xl shadow p-4 space-y-3">
-        <div class="flex items-start justify-between gap-2">
-          <div>
-            <div class="font-semibold"><i class="fa-solid fa-file-signature text-violet-600"></i> Pre-orders</div>
-            <div class="text-xs text-slate-500">Cartons a target receiver has booked ahead, from the export agent's schedule, delivered through a receiver. Each lands in the Planner's week of its pack day and fills that receiver's cartons there in purple; the office can still type over it for the week. Receivers, target receivers and packs are Packhouse's: add, edit or delete them there (Settings, PIN, Delivery Note).</div>
+        <div id="subtab-preorders" class="subtab-content hidden space-y-3">
+          <div class="text-xs text-slate-500">Cartons a target receiver has booked ahead, from the export agent's schedule, delivered through a receiver. Each lands in the Planner's week of its pack day and fills that receiver's cartons there in purple; the office can still type over it for the week. Receivers, target receivers and packs are Packhouse's: add, edit or delete them there (Settings, PIN, Delivery Note).</div>
+          <div class="flex flex-wrap gap-2">
+            <button id="poAddBtn" class="md-btn boord-btn-primary"><i class="fa-solid fa-plus"></i> Add pre-order</button>
+            <a id="poPackhouseLink" target="_blank" rel="noopener" class="md-btn bg-slate-200"><i class="fa-solid fa-arrow-up-right-from-square"></i> Edit lists in Packhouse</a>
           </div>
-          <a id="poPackhouseLink" target="_blank" rel="noopener" class="px-3 py-2 border border-slate-300 rounded-lg text-sm whitespace-nowrap text-blue-700"><i class="fa-solid fa-arrow-up-right-from-square"></i> Edit lists in Packhouse</a>
-          <button id="poAddBtn" class="px-3 py-2 boord-btn-primary rounded-lg text-sm whitespace-nowrap"><i class="fa-solid fa-plus"></i> Add pre-order</button>
+          <div id="poReason" class="hidden text-sm rounded-lg p-3 bg-amber-50 text-amber-800"></div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="text-left border-b bg-slate-50"><th class="p-2">Pack day</th><th class="p-2">Wk</th><th class="p-2">Receiver</th><th class="p-2">Target receiver</th><th class="p-2">Pack</th><th class="p-2 text-right">Cartons</th><th class="p-2 text-right">Pallets</th><th class="p-2">Note</th><th></th></tr></thead>
+              <tbody id="poRows"></tbody>
+            </table>
+          </div>
+          <div id="poTotal" class="text-xs text-slate-500"></div>
         </div>
-        <div id="poReason" class="hidden text-sm rounded-lg p-3 bg-amber-50 text-amber-800"></div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead><tr class="text-left border-b bg-slate-50"><th class="p-2">Pack day</th><th class="p-2">Wk</th><th class="p-2">Receiver</th><th class="p-2">Target receiver</th><th class="p-2">Pack</th><th class="p-2 text-right">Cartons</th><th class="p-2 text-right">Pallets</th><th class="p-2">Note</th><th></th></tr></thead>
-            <tbody id="poRows"></tbody>
-          </table>
-        </div>
-        <div id="poTotal" class="text-xs text-slate-500"></div>
       </div>
-
       <div class="bg-white rounded-xl shadow p-4 space-y-3">
         <div class="font-semibold">Server</div>
         <div class="text-xs text-slate-500">What this server is running, as opposed to what this browser has cached. If the two disagree, this device is showing old code.</div>

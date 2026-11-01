@@ -68,6 +68,14 @@ def market_group(name: str) -> str:
     return hit.group(1).lower() if hit else "local"
 
 
+def receiver_group(r: dict) -> str:
+    """A receiver's group by its market, else by its own name: on the farm
+    "Agrilink USA Sea" says USA in its name while its market field may not,
+    and it belongs with the USA receivers all the same."""
+    group = market_group(r.get("market"))
+    return group if group != "local" else market_group(r.get("name"))
+
+
 # ---------------------------------------------------------------------------
 # The figures
 # ---------------------------------------------------------------------------
@@ -170,7 +178,7 @@ def _packhouse(season_start: date, week_start: date) -> dict:
                 if in_last_week:
                     cell["last_week"] += cartons
     out_receivers = [{"id": r["id"], "name": r["name"], "market": r["market"] or "",
-                      "group": market_group(r["market"]), "active": bool(r["active"])}
+                      "group": receiver_group(r), "active": bool(r["active"])}
                      for r in receivers if r["active"] or str(r["id"]) in used_receivers]
     if "0" in used_receivers:
         out_receivers.append({"id": 0, "name": "No receiver", "market": "", "group": "local", "active": False})
@@ -440,7 +448,7 @@ def list_preorders(session: Session = Depends(get_session)):
         "reason": reason,
         # A receiver's group (usa, eu, local) picks which target receivers
         # the screen offers: a target's market is USA or EU, as in Packhouse.
-        "receivers": [{"id": r["id"], "name": r["name"], "group": market_group(r["market"])}
+        "receivers": [{"id": r["id"], "name": r["name"], "group": receiver_group(r)}
                       for r in receivers if r["active"]],
         "targets": [{"id": t["id"], "name": t["name"], "group": (t["market"] or "").lower()}
                     for t in targets if t["active"]],
