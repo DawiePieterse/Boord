@@ -788,6 +788,7 @@ ADMIN_ONLY_ROUTES = {
     ("GET", "/api/payments"),
     ("GET", "/api/payments/export"),
     ("GET", "/api/planner/week"),
+    ("GET", "/api/planner/preorders"),
     ("GET", "/api/planner/week/{week_start}/export.pdf"),
     ("GET", "/api/planner/week/{week_start}/export.xlsx"),
     ("GET", "/api/reports/block-harvest"),
@@ -829,6 +830,9 @@ ADMIN_ONLY_ROUTES = {
     ("POST", "/api/workers/import"),
     ("POST", "/api/workers/{worker_id}/photo"),
     ("PUT", "/api/planner/packs"),
+    ("PUT", "/api/planner/preorders/{preorder_id}"),
+    ("POST", "/api/planner/preorders"),
+    ("DELETE", "/api/planner/preorders/{preorder_id}"),
     ("PUT", "/api/planner/week/{week_start}"),
     ("PUT", "/api/reports/market-notes/{note_uuid}"),
     ("PUT", "/api/reports/market-products"),
@@ -1966,7 +1970,8 @@ def test_planner_prepac_cartons_hold_four_punnets():
     view["plan_deliveries"] = {"1": {"Pre-pac": 500}}
     d = planner.derive(view)
     toro = next(r for r in d["receivers"] if r["id"] == 1)
-    assert toro["cells"]["Pre-pac"] == {"cartons": 500, "units": 2000, "kg": 960.0, "pallets": 2}
+    assert toro["cells"]["Pre-pac"] == {"cartons": 500, "units": 2000, "kg": 960.0, "pallets": 2,
+                                        "po": None, "from_po": False}
     assert d["delivery_kg"] == 960.0 and d["delivery_cartons"] == 500
     assert planner.units_to_cartons(2000, 4) == 500 and planner.units_to_cartons(10, 4) == 2
     assert planner.units_to_cartons(17, 1) == 17
@@ -2029,6 +2034,29 @@ def test_planner_tables_are_built_from_the_same_derived_figures():
     for compact in (False, True):
         assert "Toro" not in [r[1] for r in _delivery_rows(view, compact)[1]]
     assert view["derived"]["delivery_cartons"] == 50
+
+
+def test_planner_preorders_fill_what_was_not_typed():
+    """A pre-order fills its receiver's cartons for the week until the
+    office types over it (0 included); the PDF says which is which."""
+    import planner  # noqa: E402
+    from routers.planner import _delivery_rows  # noqa: E402
+
+    view = _planner_view()
+    view["plan_deliveries"] = {}
+    view["preorders"] = {"1": {"Pre-pac": {"cartons": 720, "targets": [{"name": "Sweet Seasons", "cartons": 720, "day": "2026-11-16"}]}},
+                         "2": {"Pre-pac": {"cartons": 300, "targets": [{"name": "Solfruit", "cartons": 300, "day": "2026-11-17"}]}}}
+    view["derived"] = d = planner.derive(view)
+    cell = next(r for r in d["receivers"] if r["id"] == 1)["cells"]["Pre-pac"]
+    assert cell["cartons"] == 720 and cell["from_po"] and cell["po"] == 720
+    pdf_cells = lambda: [str(v) for row in _delivery_rows(view, compact=True)[1] for v in row]  # noqa: E731
+    assert "720 PO" in pdf_cells()
+    view["plan_deliveries"] = {"1": {"Pre-pac": 900}, "2": {"Pre-pac": 0}}
+    view["derived"] = d = planner.derive(view)
+    cells = {r["id"]: r["cells"]["Pre-pac"] for r in d["receivers"]}
+    assert cells[1]["cartons"] == 900 and not cells[1]["from_po"]
+    assert cells[2]["cartons"] == 0 and not cells[2]["from_po"]
+    assert "900 (PO 720)" in pdf_cells() and "0 (PO 300)" in pdf_cells()
 
 
 def main():
@@ -2116,7 +2144,8 @@ def main():
                test_planner_pallets_are_whole_and_rounded_up,
                test_planner_prepac_cartons_hold_four_punnets,
                test_planner_typed_loss_overrides_the_season_share,
-               test_planner_tables_are_built_from_the_same_derived_figures):
+               test_planner_tables_are_built_from_the_same_derived_figures,
+               test_planner_preorders_fill_what_was_not_typed):
         check(fn.__name__, fn)
 
     section("Setup state")

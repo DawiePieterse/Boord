@@ -104,6 +104,8 @@ async function showApp() {
     bindMarkets();
     bindMarketModal();
     bindPlanner();
+    bindPreorders();
+    document.getElementById("plannerPoLink").addEventListener("click", openPlannerPreorders);
     bindSettings();
     bindSuppliers();
 
@@ -115,7 +117,7 @@ async function showApp() {
       const tab = active ? active.dataset.tab : "dashboard";
       if (tab === "dashboard") await refreshDashboard();
       // Master Data now lives inside the Settings tab.
-      else if (tab === "settings") { await loadSettingsForm(); await loadAllMasterData(); }
+      else if (tab === "settings") { await loadSettingsForm(); await loadAllMasterData(); await loadPreorders(); }
       else if (tab === "markets") { await loadMarketNotes(); await loadMarketMail(); }
       else if (tab === "planner") await loadPlanner(_plan ? { week_start: _plan.week_start } : {});
     });
@@ -1614,6 +1616,7 @@ function plannerDerive(view) {
   const packs = {};
   for (const p of view.packs || []) packs[p.name] = p;
   const deliveries = view.plan_deliveries || {};
+  const preorders = view.preorders || {};
   const receivers = [];
   const packTotals = {};
   for (const name of Object.keys(packs)) packTotals[name] = { cartons: 0, kg: 0, pallets: 0 };
@@ -1624,13 +1627,16 @@ function plannerDerive(view) {
     const cells = {};
     let rc = 0, rk = 0, rp = 0;
     for (const [name, p] of Object.entries(packs)) {
-      const cartons = on ? parseInt((deliveries[rid] || {})[name] || 0, 10) || 0 : 0;
+      // Typed wins; where nothing was typed, the week's pre-orders fill it.
+      const typed = (deliveries[rid] || {})[name];
+      const po = ((preorders[rid] || {})[name] || {}).cartons || null;
+      const cartons = on ? (typed != null ? parseInt(typed, 10) || 0 : po || 0) : 0;
       const units = cartons * (p.units_per_carton || 1);   // Packhouse's unit: a Pre-pac punnet
       const kg = r1(units * (p.carton_kg || 0));
       const perPallet = p.cartons_per_pallet || 0;
       // Whole pallets, rounded up: a part-filled pallet still travels.
       const pallets = perPallet ? (cartons ? Math.ceil(cartons / perPallet) : 0) : null;
-      cells[name] = { cartons, units, kg, pallets };
+      cells[name] = { cartons, units, kg, pallets, po, from_po: !!po && typed == null };
       rc += cartons; rk += kg; rp += pallets || 0;
       packTotals[name].cartons += cartons; packTotals[name].kg += kg; packTotals[name].pallets += pallets || 0;
     }
@@ -1842,6 +1848,16 @@ function renderPlannerHarvest() {
   }));
 }
 
+// The Planner's link to this week's pre-orders in Settings. The plan is
+// saved first; coming back to the Planner reloads the week, pre-orders and all.
+function openPlannerPreorders() {
+  if (!_plan) return;
+  flushPlannerSave();
+  _poWeek = { start: _plan.week_start, end: _plan.week_end };
+  _poFromPlanner = true;
+  document.querySelector('.tab-btn[data-tab="settings"]').click();
+}
+
 function plannerBlock(id) {
   const b = _plan.blocks.find((x) => x.block_id === id);
   if (!b.fixed) b.fixed = {};
@@ -1892,9 +1908,10 @@ function renderPlannerDelivery() {
     const dis = r.on ? "" : "disabled";
     const cells = v.packs.map((p) => {
       const done = (v.delivered[String(r.id)] || {})[p.name] || {};
-      const planned = (v.plan_deliveries[String(r.id)] || {})[p.name] || "";
+      const planned = (v.plan_deliveries[String(r.id)] || {})[p.name] ?? "";
       return `<td class="p-1 text-center align-top">
         <input type="number" min="0" step="1" inputmode="numeric" class="planner-cartons" data-plan-cartons="${rid}:${esc(p.name)}" value="${planned}" placeholder="cartons" title="Cartons this week" ${dis}>
+        <div class="text-[11px] whitespace-nowrap" data-plan-po="${rid}:${esc(p.name)}"></div>
         <div class="planner-actual" data-plan-done="${rid}:${esc(p.name)}" data-ytd="${done.ytd || 0}" data-lastweek="${done.last_week || 0}"></div>
       </td>`;
     }).join("");
@@ -1915,6 +1932,10 @@ function renderPlannerDelivery() {
     </tr>`);
   }
   rows.innerHTML = body.length ? body.join("") : `<tr><td colspan="${v.packs.length + 4}" class="p-3 text-sm text-slate-500">No receivers in Boord Packhouse's settings yet.</td></tr>`;
+  const nPo = (v.preorder_list || []).length;
+  document.getElementById("plannerPoLink").innerHTML = nPo
+    ? `<i class="fa-solid fa-file-signature"></i> ${nPo} pre-order${nPo === 1 ? "" : "s"} this week · edit in Settings`
+    : `<i class="fa-solid fa-file-signature"></i> Add a pre-order in Settings`;
   document.getElementById("plannerDeliveryFoot").innerHTML = `<tr class="font-semibold bg-slate-50">
       <td class="p-2">Total</td>
       <td class="p-2 text-right" data-plan-cell="delivery_cartons"></td>
@@ -1931,12 +1952,19 @@ function renderPlannerDelivery() {
     inp.addEventListener("input", () => {
       const [rid, pack] = inp.dataset.planCartons.split(/:(.*)/s);
       const d = _plan.plan_deliveries[rid] || (_plan.plan_deliveries[rid] = {});
-      const n = parseInt(inp.value, 10);
-      if (inp.value === "" || !n) delete d[pack]; else d[pack] = Math.max(0, n);
+      // Empty hands the cell back to its pre-order (if any); a typed 0 is
+      // kept, so a pre-order can be cancelled for the week.
+      if (inp.value === "") delete d[pack]; else d[pack] = Math.max(0, parseInt(inp.value, 10) || 0);
       refreshPlannerDerived();
     });
-    inp.addEventListener("change", schedulePlannerSave);
+    inp.addEventListener("change", () => { refreshPlannerDerived(); schedulePlannerSave(); });
   });
+  rows.querySelectorAll("[data-plan-po]").forEach((el) => el.addEventListener("click", (e) => {
+    if (!e.target.closest("[data-po-reset]")) return;
+    const [rid, pack] = el.dataset.planPo.split(/:(.*)/s);
+    delete (_plan.plan_deliveries[rid] || {})[pack];
+    refreshPlannerDerived(); schedulePlannerSave();
+  }));
   const savePacks = () => {
     clearTimeout(_planPacksTimer);
     _planPacksTimer = setTimeout(async () => {
@@ -2036,6 +2064,26 @@ function refreshPlannerDerived() {
     const pack = el.dataset.planDone.split(/:(.*)/s)[1];
     el.textContent = `YTD ${Boord.fmtNum(plannerUnitsToCartons(+el.dataset.ytd, perCarton[pack]), 0)} · last wk ${Boord.fmtNum(plannerUnitsToCartons(+el.dataset.lastweek, perCarton[pack]), 0)}`;
   });
+  // Pre-orders: a cell filled by one is purple and says which pack days; one
+  // the office typed over keeps the pre-order's figure beside it, with a
+  // reset that hands the cell back to it.
+  const poTargets = (rid, pack) => (((v.preorders || {})[rid] || {})[pack] || {}).targets || [];
+  const shortDay = (iso) => new Date(`${iso}T00:00`).toLocaleDateString("en-ZA", { day: "2-digit", month: "short" });
+  for (const r of d.receivers) {
+    for (const [pack, c] of Object.entries(r.cells)) {
+      const key = `${r.id}:${pack}`;
+      const inp = document.querySelector(`[data-plan-cartons="${CSS.escape(key)}"]`);
+      const note = document.querySelector(`[data-plan-po="${CSS.escape(key)}"]`);
+      if (!inp || !note) continue;
+      const typed = (v.plan_deliveries[String(r.id)] || {})[pack];
+      if (inp !== focused) inp.value = typed != null ? typed : (c.po || "");
+      for (const cls of ["bg-violet-100", "border-violet-400", "text-violet-800"]) inp.classList.toggle(cls, c.from_po);
+      note.innerHTML = !c.po ? ""
+        : c.from_po ? `<span class="text-violet-700">PO ${poTargets(String(r.id), pack).map((t) =>
+            `<span title="Packed ${shortDay(t.day)}">${esc(t.name || "")} ${Boord.fmtNum(t.cartons, 0)}</span>`).join(" · ")}</span>`
+        : `<span class="text-amber-700">typed · PO ${Boord.fmtNum(c.po, 0)}</span> <button type="button" class="underline text-violet-700" data-po-reset>reset</button>`;
+    }
+  }
   for (const r of d.receivers) {
     const on = v.receivers.find((x) => x.id === r.id).on;
     set(`rcartons:${r.id}`, on ? Boord.fmtNum(r.cartons, 0) : "");
@@ -2795,6 +2843,149 @@ async function runBackupNow() {
   } catch (e) {
     Boord.toast("Backup failed");
   }
+}
+
+// ----- Pre-orders (Settings) -----
+// The export agents send their season's schedule once: per pack day, the
+// cartons each of their receivers wants. Typed here, they fill the Planner's
+// week of the pack day (backend build_week / planner.derive). One row is
+// edited in place at a time; "new" is the row being added.
+
+let _po = null;
+let _poEdit = null;
+let _poDraft = null;   // the row being edited, kept across a refresh of the lists
+let _poWeek = null;    // {start, end}: the Planner week whose rows are highlighted
+let _poFromPlanner = false;
+
+// Packhouse keeps the receivers, target receivers and packs (Settings ->
+// Delivery Note, behind its PIN). Same host, its own port, as on the tailnet.
+const PACKHOUSE_LISTS_URL = `${location.protocol}//${location.hostname}:8060/#settings/deliverynote`;
+
+async function loadPreorders(keepEdit = false) {
+  try {
+    _po = await Boord.api("/api/planner/preorders");
+  } catch (e) {
+    Boord.toast(Boord.errorDetail(e, "Could not load the pre-orders"));
+    return;
+  }
+  if (keepEdit) _poDraft = poRowValues(); else { _poEdit = null; _poDraft = null; }
+  renderPreorders();
+}
+
+// What the row being edited holds right now, as a pre-order.
+function poRowValues() {
+  const row = document.querySelector("[data-po-row]");
+  if (!row) return null;
+  const f = (k) => row.querySelector(`[data-po-f="${k}"]`).value;
+  const id = (k) => (f(k) ? parseInt(f(k), 10) : null);
+  return { id: row.dataset.poRow === "new" ? null : parseInt(row.dataset.poRow, 10), pack_day: f("pack_day"),
+           receiver_id: id("receiver_id"), target_receiver_id: id("target_receiver_id"), pack: f("pack"),
+           cartons: parseInt(f("cartons"), 10) || null, note: f("note") };
+}
+
+function renderPreorders() {
+  const reason = document.getElementById("poReason");
+  reason.classList.toggle("hidden", !_po.reason);
+  reason.textContent = _po.reason || "";
+  const shortDay = (iso) => new Date(`${iso}T00:00`).toLocaleDateString("en-ZA", { weekday: "short", day: "2-digit", month: "short" });
+  const jump = `<a href="${PACKHOUSE_LISTS_URL}" target="_blank" rel="noopener" class="text-[11px] text-blue-700 whitespace-nowrap"><i class="fa-solid fa-arrow-up-right-from-square"></i> edit list</a>`;
+  const editRow = (po) => {
+    // A retired receiver or target still shows on the row that names it.
+    const receivers = _po.receivers.some((r) => r.id === po.receiver_id) || po.receiver_id == null ? _po.receivers
+      : [..._po.receivers, { id: po.receiver_id, name: po.receiver_name, group: "" }];
+    const group = (receivers.find((r) => r.id === po.receiver_id) || {}).group;
+    // Target receivers of the receiver's market (USA or EU); all of them
+    // until a receiver is picked, none to pick from for a local one.
+    let targets = _po.targets.filter((t) => !group || t.group === group);
+    if (po.target_receiver_id && !targets.some((t) => t.id === po.target_receiver_id)) {
+      targets = [...targets, { id: po.target_receiver_id, name: po.target_name || `Target ${po.target_receiver_id}` }];
+    }
+    const packs = _po.packs.includes(po.pack) || !po.pack ? _po.packs : [..._po.packs, po.pack];
+    const field = "border border-slate-300 rounded p-1";
+    return `<tr class="border-b bg-violet-50" data-po-row="${po.id || "new"}">
+      <td class="p-1"><input type="date" class="${field}" data-po-f="pack_day" value="${po.pack_day || ""}"></td>
+      <td class="p-1 text-slate-400">–</td>
+      <td class="p-1"><select class="${field}" data-po-f="receiver_id"><option value="">Receiver…</option>${receivers.map((r) => `<option value="${r.id}" ${r.id === po.receiver_id ? "selected" : ""}>${esc(r.name)}</option>`).join("")}</select><div>${jump}</div></td>
+      <td class="p-1"><select class="${field}" data-po-f="target_receiver_id"><option value="">${group === "local" ? "– (local)" : "Target receiver…"}</option>${targets.map((t) => `<option value="${t.id}" ${t.id === po.target_receiver_id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select><div>${jump}</div></td>
+      <td class="p-1"><select class="${field}" data-po-f="pack">${packs.map((p) => `<option ${p === (po.pack || _po.default_pack) ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></td>
+      <td class="p-1 text-right"><input type="number" min="1" step="1" inputmode="numeric" class="${field} w-24 text-right" data-po-f="cartons" value="${po.cartons || ""}"></td>
+      <td class="p-1"></td>
+      <td class="p-1"><input type="text" class="${field} w-full min-w-[12rem]" data-po-f="note" value="${esc(po.note || "")}" placeholder="Del 17 Nov 07:00 · ETD 19 Nov · USDA 5"></td>
+      <td class="p-1 whitespace-nowrap"><button class="px-2 text-green-700" data-po-save title="Save"><i class="fa-solid fa-check"></i></button><button class="px-2 text-slate-500" data-po-cancel title="Cancel"><i class="fa-solid fa-xmark"></i></button></td>
+    </tr>`;
+  };
+  const inWeek = (po) => _poWeek && po.pack_day >= _poWeek.start && po.pack_day <= _poWeek.end;
+  const rows = _po.preorders.map((po) => (_poEdit === po.id ? editRow(_poDraft || po) : `<tr class="border-b ${inWeek(po) ? "bg-violet-50" : ""}" ${inWeek(po) ? "data-po-week" : ""}>
+      <td class="p-2 whitespace-nowrap">${shortDay(po.pack_day)}</td><td class="p-2">${po.iso_week}</td>
+      <td class="p-2">${esc(po.receiver_name)}</td><td class="p-2">${esc(po.target_name) || `<span class="text-slate-400">–</span>`}</td><td class="p-2">${esc(po.pack)}</td>
+      <td class="p-2 text-right">${Boord.fmtNum(po.cartons, 0)}</td>
+      <td class="p-2 text-right">${po.pallets == null ? `<span class="text-slate-400" title="Type the pack's cartons per pallet on the Planner">–</span>` : Boord.fmtNum(po.pallets, 0)}</td>
+      <td class="p-2 text-xs text-slate-500">${esc(po.note)}</td>
+      <td class="p-2 whitespace-nowrap"><button class="px-2 text-slate-500" data-po-edit="${po.id}" title="Edit"><i class="fa-solid fa-pen"></i></button><button class="px-2 text-red-600" data-po-del="${po.id}" title="Delete"><i class="fa-solid fa-trash"></i></button></td>
+    </tr>`));
+  if (_poEdit === "new") rows.unshift(editRow(_poDraft || {}));
+  document.getElementById("poRows").innerHTML = rows.length ? rows.join("")
+    : `<tr><td colspan="9" class="p-3 text-sm text-slate-500">No pre-orders yet. Add one per pack day from the receiver's schedule.</td></tr>`;
+  const cartons = _po.preorders.reduce((s, p) => s + p.cartons, 0);
+  const pallets = _po.preorders.reduce((s, p) => s + (p.pallets || 0), 0);
+  document.getElementById("poTotal").textContent = _po.preorders.length
+    ? `${_po.preorders.length} pre-orders · ${Boord.fmtNum(cartons, 0)} cartons${pallets ? ` · ${Boord.fmtNum(pallets, 0)} pallets` : ""}` : "";
+}
+
+function bindPreorders() {
+  document.getElementById("poPackhouseLink").href = PACKHOUSE_LISTS_URL;
+  // Coming from a week on the Planner, a new one starts on that week's Monday.
+  document.getElementById("poAddBtn").addEventListener("click", () => {
+    if (_po) { _poEdit = "new"; _poDraft = _poWeek ? { pack_day: _poWeek.start } : null; renderPreorders(); }
+  });
+  // Opening Settings reads the pre-orders afresh. From the Planner's link,
+  // that week's rows are shaded and scrolled to; from the tab, none are.
+  document.querySelector('.tab-btn[data-tab="settings"]').addEventListener("click", async () => {
+    if (!_poFromPlanner) _poWeek = null;
+    _poFromPlanner = false;
+    await loadPreorders();
+    if (_poWeek) {
+      (document.querySelector("[data-po-week]") || document.getElementById("poAddBtn")).scrollIntoView({ block: "center" });
+    }
+  });
+  // Back from editing the lists in Packhouse's tab: fetch them again, keeping
+  // whatever row is half-typed here.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && _po && !document.getElementById("tab-settings").classList.contains("hidden")) {
+      loadPreorders(true);
+    }
+  });
+  // A different receiver can mean a different market: offer its targets.
+  document.getElementById("poRows").addEventListener("change", (e) => {
+    if (e.target.matches('[data-po-f="receiver_id"]')) { _poDraft = poRowValues(); _poDraft.target_receiver_id = null; renderPreorders(); }
+  });
+  document.getElementById("poRows").addEventListener("click", async (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    if (btn.dataset.poEdit) { _poEdit = parseInt(btn.dataset.poEdit, 10); _poDraft = null; renderPreorders(); return; }
+    if (btn.hasAttribute("data-po-cancel")) { _poEdit = null; _poDraft = null; renderPreorders(); return; }
+    if (btn.dataset.poDel) {
+      const po = _po.preorders.find((p) => p.id === parseInt(btn.dataset.poDel, 10));
+      if (!confirm(`Delete ${po.target_name || po.receiver_name}'s ${po.cartons} cartons packed ${po.pack_day}?`)) return;
+      try { await Boord.api(`/api/planner/preorders/${po.id}`, { method: "DELETE" }); } catch (err) { Boord.toast(Boord.errorDetail(err, "Not deleted")); return; }
+      await loadPreorders();
+      return;
+    }
+    if (btn.hasAttribute("data-po-save")) {
+      const row = btn.closest("[data-po-row]");
+      const { id: _, ...body } = poRowValues();
+      if (!body.pack_day || !body.receiver_id || !body.pack || !(body.cartons > 0)) {
+        Boord.toast("A pre-order needs a pack day, a receiver, a pack and its cartons");
+        return;
+      }
+      const id = row.dataset.poRow;
+      try {
+        await Boord.api(id === "new" ? "/api/planner/preorders" : `/api/planner/preorders/${id}`,
+                        { method: id === "new" ? "POST" : "PUT", body });
+      } catch (err) { Boord.toast(Boord.errorDetail(err, "Not saved")); return; }
+      await loadPreorders();
+    }
+  });
 }
 
 async function loadSettingsForm() {

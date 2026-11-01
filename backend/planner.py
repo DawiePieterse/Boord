@@ -141,7 +141,8 @@ def derive(view: dict) -> dict:
 
     - per block: remaining, available (the saved figure or remaining), kg
       per ticked day, the block's planned total;
-    - per receiver and pack (nothing for one not ticked): planned cartons, Packhouse units (punnets for
+    - per receiver and pack (nothing for one not ticked): planned cartons
+      (typed, else the week's pre-orders, with from_po saying which), Packhouse units (punnets for
       Pre-pac), kg and whole pallets (rounded up: a part-filled pallet still
       goes on the truck);
     - the week: planned harvest kg, the loss % in force, deliverable kg
@@ -178,6 +179,7 @@ def derive(view: dict) -> dict:
 
     packs = {p["name"]: p for p in view.get("packs", [])}
     deliveries = view.get("plan_deliveries") or {}
+    preorders = view.get("preorders") or {}
     receivers_out = []
     pack_totals: Dict[str, dict] = {name: {"cartons": 0, "kg": 0.0, "pallets": 0} for name in packs}
     delivery_kg = 0.0
@@ -191,7 +193,11 @@ def derive(view: dict) -> dict:
         cells = {}
         r_cartons, r_kg, r_pallets = 0, 0.0, 0
         for name, p in packs.items():
-            cartons = int((deliveries.get(rid) or {}).get(name) or 0) if on else 0
+            # What the office typed wins; where nothing was typed, the
+            # receiver's pre-orders for the week fill the cell.
+            typed = (deliveries.get(rid) or {}).get(name)
+            po = ((preorders.get(rid) or {}).get(name) or {}).get("cartons")
+            cartons = int(typed if typed is not None else (po or 0)) if on else 0
             # Packhouse's carton_kg is the weight of the unit its pallet lines
             # count (a Pre-pac punnet, 0.48 kg); a carton holds units_per_carton
             # of them (4), so the kg is units x unit weight.
@@ -202,7 +208,8 @@ def derive(view: dict) -> dict:
             # pallets to their own destination, so 20 cartons of a 1500-carton
             # pack is still one pallet on the truck, not 0.01 of one.
             pallets = -(-cartons // per_pallet) if per_pallet and cartons else (0 if per_pallet else None)
-            cells[name] = {"cartons": cartons, "units": units, "kg": kg, "pallets": pallets}
+            cells[name] = {"cartons": cartons, "units": units, "kg": kg, "pallets": pallets, "po": po,
+                           "from_po": bool(po) and typed is None}
             r_cartons += cartons
             r_kg += kg
             r_pallets += pallets or 0

@@ -10,8 +10,9 @@ Three sources, one screen:
 - Boord Packhouse's packhouse.db, read-only, for the receivers, the packs
   and the delivery notes already loaded.
 
-Only the plan itself (models.HarvestPlan) and the cartons-per-pallet of each
-pack (models.PlannerPack) are written, and only to boord.db. The two sibling
+Only the plan itself (models.HarvestPlan), the cartons-per-pallet of each
+pack (models.PlannerPack) and the receivers' pre-orders (models.PreOrder,
+kept from Settings) are written, and only to boord.db. The two sibling
 databases are opened the way reports.py opens packhouse.db: mode=ro, and a
 503 in words rather than a 500 when one is not on this PC - the plan must
 still open with the estimate or the receivers missing, saying so.
@@ -30,6 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from fpdf import FPDF
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, Field
@@ -39,7 +41,7 @@ from sqlmodel import Session, select
 import planner
 from db import DATA_DIR, get_own_supplier_id, get_session
 from excel_io import XLSX_MEDIA
-from models import Block, HarvestPlan, HarvestRecord, PlannerPack, SystemSetting
+from models import Block, HarvestPlan, HarvestRecord, PlannerPack, PreOrder, SystemSetting
 from routers.reports import REPORTS_DIR, _packhouse_rows
 from security import require_admin_client
 from timeutil import day_bounds, to_local
@@ -219,13 +221,31 @@ def build_week(session: Session, week_start: date) -> dict:
     plan = session.get(HarvestPlan, week_start)
     saved_blocks = {p["block_id"]: p for p in json.loads(plan.blocks or "[]")} if plan else {}
     plan_deliveries = json.loads(plan.deliveries or "{}") if plan else {}
+    # Pre-orders packed this week, summed per receiver and pack, with their
+    # pack days: they fill the cartons wherever nothing was typed (derive).
+    week_pos = session.exec(select(PreOrder).where(PreOrder.pack_day >= week_start, PreOrder.pack_day <= week_end)
+                            .order_by(PreOrder.pack_day, PreOrder.id)).all()
+    targets = _target_names() if week_pos else {}
+    receiver_names = {r["id"]: r["name"] for r in ph["receivers"]}
+    preorders: Dict[str, Dict[str, dict]] = {}
+    preorder_list = []
+    for po in week_pos:
+        target = targets.get(po.target_receiver_id, "") if po.target_receiver_id else ""
+        cell = preorders.setdefault(str(po.receiver_id), {}).setdefault(po.pack, {"cartons": 0, "targets": []})
+        cell["cartons"] += po.cartons
+        cell["targets"].append({"name": target, "cartons": po.cartons, "day": po.pack_day.isoformat()})
+        preorder_list.append({"pack_day": po.pack_day.isoformat(), "pack": po.pack, "cartons": po.cartons,
+                              "receiver": receiver_names.get(po.receiver_id, f"Receiver {po.receiver_id}"),
+                              "target": target, "note": po.note})
     # Like a block, a receiver is ticked for the week or not. A week not yet
-    # planned starts with none ticked; a plan saved before the tick existed
-    # has every receiver it planned cartons for ticked, so it reads as it did.
+    # planned starts with none ticked but the receivers with a pre-order in
+    # it; a plan saved before the tick existed has every receiver it planned
+    # cartons for ticked, so it reads as it did. A saved week keeps its ticks:
+    # a pre-order added after it shows in purple on the unticked row instead.
     if plan and plan.receivers_on is not None:
         receivers_on = set(json.loads(plan.receivers_on))
     else:
-        receivers_on = set(plan_deliveries)
+        receivers_on = set(plan_deliveries) | set(preorders)
     receivers = [dict(r, on=str(r["id"]) in receivers_on) for r in ph["receivers"]]
 
     out_blocks = []
@@ -270,6 +290,8 @@ def build_week(session: Session, week_start: date) -> dict:
         "packs": packs,
         "delivered": ph["delivered"],
         "plan_deliveries": plan_deliveries,
+        "preorders": preorders,
+        "preorder_list": preorder_list,
         "loss": {
             "harvested_kg": harvested_total, "delivered_kg": ph["delivered_kg"],
             "season_pct": planner.loss_pct(harvested_total, ph["delivered_kg"]) if ph["available"] else None,
@@ -340,7 +362,8 @@ def save_week(week_start: date, body: PlanIn, session: Session = Depends(get_ses
                  if k.isdigit() and int(k) in days and v is not None and v >= 0}
         blocks.append({"block_id": b.block_id, "on": b.on, "available_kg": b.available_kg,
                        "days": days, "fixed": fixed})
-    deliveries = {rid: {pack: int(c) for pack, c in cells.items() if c}
+    # A typed 0 is kept: over a pre-order it means "none this week after all".
+    deliveries = {rid: {pack: int(c) for pack, c in cells.items() if c is not None and c >= 0}
                   for rid, cells in body.deliveries.items()}
     deliveries = {rid: cells for rid, cells in deliveries.items() if cells}
     session.merge(HarvestPlan(
@@ -370,6 +393,110 @@ def save_packs(body: List[PackIn], session: Session = Depends(get_session)):
             session.merge(PlannerPack(pack=p.pack.strip(), cartons_per_pallet=p.cartons_per_pallet,
                                       units_per_carton=p.units_per_carton))
     session.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Pre-orders (Admin -> Settings)
+# ---------------------------------------------------------------------------
+
+def _default_pack(packs: List[str], last: Optional[str]) -> str:
+    """The pack a new pre-order starts on: the last one typed, else Rhino 4kg,
+    which is what the export agents almost always book, else the first."""
+    if last in packs:
+        return last
+    rhino = [p for p in packs if "rhino" in p.lower() and re.search(r"\b4\s*kg", p, re.I)]
+    return rhino[0] if rhino else (packs[0] if packs else "")
+
+
+def _target_names() -> Dict[int, str]:
+    """Packhouse's target receivers by id, retired ones too (an old
+    pre-order still names its own). Empty when Packhouse can't be read."""
+    try:
+        return {r["id"]: r["name"] for r in _packhouse_rows("SELECT id, name FROM targetreceiver")}
+    except HTTPException:
+        return {}
+
+
+@router.get("/preorders")
+def list_preorders(session: Session = Depends(get_session)):
+    """Every pre-order, by pack day, with the receivers and packs to pick
+    from. Packhouse missing leaves the list readable (names as ids) with the
+    reason, rather than no list at all."""
+    reason = None
+    try:
+        receivers = _packhouse_rows("SELECT id, name, market, active FROM receiver ORDER BY sort, name")
+        targets = _packhouse_rows("SELECT id, name, market, active FROM targetreceiver ORDER BY sort, name")
+        packs = _packhouse_rows("SELECT name, active FROM packaging ORDER BY sort, name")
+    except HTTPException as e:
+        receivers, targets, packs, reason = [], [], [], e.detail
+    names = {r["id"]: r["name"] for r in receivers}
+    target_names = {t["id"]: t["name"] for t in targets}
+    per_pallet = {p.pack: p.cartons_per_pallet for p in session.exec(select(PlannerPack)).all()}
+    rows = session.exec(select(PreOrder).order_by(PreOrder.pack_day, PreOrder.id)).all()
+    last = max(rows, key=lambda r: r.updated_at).pack if rows else None
+    pack_names = sorted({p["name"] for p in packs if p["active"]}, key=planner.pack_sort_key)
+    return {
+        "reason": reason,
+        # A receiver's group (usa, eu, local) picks which target receivers
+        # the screen offers: a target's market is USA or EU, as in Packhouse.
+        "receivers": [{"id": r["id"], "name": r["name"], "group": market_group(r["market"])}
+                      for r in receivers if r["active"]],
+        "targets": [{"id": t["id"], "name": t["name"], "group": (t["market"] or "").lower()}
+                    for t in targets if t["active"]],
+        "packs": pack_names,
+        "default_pack": _default_pack(pack_names, last),
+        "preorders": [{
+            "id": r.id, "pack_day": r.pack_day.isoformat(), "iso_week": r.pack_day.isocalendar()[1],
+            "receiver_id": r.receiver_id, "receiver_name": names.get(r.receiver_id, f"Receiver {r.receiver_id}"),
+            "target_receiver_id": r.target_receiver_id,
+            "target_name": target_names.get(r.target_receiver_id, "") if r.target_receiver_id else "",
+            "pack": r.pack, "cartons": r.cartons, "note": r.note,
+            # Whole pallets, rounded up, as on the Planner; None until the
+            # pack's cartons per pallet is typed there.
+            "pallets": -(-r.cartons // per_pallet[r.pack]) if per_pallet.get(r.pack) else None,
+        } for r in rows],
+    }
+
+
+class PreOrderIn(BaseModel):
+    pack_day: date
+    receiver_id: int
+    target_receiver_id: Optional[int] = None
+    pack: str = Field(min_length=1)
+    cartons: int = Field(gt=0)
+    note: str = ""
+
+
+def _put_preorder(row: PreOrder, body: PreOrderIn, session: Session) -> dict:
+    row.pack_day, row.receiver_id, row.pack = body.pack_day, body.receiver_id, body.pack.strip()
+    row.target_receiver_id = body.target_receiver_id
+    row.cartons, row.note, row.updated_at = body.cartons, body.note.strip(), datetime.utcnow()
+    session.add(row)
+    session.commit()
+    return {"ok": True, "id": row.id}
+
+
+@router.post("/preorders")
+def add_preorder(body: PreOrderIn, session: Session = Depends(get_session)):
+    return _put_preorder(PreOrder(pack_day=body.pack_day, receiver_id=body.receiver_id, pack=body.pack,
+                                  cartons=body.cartons, updated_at=datetime.utcnow()), body, session)
+
+
+@router.put("/preorders/{preorder_id}")
+def edit_preorder(preorder_id: int, body: PreOrderIn, session: Session = Depends(get_session)):
+    row = session.get(PreOrder, preorder_id)
+    if not row:
+        raise HTTPException(404, "That pre-order is gone - reload the list")
+    return _put_preorder(row, body, session)
+
+
+@router.delete("/preorders/{preorder_id}")
+def delete_preorder(preorder_id: int, session: Session = Depends(get_session)):
+    row = session.get(PreOrder, preorder_id)
+    if row:
+        session.delete(row)
+        session.commit()
     return {"ok": True}
 
 
@@ -429,6 +556,16 @@ def _harvest_rows(view: dict, compact: bool = False) -> tuple:
     return headers, rows, total
 
 
+def _po_text(cell: dict):
+    """A PDF cell that came from a pre-order says so: "720 PO", or "900 (PO
+    720)" where the office typed over one. Plain cartons otherwise."""
+    if cell.get("from_po"):
+        return f"{cell['cartons']} PO"
+    if cell.get("po") and cell["cartons"] != cell["po"]:
+        return f"{cell['cartons']} (PO {cell['po']})"
+    return cell["cartons"]
+
+
 def _delivery_rows(view: dict, compact: bool = False) -> tuple:
     """The delivery section. The sheet has YTD and last week beside this
     week's cartons for each pack; the PDF (`compact`) has this week's only.
@@ -455,7 +592,8 @@ def _delivery_rows(view: dict, compact: bool = False) -> tuple:
                 upc = p.get("units_per_carton") or 1
                 row += [planner.units_to_cartons(done.get("ytd", 0), upc),
                         planner.units_to_cartons(done.get("last_week", 0), upc)]
-            row.append(x["cells"][p["name"]]["cartons"])
+            cell = x["cells"][p["name"]]
+            row.append(_po_text(cell) if compact else cell["cartons"])
         rows.append(row)
     total = ["Total", "", d["delivery_cartons"], _num(d["delivery_kg"]), d["delivery_pallets"]]
     for p in packs:
@@ -466,6 +604,14 @@ def _delivery_rows(view: dict, compact: bool = False) -> tuple:
                       planner.units_to_cartons(sum(c.get("last_week", 0) for c in cells), upc)]
         total.append(d["pack_totals"][p["name"]]["cartons"])
     return headers, rows, total
+
+
+def _preorder_rows(view: dict) -> tuple:
+    """The week's pre-orders, one per line, for under the delivery table:
+    which target receiver booked what, through which receiver."""
+    rows = [[date.fromisoformat(p["pack_day"]).strftime("%a %d %b"), p["receiver"], p["target"], p["pack"],
+             p["cartons"], p["note"]] for p in view.get("preorder_list") or []]
+    return ["Pack day", "Receiver", "Target receiver", "Pack", "Cartons", "Note"], rows, None
 
 
 def _grand_rows(view: dict, compact: bool = False) -> list:
@@ -508,6 +654,7 @@ def export_xlsx(week_start: date, session: Session = Depends(get_session)):
             cell = ws.cell(row=ws.max_row, column=c)
             cell.font, cell.fill = bold, head_fill
             cell.alignment = Alignment(wrap_text=True, vertical="top")
+        first = ws.max_row + 1
         for r in rows:
             ws.append(r)
         if total:
@@ -515,6 +662,7 @@ def export_xlsx(week_start: date, session: Session = Depends(get_session)):
             for c in range(1, len(total) + 1):
                 ws.cell(row=ws.max_row, column=c).font = bold
         ws.append([])
+        return first
 
     ws.append([_title(view)])
     ws.cell(row=1, column=1).font = Font(bold=True, size=14)
@@ -526,7 +674,30 @@ def export_xlsx(week_start: date, session: Session = Depends(get_session)):
         ws.append([view["packhouse"].get("reason", "")])
     ws.append([])
     section("Harvest this week", *_harvest_rows(view))
-    section("Delivery this week (cartons; Packhouse's units per carton as set on the Planner)", *_delivery_rows(view))
+    first = section("Delivery this week (cartons; Packhouse's units per carton as set on the Planner)",
+                    *_delivery_rows(view))
+    # Pre-order cells, in the same order _delivery_rows wrote the ticked
+    # receivers: purple where the pre-order stands, a note where the office
+    # typed over one. "this wk" is the third column of each pack's three.
+    po_fill = PatternFill("solid", fgColor="EDE9FE")
+    derived = {str(r["id"]): r for r in view["derived"]["receivers"]}
+    marked = False
+    ticked = [x for x in view["receivers"] if x.get("on", True)]
+    for i, r in enumerate(ticked):
+        for j, p in enumerate(view["packs"]):
+            cell = derived[str(r["id"])]["cells"][p["name"]]
+            target = ws.cell(row=first + i, column=8 + 3 * j)
+            if cell["from_po"]:
+                target.fill = po_fill
+                marked = True
+            elif cell["po"] and cell["cartons"] != cell["po"]:
+                target.comment = Comment(f"Pre-order {cell['po']}, typed over", "Boord")
+                marked = True
+    if marked:  # in the blank row under the totals
+        ws.cell(row=first + len(ticked) + 1, column=1,
+                value="Purple = a pre-order booked by a target receiver; a note = typed over a pre-order")
+    if view.get("preorder_list"):
+        section("Pre-orders packed this week", *_preorder_rows(view))
     section("Grand totals", ["", ""], _grand_rows(view), None)
     widths = {}
     for row in ws.iter_rows():
@@ -587,7 +758,10 @@ def export_pdf(week_start: date, session: Session = Depends(get_session)):
             if pdf.get_y() > pdf.h - 20:
                 pdf.add_page()
             for i, (v, w) in enumerate(zip(r, widths)):
-                pdf.cell(w, 6, _latin(v), border=1, align="L" if i == 0 else "R")
+                # A pre-order's cell ("720 PO", _po_text) is shaded, as on the screen.
+                po = isinstance(v, str) and v.endswith("PO")
+                pdf.set_fill_color(237, 233, 254)
+                pdf.cell(w, 6, _latin(v), border=1, align="L" if i == 0 else "R", fill=po)
             pdf.ln(6)
         if total:
             pdf.set_font("Helvetica", "B", 8)
@@ -609,6 +783,13 @@ def export_pdf(week_start: date, session: Session = Depends(get_session)):
     text("Delivery this week (cartons)", 11, "B", 7)
     h, r, t = _delivery_rows(view, compact=True)
     table(h, r, t, first_col=28)
+    if any("PO" in str(v) for row in r for v in row):
+        text("PO = a pre-order booked by a target receiver; 900 (PO 720) = typed over a pre-order of 720", 7)
+        pdf.ln(2)
+    if view.get("preorder_list"):
+        text("Pre-orders packed this week", 11, "B", 7)
+        h, r, t = _preorder_rows(view)
+        table(h, r, t, first_col=24)
     text("Grand totals", 11, "B", 7)
     pdf.set_font("Helvetica", "", 10)
     for label, value in _grand_rows(view, compact=True):
