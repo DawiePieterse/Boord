@@ -1573,6 +1573,14 @@ function plannerPct(part, whole) {
   return Math.round(100 * (part || 0) / whole);
 }
 
+// backend/planner.py cartons_per_pallet: typed, else as many as make ~1000 kg.
+const PLAN_PALLET_KG = 1000;
+function plannerPerPallet(p) {
+  if (p.cartons_per_pallet) return p.cartons_per_pallet;
+  const carton = (p.carton_kg || 0) * (p.units_per_carton || 1);
+  return carton ? Math.max(1, Math.round(PLAN_PALLET_KG / carton)) : 0;
+}
+
 function plannerSpread(available, days, fixed) {
   const ticked = [...new Set(days.filter((d) => d >= 0 && d <= 6))].sort();
   const out = {};
@@ -1633,7 +1641,7 @@ function plannerDerive(view) {
       const cartons = on ? (typed != null ? parseInt(typed, 10) || 0 : po || 0) : 0;
       const units = cartons * (p.units_per_carton || 1);   // Packhouse's unit: a Pre-pac punnet
       const kg = r1(units * (p.carton_kg || 0));
-      const perPallet = p.cartons_per_pallet || 0;
+      const perPallet = plannerPerPallet(p);
       // Whole pallets, rounded up: a part-filled pallet still travels.
       const pallets = perPallet ? (cartons ? Math.ceil(cartons / perPallet) : 0) : null;
       cells[name] = { cartons, units, kg, pallets, po, from_po: !!po && typed == null };
@@ -1777,8 +1785,8 @@ function renderPlannerHarvest() {
     return `<tr class="border-b ${b.on ? "" : "planner-block-off"}" data-plan-row="${id}">
       <td class="p-2 font-medium whitespace-nowrap">
         <label class="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" class="w-5 h-5" data-plan-on="${id}" ${b.on ? "checked" : ""} title="Harvest this block this week">
-          <span>${esc(b.name)}${b.variety ? `<div class="text-xs text-slate-400 font-normal">${esc(b.variety)}</div>` : ""}</span>
+          <input type="checkbox" class="w-5 h-5" data-plan-on="${id}" ${b.on ? "checked" : ""} title="${b.supplier ? "Fruit from this supplier this week" : "Harvest this block this week"}">
+          <span>${esc(b.name)}${b.supplier ? `<div class="text-xs text-slate-400 font-normal">External supplier</div>` : b.variety ? `<div class="text-xs text-slate-400 font-normal">${esc(b.variety)}</div>` : ""}</span>
         </label>
       </td>
       <td class="p-2 text-right">${kg(b.estimate_kg)}</td>
@@ -1786,8 +1794,8 @@ function renderPlannerHarvest() {
       <td class="p-2 text-right">${kg(b.last_week_kg)}<div class="text-xs text-slate-400" data-plan-cell="last_week_pct:${id}"></div></td>
       <td class="p-2 text-right"><span data-plan-cell="remaining_kg:${id}"></span><div class="text-xs text-slate-400" data-plan-cell="remaining_pct:${id}"></div></td>
       <td class="p-2 text-right whitespace-nowrap">
-        <input type="number" min="0" step="1" inputmode="numeric" data-plan-avail="${id}" ${dis} title="kg available to pick this week. Empty = all that remains"> kg
-        <input type="number" min="0" max="100" step="1" inputmode="numeric" class="planner-pct" data-plan-availpct="${id}" ${dis} title="as a % of what remains">%
+        <input type="number" min="0" step="1" inputmode="numeric" data-plan-avail="${id}" ${dis} title="${b.supplier ? "Total kg this supplier brings in this week" : "kg available to pick this week. Empty = all that remains"}"> kg
+        <span class="${b.supplier ? "invisible" : ""}"><input type="number" min="0" max="100" step="1" inputmode="numeric" class="planner-pct" data-plan-availpct="${id}" ${dis} title="as a % of what remains">%</span>
       </td>
       ${days}
       <td class="p-2 text-right font-semibold" data-plan-cell="total_kg:${id}"></td>
@@ -1859,6 +1867,15 @@ function openPlannerPreorders() {
   document.querySelector('.tab-btn[data-tab="settings"]').click();
 }
 
+// "2 Blocks & 1 External Supplier": what the ticked rows are made of.
+function plannerOnLabel(on) {
+  const n = (x, word) => `${x} ${word}${x === 1 ? "" : "s"}`;
+  const sup = on.filter((b) => b.supplier).length;
+  const blocks = on.length - sup;
+  if (!sup) return n(blocks, "Block");
+  return blocks ? `${n(blocks, "Block")} & ${n(sup, "External Supplier")}` : n(sup, "External Supplier");
+}
+
 function plannerBlock(id) {
   const b = _plan.blocks.find((x) => x.block_id === id);
   if (!b.fixed) b.fixed = {};
@@ -1895,7 +1912,7 @@ function renderPlannerDelivery() {
     <tr class="text-left border-b bg-slate-50 text-[11px] font-normal text-slate-500">
       ${v.packs.map((p) => `<th class="p-1 text-center font-normal whitespace-nowrap">
         <div><input type="number" min="1" step="1" class="planner-cartons planner-pct" data-plan-percarton="${esc(p.name)}" value="${p.units_per_carton || 1}" title="Packhouse units (punnets) per carton"> /carton</div>
-        <div class="mt-1"><input type="number" min="0" step="1" class="planner-cartons planner-pct" data-plan-perpallet="${esc(p.name)}" value="${p.cartons_per_pallet || ""}" placeholder="?" title="Cartons per pallet"> /pallet</div>
+        <div class="mt-1"><input type="number" min="0" step="1" class="planner-cartons planner-pct" data-plan-perpallet="${esc(p.name)}" value="${p.cartons_per_pallet || ""}" placeholder="${plannerPerPallet(p) || "?"}" title="Cartons per pallet. Empty = as many as make about ${PLAN_PALLET_KG} kg"> /pallet</div>
       </th>`).join("")}
     </tr>`;
   let lastGroup = null;
@@ -1989,6 +2006,7 @@ function renderPlannerDelivery() {
       const p = _plan.packs.find((x) => x.name === inp.dataset.planPercarton);
       p.units_per_carton = Math.max(1, parseInt(inp.value, 10) || 1);
       head.querySelector(`[data-plan-unitkg="${CSS.escape(p.name)}"]`).textContent = unitKg(p) + (p.active ? "" : " · retired");
+      head.querySelector(`[data-plan-perpallet="${CSS.escape(p.name)}"]`).placeholder = plannerPerPallet(p) || "?";
       refreshPlannerDerived();
     });
     inp.addEventListener("change", savePacks);
@@ -2048,8 +2066,9 @@ function refreshPlannerDerived() {
   const sum = (f) => on.reduce((s, b) => s + (f(b) || 0), 0);
   const byId = Object.fromEntries(d.blocks.map((b) => [b.block_id, b]));
   const anyEst = on.some((b) => b.estimate_kg != null);
+  const onLabel = plannerOnLabel(on);
   document.getElementById("plannerHarvestFoot").innerHTML = on.length ? `<tr class="font-semibold bg-slate-50">
-      <td class="p-2">Total (${on.length} blocks)</td>
+      <td class="p-2">Total (${onLabel})</td>
       <td class="p-2 text-right">${anyEst ? kg(sum((b) => b.estimate_kg)) : "–"}</td>
       <td class="p-2 text-right">${kg(sum((b) => b.ytd_kg))}</td>
       <td class="p-2 text-right">${kg(sum((b) => b.last_week_kg))}</td>
@@ -2115,7 +2134,7 @@ function refreshPlannerDerived() {
   const lossValue = lossInput && lossInput === focused ? lossInput.value : (loss.override_pct == null ? "" : loss.override_pct);
   const tile = (label, body, cls = "") => `<div class="rounded-xl p-3 ${cls || "bg-slate-50"}"><div class="text-xs text-slate-500">${label}</div>${body}</div>`;
   document.getElementById("plannerGrand").innerHTML = [
-    tile("Planned harvest", `<div class="text-xl font-bold">${Boord.fmtNum(d.harvest_kg, 0) + " kg"}</div><div class="text-xs text-slate-400">${on.length} blocks on</div>`),
+    tile("Planned harvest", `<div class="text-xl font-bold">${Boord.fmtNum(d.harvest_kg, 0) + " kg"}</div><div class="text-xs text-slate-400">${onLabel} on</div>`),
     tile("Juice and loss", `<div class="flex items-center gap-1"><input type="number" id="plannerLossInput" min="-100" max="100" step="1" inputmode="numeric" class="border border-slate-300 rounded-lg p-1 w-20 text-right text-lg font-bold" placeholder="${loss.season_pct == null ? "–" : Boord.fmtNum(loss.season_pct, 0)}" value="${lossValue}" title="Type to override the season's share; clear to use it again"> <span class="text-lg font-bold">%</span></div>
       <div class="text-xs text-slate-400">${loss.override_pct != null ? `typed · season ${loss.season_pct == null ? "–" : pc(loss.season_pct)}` : loss.season_pct != null ? `season so far: ${Boord.fmtNum(loss.harvested_kg, 0)} kg picked, ${Boord.fmtNum(loss.delivered_kg, 0)} kg delivered` : "no season figure yet"}</div>`),
     tile("Deliverable", `<div class="text-xl font-bold">${Boord.fmtNum(d.deliverable_kg, 0) + " kg"}</div><div class="text-xs text-slate-400">after ${pc(d.loss_pct)} loss</div>`),

@@ -1737,7 +1737,7 @@ pack day, with **Add pre-order**:
   day and time, JNB-CPT, ETD, USDA samples.
 
 **Pallets** follow from the pack's cartons per pallet, as typed on the
-Planner. The pencil edits a row in place; the bin deletes it after asking.
+Planner (about 1 000 kg a pallet until it is). The pencil edits a row in place; the bin deletes it after asking.
 
 Receivers, target receivers and packs are Boord Packhouse's lists, not
 Boord's. **Edit lists in Packhouse** (and **edit list** under each dropdown
@@ -2026,7 +2026,7 @@ saved is marked ● in the list.
 ### Harvest this week
 
 One row per active block of the farm's own (suppliers' blocks are not
-planned here), in block order. The **checkbox in front of the block** says
+planned here; see the supplier rows below), in block order. The **checkbox in front of the block** says
 whether it is picked this week: an unticked block stays in the list with its
 figures, greyed, its days hidden and nothing of it in the totals. A new week
 starts with every block unticked: tick the ones picked this week. Columns:
@@ -2053,6 +2053,18 @@ starts with every block unticked: tick the ones picked this week. Columns:
   In red when the day was not ticked for that block (or the block is off):
   picking went off plan.
 - **Total** - the block's planned kg for the week.
+
+Under the blocks, one row per active **external supplier** (Master Data ->
+Suppliers, every one but the farm's own) for the fruit they bring in this
+week. Tick it like a block, type the week's **total kg** in Available this
+week, then tick the days: the kg are shared over the days and can be held
+per day exactly as a block's. Its **YTD** and **Last wk** are the kg
+received from that supplier at receiving (Kg Sent of its lots, by the day
+they were checked in), over the same weeks as a block's. There is no
+estimate for a supplier, so Estimate and Remaining show a dash and there is
+no % box. Its kg count in the Total row, which says what it adds up, for
+example **Total (2 Blocks & 1 External Supplier)**, and so in the planned
+harvest and deliverable kg the delivery is measured against.
 
 ### Delivery this week
 
@@ -2098,8 +2110,10 @@ keep, so the Planner does, one under the other:
   go in a carton, so Pre-pac starts at 4 and every other pack at 1. Kg is
   units × unit weight (500 Pre-pac cartons = 2 000 punnets = 960 kg), and
   Packhouse's delivered punnets read back as cartons.
-- **/pallet** - how many cartons make a pallet. Until it is typed that
-  pack's pallets show a dash. Pallets are counted
+- **/pallet** - how many cartons make a pallet. Until it is typed, a
+  pallet is taken as about 1 000 kg: the box shows, greyed, as many cartons
+  as make that (909 of a 1,1 kg carton; 521 Pre-pac cartons of 4 × 0,48 kg).
+  Type a figure to use the real one; clear it to go back. Pallets are counted
 whole and rounded up, per receiver and pack: each receiver's fruit travels
 to its own destination, so 20 cartons of a pack is still a pallet on the
 truck, and 3 001 cartons of a 1 500-carton pack is three. A receiver or pack

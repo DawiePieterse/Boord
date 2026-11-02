@@ -1928,15 +1928,20 @@ def test_planner_derive_adds_up_the_week():
     assert by_id["9"]["per_day"] == {"4": 50.0}
     assert d["harvest_kg"] == 350.0
     assert d["day_totals"] == [130.0, 90.0, 40.0, 40.0, 50.0, 0.0, 0.0]
-    # Deliveries: cartons x carton kg; pallets only where cartons per pallet is
-    # known, counted whole and rounded up: 500 of a 1000-carton pack is one
-    # pallet on the truck, a receiver with no cartons of it has none.
+    # Deliveries: cartons x carton kg; pallets counted whole and rounded up:
+    # 500 of a 1000-carton pack is one pallet on the truck, a receiver with
+    # no cartons of it has none. 1kg XXL has no cartons per pallet typed, so
+    # it takes as many 1.1 kg cartons as make ~1000 kg (909): 100 is a pallet.
     toro = next(r for r in d["receivers"] if r["id"] == 1)
     assert toro["cartons"] == 600 and toro["kg"] == 350.0
-    assert toro["cells"]["Pre-pac"]["pallets"] == 1 and toro["cells"]["1kg XXL"]["pallets"] is None
+    assert toro["cells"]["Pre-pac"]["pallets"] == 1 and toro["cells"]["1kg XXL"]["pallets"] == 1
     agrilink = next(r for r in d["receivers"] if r["id"] == 2)
-    assert agrilink["cells"]["Pre-pac"]["pallets"] == 0 and agrilink["pallets"] == 0
-    assert d["delivery_cartons"] == 650 and d["delivery_kg"] == 405.0 and d["delivery_pallets"] == 1
+    assert agrilink["cells"]["Pre-pac"]["pallets"] == 0 and agrilink["pallets"] == 1
+    assert d["delivery_cartons"] == 650 and d["delivery_kg"] == 405.0 and d["delivery_pallets"] == 3
+    assert planner.cartons_per_pallet({"carton_kg": 1.1}) == 909
+    assert planner.cartons_per_pallet({"carton_kg": 0.48, "units_per_carton": 4}) == 521
+    assert planner.cartons_per_pallet({"carton_kg": 4.5, "cartons_per_pallet": 240}) == 240
+    assert planner.cartons_per_pallet({"carton_kg": 0}) == 0
     assert d["pack_totals"]["1kg XXL"]["cartons"] == 150
     # 15% loss on 350 kg picked leaves 298 kg (whole kg, 297.5 rounded) to
     # deliver against 405 kg planned: short.
@@ -2011,8 +2016,8 @@ def test_planner_tables_are_built_from_the_same_derived_figures():
     # The receiver's totals come right after its name, then the packs.
     assert headers[2:8] == ["Cartons", "Kg", "Pallets", "Pre-pac YTD", "Pre-pac last wk", "Pre-pac this wk"]
     toro = next(r for r in rows if r[1] == "Toro")
-    assert toro[2:5] == [600, 350.0, 1] and toro[5:8] == [2000, 300, 500]
-    assert total[2:5] == [650, 405.0, 1]
+    assert toro[2:5] == [600, 350.0, 2] and toro[5:8] == [2000, 300, 500]
+    assert total[2:5] == [650, 405.0, 3]   # 1kg XXL at ~1000 kg a pallet
     grand = dict((label.split(" (")[0], value) for label, value in _grand_rows(view))
     assert grand["Short kg"] == 107 and grand["Deliverable kg"] == 298
     # The PDF's compact tables: block, the days and the total, blocks with
@@ -2026,7 +2031,7 @@ def test_planner_tables_are_built_from_the_same_derived_figures():
     assert [r[0] for r in _harvest_rows(view)[1]] == ["Block 17", "Block 7", "Block 9"]
     headers, rows, total = _delivery_rows(view, compact=True)
     assert headers == ["Market", "Receiver", "Cartons", "Kg", "Pallets", "Pre-pac", "1kg XXL"]
-    assert next(r for r in rows if r[1] == "Toro")[2:] == [600, 350, 1, 500, 100] and total[2:] == [650, 405, 1, 500, 150]
+    assert next(r for r in rows if r[1] == "Toro")[2:] == [600, 350, 2, 500, 100] and total[2:] == [650, 405, 3, 500, 150]
     assert [label for label, _ in _grand_rows(view, compact=True)][1] == "Juice and loss %"
     # A receiver unticked for the week counts for nothing and leaves both exports.
     next(r for r in view["receivers"] if r["name"] == "Toro")["on"] = False

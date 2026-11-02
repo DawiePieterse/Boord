@@ -134,6 +134,22 @@ def loss_pct(harvested_kg: float, delivered_kg: float) -> Optional[float]:
     return round(100.0 * (harvested_kg - delivered_kg) / harvested_kg)
 
 
+# What a pallet takes, about, on the farm's trucks: until the office types a
+# pack's cartons per pallet, its pallets are worked out from this.
+PALLET_KG = 1000
+
+
+def cartons_per_pallet(pack: dict) -> int:
+    """The cartons per pallet typed for a pack, else as many cartons as make
+    PALLET_KG (a carton's kg is units_per_carton x Packhouse's unit kg).
+    0 only when the pack has no weight to go by."""
+    typed = pack.get("cartons_per_pallet") or 0
+    if typed:
+        return typed
+    carton = (pack.get("carton_kg") or 0) * (pack.get("units_per_carton") or 1)
+    return max(1, round(PALLET_KG / carton)) if carton else 0
+
+
 def derive(view: dict) -> dict:
     """Every figure the screen, the spreadsheet and the PDF agree on, from
     the week's view (routers/planner.py build_week). Returned alongside it
@@ -203,7 +219,7 @@ def derive(view: dict) -> dict:
             # of them (4), so the kg is units x unit weight.
             units = cartons * (p.get("units_per_carton") or 1)
             kg = round(units * (p.get("carton_kg") or 0))
-            per_pallet = p.get("cartons_per_pallet") or 0
+            per_pallet = cartons_per_pallet(p)
             # Whole pallets, rounded up: a receiver's cartons go on their own
             # pallets to their own destination, so 20 cartons of a 1500-carton
             # pack is still one pallet on the truck, not 0.01 of one.

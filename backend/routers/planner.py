@@ -41,7 +41,7 @@ from sqlmodel import Session, select
 import planner
 from db import DATA_DIR, get_own_supplier_id, get_session
 from excel_io import XLSX_MEDIA
-from models import Block, HarvestPlan, HarvestRecord, PlannerPack, PreOrder, SystemSetting
+from models import Block, HarvestPlan, HarvestRecord, Lot, PlannerPack, PreOrder, Supplier, SystemSetting
 from routers.reports import REPORTS_DIR, _packhouse_rows
 from security import require_admin_client
 from timeutil import day_bounds, to_local
@@ -125,6 +125,21 @@ def _block_kg(session: Session, start: date, end: date) -> Dict[str, float]:
         .where(HarvestRecord.timestamp >= s, HarvestRecord.timestamp <= e)
         .group_by(HarvestRecord.block_id)).all()
     return {bid: round(kg or 0.0, 1) for bid, kg in rows if bid}
+
+
+def _supplier_kg(session: Session, start: date, end: date) -> Dict[int, float]:
+    """Kg received per supplier over a span of local days, inclusive: the
+    Kg Sent of every lot checked in at receiving, by the day it arrived.
+    An external supplier's fruit reaches Boord only this way (no crates),
+    so this is their YTD and last week on the Planner."""
+    if end < start:
+        return {}
+    s, e = day_bounds(start, end)
+    rows = session.exec(
+        select(Lot.supplier_id, func.sum(Lot.total_kg))
+        .where(Lot.received_at >= s, Lot.received_at <= e, Lot.supplier_id != None)  # noqa: E711
+        .group_by(Lot.supplier_id)).all()
+    return {sid: round(kg or 0.0, 1) for sid, kg in rows}
 
 
 def _week_actuals(session: Session, week_start: date) -> Dict[str, List[float]]:
@@ -266,6 +281,28 @@ def build_week(session: Session, week_start: date) -> dict:
             "actual": actuals.get(b.id, [0.0] * 7),
             "on": bool(p.get("on", False)),  # a week not yet planned starts with every block off
             "available_kg": p.get("available_kg"),
+            "days": [d for d in (p.get("days") or []) if isinstance(d, int) and 0 <= d <= 6],
+            "fixed": {str(k): v for k, v in (p.get("fixed") or {}).items()},
+        })
+    # Under the blocks, a row per external supplier for the kg they bring in
+    # this week. Boord holds no estimate for their fruit (YTD and last week
+    # are what receiving checked in from them), so the office types the
+    # week's total (available_kg) and spreads it over the
+    # days like a block's; it then counts in the harvest and deliverable kg
+    # like our own. Kept in the same saved list under a "supplier-<id>" key,
+    # which no block id looks like, so the plan needs no new column.
+    sup_ytd = _supplier_kg(session, season_start, week_start - timedelta(days=1))
+    sup_last_week = _supplier_kg(session, week_start - timedelta(days=7), week_start - timedelta(days=1))
+    for s in session.exec(select(Supplier).where(Supplier.active == True,  # noqa: E712
+                                                 Supplier.is_own_farm == False)  # noqa: E712
+                          .order_by(Supplier.name)).all():
+        key = f"supplier-{s.id}"
+        p = saved_blocks.get(key, {})
+        out_blocks.append({
+            "block_id": key, "name": s.name, "variety": "", "supplier": True,
+            "estimate_kg": None, "ytd_kg": sup_ytd.get(s.id, 0.0), "last_week_kg": sup_last_week.get(s.id, 0.0),
+            "actual": [0.0] * 7,
+            "on": bool(p.get("on", False)), "available_kg": p.get("available_kg"),
             "days": [d for d in (p.get("days") or []) if isinstance(d, int) and 0 <= d <= 6],
             "fixed": {str(k): v for k, v in (p.get("fixed") or {}).items()},
         })
@@ -435,12 +472,19 @@ def list_preorders(session: Session = Depends(get_session)):
     try:
         receivers = _packhouse_rows("SELECT id, name, market, active FROM receiver ORDER BY sort, name")
         targets = _packhouse_rows("SELECT id, name, market, active FROM targetreceiver ORDER BY sort, name")
-        packs = _packhouse_rows("SELECT name, active FROM packaging ORDER BY sort, name")
+        packs = _packhouse_rows("SELECT name, carton_kg, active FROM packaging ORDER BY sort, name")
     except HTTPException as e:
         receivers, targets, packs, reason = [], [], [], e.detail
     names = {r["id"]: r["name"] for r in receivers}
     target_names = {t["id"]: t["name"] for t in targets}
-    per_pallet = {p.pack: p.cartons_per_pallet for p in session.exec(select(PlannerPack)).all()}
+    # Cartons per pallet as the Planner works it out: typed, else ~1000 kg.
+    saved = {p.pack: p for p in session.exec(select(PlannerPack)).all()}
+    per_pallet = {}
+    for p in packs:
+        s = saved.get(p["name"])
+        per_pallet[p["name"]] = planner.cartons_per_pallet({
+            "carton_kg": p["carton_kg"], "cartons_per_pallet": s.cartons_per_pallet if s else 0,
+            "units_per_carton": s.units_per_carton if s else default_units_per_carton(p["name"])})
     rows = session.exec(select(PreOrder).order_by(PreOrder.pack_day, PreOrder.id)).all()
     last = max(rows, key=lambda r: r.updated_at).pack if rows else None
     pack_names = sorted({p["name"] for p in packs if p["active"]}, key=planner.pack_sort_key)
@@ -460,8 +504,8 @@ def list_preorders(session: Session = Depends(get_session)):
             "target_receiver_id": r.target_receiver_id,
             "target_name": target_names.get(r.target_receiver_id, "") if r.target_receiver_id else "",
             "pack": r.pack, "cartons": r.cartons, "note": r.note,
-            # Whole pallets, rounded up, as on the Planner; None until the
-            # pack's cartons per pallet is typed there.
+            # Whole pallets, rounded up, as on the Planner; None for a pack
+            # Packhouse no longer lists (no weight to work it out from).
             "pallets": -(-r.cartons // per_pallet[r.pack]) if per_pallet.get(r.pack) else None,
         } for r in rows],
     }
