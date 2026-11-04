@@ -352,6 +352,36 @@ class MarketInvoice(SQLModel, table=True):
     imported_at: datetime
 
 
+class MarketDailySale(SQLModel, table=True):
+    """Where a delivery note stands at the market, from the agent's daily
+    sales report (Dapper's "DAILY SALES REPORT", read out of the farm's Gmail
+    by market_mail.py): cartons received, sold and unsold so far, and the
+    gross they sold for. The report is a running total per note, so only the
+    newest one is kept, one row per agent and note.
+
+    It is sales, not money: no commission or costs come off until the tax
+    invoice, which can be weeks behind. The reports count it as sold, with
+    its gross "not yet paid", until an invoice or statement says as much.
+    note_no is the number as printed less its B-/LW- ("1331", "21352");
+    note_label keeps it as printed. lines is a JSON list of {product,
+    received, discards, sold, gross, unsold}, product being the agent's own
+    description ("LICH TM BX020 CL 1 XL")."""
+    agent: str = Field(primary_key=True)
+    note_no: str = Field(primary_key=True)
+    note_label: str = ""
+    report_date: date
+    received_on: Optional[date] = None
+    market_ref: str = ""
+    lines: str = "[]"
+    received: int = 0
+    sold: int = 0
+    unsold: int = 0
+    gross: float = 0
+    file: str = ""
+    email_from: str = ""
+    imported_at: datetime
+
+
 class MarketProduct(SQLModel, table=True):
     """Which Packhouse pack a market's product description is, so sold
     cartons line up with sent ones. Set once per description on the Reports

@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 import market_mail
 from db import DATA_DIR, get_own_supplier_id, get_session, supplier_map
 from excel_io import XLSX_MEDIA, rows_to_xlsx_bytes
-from models import Block, Device, HarvestRecord, Lot, MarketInvoice, MarketProduct, MarketStatement, \
+from models import Block, Device, HarvestRecord, Lot, MarketDailySale, MarketInvoice, MarketProduct, MarketStatement, \
     ReceivingRecord, Supplier, SystemSetting, Team, Worker
 from routers.dashboard import dashboard_summary
 from routers.lots import blocks_by_lot as _blocks_by_lot, list_in_transit, list_pending, list_received
@@ -650,6 +650,11 @@ class MarketStatementIn(BaseModel):
     invoice_no: str = ""
     transport_cost: float = Field(default=0, ge=0)
     notes: str = ""
+    # The form greys out the sales boxes while the market's invoices or daily
+    # report fill them; saving it (for the transport) must not turn those
+    # figures into a typed statement, which would then outlast the next day's
+    # report. True keeps whatever sales were typed before, if any.
+    keep_sales: bool = False
 
 
 def _ratio(num: float, den: float):
@@ -657,36 +662,63 @@ def _ratio(num: float, den: float):
     return round(num / den, 2) if den else ""
 
 
+def _note_aliases(note: dict) -> list:
+    """The numbers a market may have written for a Packhouse note. A juice
+    note's own series (J-0001), so its invoices (Onderberg's) are filed under
+    that, apart from fruit note 1. A fruit note is its number; 2026's notes
+    1350 and on also went to the market with a 2 in front by mistake
+    (B-21352 for 1352), so a market figure for 21352 is taken as 1352's too.
+    Only four-digit numbers get the alias, so it can never be another live
+    note's number this side of note 21000."""
+    if json.loads(note.get("bins") or "[]"):
+        return [f"J-{note['note_no']:04d}"]
+    no = note["note_no"]
+    return [str(no)] + ([f"2{no}"] if 1000 <= no <= 9999 else [])
+
+
 def _market_notes(period_start: date, period_end: date, session: Session) -> list:
     """Every live delivery note loaded in the range, with what went out on it
-    per pack and what the market paid. Packs come from the note's own copy of
-    its pallets, so a pack retired in Packhouse since still shows. Not
+    per pack and what the market sold and paid. Packs come from the note's own
+    copy of its pallets, so a pack retired in Packhouse since still shows. Not
     filtered by supplier, like the Delivery Notes report: a note carries
     whatever suppliers were stacked.
 
-    The money comes from the market's emailed invoices (market_mail.py) once
-    any have arrived for the note, all its part-payments added up, and
-    otherwise from the statement the office typed. Transport is always typed."""
+    Sales come from whichever source has seen the most of the note: the
+    market's emailed invoices (market_mail.py), all its part payments added
+    up, else the statement the office typed; but when the agent's daily sales
+    report says more has sold than either, its running totals stand in, with
+    the note marked provisional, until a Final Payment invoice settles it.
+
+    Money is only what was paid: a provisional note's commission, costs and
+    net are its invoices' (or typed statement's) so far, and the gross the
+    daily report adds on top is `unpaid`. So gross - unpaid - costs = net on
+    every note, and Net Paid never counts money still at the market.
+    Transport is always typed."""
     notes = _packhouse_rows("SELECT * FROM deliverynote WHERE removed = 0 AND loaded_on >= ? AND loaded_on <= ? "
                             "ORDER BY loaded_on, note_no", (period_start.isoformat(), period_end.isoformat()))
     uuids = [n["uuid"] for n in notes]
     statements = {s.note_uuid: s for s in session.exec(
         select(MarketStatement).where(MarketStatement.note_uuid.in_(uuids))).all()} if uuids else {}
-    invoices = {}
-    # A juice note's number is its own series (J-0001), so its invoices
-    # (Onderberg's) are filed under that, apart from fruit note 1.
-    key = {n["uuid"]: f"J-{n['note_no']:04d}" if json.loads(n.get("bins") or "[]") else str(n["note_no"])
-           for n in notes}
-    note_nos = list(key.values())
+    aliases = {n["uuid"]: _note_aliases(n) for n in notes}
+    note_nos = [a for al in aliases.values() for a in al]
+    by_no = {}
     for inv in session.exec(select(MarketInvoice).where(MarketInvoice.note_no.in_(note_nos))
                             .order_by(MarketInvoice.invoice_date, MarketInvoice.invoice_no)).all() if notes else []:
-        invoices.setdefault(inv.note_no, []).append(inv)
+        by_no.setdefault(inv.note_no, []).append(inv)
+    daily_by_no = {}
+    for d in session.exec(select(MarketDailySale).where(MarketDailySale.note_no.in_(note_nos))).all() \
+            if notes else []:
+        # One agent per note in practice; were there two, the newest report.
+        if d.note_no not in daily_by_no or d.report_date > daily_by_no[d.note_no].report_date:
+            daily_by_no[d.note_no] = d
     pack_of = {m.product: m.pack for m in session.exec(select(MarketProduct)).all()}
     out = []
     for n in notes:
         pallets = json.loads(n["pallets"] or "[]")
         st = statements.get(n["uuid"])
-        invs = invoices.get(key[n["uuid"]], [])
+        invs = [inv for a in aliases[n["uuid"]] for inv in by_no.get(a, [])]
+        dailies = [daily_by_no[a] for a in aliases[n["uuid"]] if a in daily_by_no]
+        daily = max(dailies, key=lambda d: d.report_date) if dailies else None
         packs = {}
         for p in pallets:
             for ln in p.get("lines", []):
@@ -703,33 +735,53 @@ def _market_notes(period_start: date, period_end: date, session: Session) -> lis
             pk["sent"] += 1
             pk["net_kg"] += max((b.get("full_kg") or 0) - (b.get("empty_kg") or 0), 0)
             pk["carton_kg"] = pk["net_kg"] / pk["sent"]
-        if invs:
+
+        def market_lines(rows):
+            """The market's own lines onto the packs: sold and gross."""
             for pk in packs.values():
                 pk["sold"], pk["gross"] = 0, 0
-            for inv in invs:
-                for ln in json.loads(inv.lines):
-                    # A product not yet matched to a pack still counts, as a
-                    # line of its own with nothing sent and no kg.
-                    name = pack_of.get(ln["product"], ln["product"])
-                    pk = packs.setdefault(name, {"pack": name, "carton_kg": 0, "sent": 0, "sold": 0, "gross": 0,
-                                                 "unmapped": ln["product"] not in pack_of
-                                                             and ln["product"] != market_mail.JUICE_PRODUCT})
-                    pk["sold"] += ln["sold"]
-                    pk["gross"] += ln["income"]
+            for ln in rows:
+                # A product not yet matched to a pack still counts, as a
+                # line of its own with nothing sent and no kg.
+                name = pack_of.get(ln["product"], ln["product"])
+                pk = packs.setdefault(name, {"pack": name, "carton_kg": 0, "sent": 0, "sold": 0, "gross": 0,
+                                             "unmapped": ln["product"] not in pack_of
+                                                         and ln["product"] != market_mail.JUICE_PRODUCT})
+                pk["sold"] += ln["sold"]
+                pk["gross"] += ln["income"] if "income" in ln else ln["gross"]
             for pk in packs.values():
                 pk["gross"] = round(pk["gross"], 2)
                 pk["price"] = round(pk["gross"] / pk["sold"], 2) if pk["sold"] else None
+
+        typed = {ln["pack"]: ln for ln in json.loads(st.lines)} if st else {}
+        inv_sold = sum(ln["sold"] for inv in invs for ln in json.loads(inv.lines))
+        typed_sold = sum(ln.get("sold") or 0 for ln in typed.values())
+        final = any("final" in (inv.payment or "").lower() for inv in invs)
+        provisional = bool(daily) and not final and daily.sold > (inv_sold if invs else typed_sold)
+        if invs:
             money = {k: round(sum(getattr(inv, k) for inv in invs), 2)
                      for k in ("commission", "deductions", "bank_cost")}
+            paid_gross, paid_sold = round(sum(inv.gross for inv in invs), 2), inv_sold
         else:
-            typed = {ln["pack"]: ln for ln in json.loads(st.lines)} if st else {}
+            money = {k: getattr(st, k) if st else 0 for k in ("commission", "deductions", "bank_cost")}
+            paid_gross = round(sum((ln.get("sold") or 0) * (ln.get("price") or 0) for ln in typed.values()), 2)
+            paid_sold = typed_sold
+        if provisional:
+            market_lines(json.loads(daily.lines))
+        elif invs:
+            market_lines([ln for inv in invs for ln in json.loads(inv.lines)])
+        else:
             for pk in packs.values():
                 pk["sold"] = typed.get(pk["pack"], {}).get("sold")
                 pk["price"] = typed.get(pk["pack"], {}).get("price")
                 pk["gross"] = round((pk["sold"] or 0) * (pk["price"] or 0), 2)
-            money = {k: getattr(st, k) if st else 0 for k in ("commission", "deductions", "bank_cost")}
         packs = sorted(packs.values(), key=lambda pk: pk["pack"])
         gross = round(sum(pk["gross"] for pk in packs), 2)
+        sold = sum(pk["sold"] or 0 for pk in packs)
+        kg_sold = round(sum((pk["sold"] or 0) * pk["carton_kg"] for pk in packs), 1)
+        unpaid = round(gross - paid_gross, 2) if provisional else 0
+        if not provisional:
+            paid_sold = sold
         out.append(dict({
             "uuid": n["uuid"], "note_no": n["note_no"], "loaded_on": n["loaded_on"],
             "receiver": (n["receiver"] or "").split("\n")[0],
@@ -737,11 +789,19 @@ def _market_notes(period_start: date, period_end: date, session: Session) -> lis
             "market": "Juice" if json.loads(n.get("bins") or "[]")
                       else ", ".join(sorted({p.get("market_name", "") for p in pallets} - {""})),
             "transporter": n["transporter"], "pallets": len(pallets), "packs": packs,
-            "sent": sum(pk["sent"] for pk in packs), "sold": sum(pk["sold"] or 0 for pk in packs),
+            "sent": sum(pk["sent"] for pk in packs), "sold": sold,
             "kg_sent": round(sum(pk["sent"] * pk["carton_kg"] for pk in packs), 1),
-            "kg_sold": round(sum((pk["sold"] or 0) * pk["carton_kg"] for pk in packs), 1),
+            "kg_sold": kg_sold,
             "entered": st is not None or bool(invs), "gross": gross,
-            "net": round(gross - sum(money.values()), 2),
+            # Sold and gross still at the market, from the daily report.
+            "provisional": provisional, "unpaid": unpaid,
+            # What the money columns' R/carton and R/kg are over: the cartons
+            # paid for, so a provisional note's unpaid sales don't water them down.
+            "paid_sold": paid_sold, "paid_kg_sold": round(kg_sold * paid_sold / sold, 1) if sold else 0,
+            "net": round(gross - unpaid - sum(money.values()), 2),
+            "daily": {"report_date": str(daily.report_date), "agent": daily.agent, "note_label": daily.note_label,
+                      "market_ref": daily.market_ref, "received": daily.received, "sold": daily.sold,
+                      "unsold": daily.unsold, "gross": daily.gross} if daily else None,
             "invoices": [{"invoice_no": i.invoice_no, "invoice_date": str(i.invoice_date), "payment": i.payment,
                           "agent": i.agent, "net": i.net} for i in invs],
             "waybill_no": st.waybill_no if st else "", "invoice_no": st.invoice_no if st else "",
@@ -760,9 +820,15 @@ def list_market_notes(period_start: date, period_end: date, session: Session = D
 def save_market_statement(note_uuid: str, body: MarketStatementIn, session: Session = Depends(get_session)):
     if not _packhouse_rows("SELECT uuid FROM deliverynote WHERE uuid = ? AND removed = 0", (note_uuid,)):
         raise HTTPException(404, "That delivery note is not in Boord Packhouse any more")
+    old = session.get(MarketStatement, note_uuid)
+    if body.keep_sales:
+        lines = old.lines if old else "[]"
+        commission, deductions, bank_cost = (old.commission, old.deductions, old.bank_cost) if old else (0, 0, 0)
+    else:
+        lines = json.dumps([ln.model_dump() for ln in body.lines])
+        commission, deductions, bank_cost = body.commission, body.deductions, body.bank_cost
     session.merge(MarketStatement(
-        note_uuid=note_uuid, lines=json.dumps([ln.model_dump() for ln in body.lines]),
-        commission=body.commission, deductions=body.deductions, bank_cost=body.bank_cost,
+        note_uuid=note_uuid, lines=lines, commission=commission, deductions=deductions, bank_cost=bank_cost,
         waybill_no=body.waybill_no.strip(), invoice_no=body.invoice_no.strip(),
         transport_cost=body.transport_cost, notes=body.notes.strip(), updated_at=datetime.utcnow(),
     ))
@@ -783,8 +849,13 @@ def market_mail_status(session: Session = Depends(get_session)):
     matched to, plus Packhouse's packs to choose from."""
     cfg = market_mail.read_config()
     status = market_mail.read_status()
-    products = sorted({ln["product"] for inv in session.exec(select(MarketInvoice)).all()
-                       for ln in json.loads(inv.lines)} - {market_mail.JUICE_PRODUCT})
+    # The daily sales report names a pack its own way again ("LICH TM BX020
+    # CL 1 XL" for the invoice's "LICH, BX020, THREE MONTH RED, CL 1, XL"), so
+    # its descriptions are matched here too.
+    products = sorted(({ln["product"] for inv in session.exec(select(MarketInvoice)).all()
+                        for ln in json.loads(inv.lines)}
+                       | {ln["product"] for d in session.exec(select(MarketDailySale)).all()
+                          for ln in json.loads(d.lines)}) - {market_mail.JUICE_PRODUCT})
     pack_of = {m.product: m.pack for m in session.exec(select(MarketProduct)).all()}
     try:
         packs = [r["name"] for r in _packhouse_rows("SELECT name FROM packaging WHERE active = 1 ORDER BY sort, name")]
@@ -834,12 +905,17 @@ def delete_market_invoice(invoice_no: str, session: Session = Depends(get_sessio
     return {"ok": True}
 
 
-_MONEY_HEADERS = ["Gross", "Commission", "Deductions", "Bank Cost", "Net Paid", "Net R/Carton", "Net R/Kg"]
+_MONEY_HEADERS = ["Gross", "Gross Not Yet Paid", "Commission", "Deductions", "Bank Cost", "Net Paid",
+                  "Net R/Carton", "Net R/Kg"]
 
 
 def _money(r: dict) -> list:
-    return [round(r["gross"], 2), round(r["commission"], 2), round(r["deductions"], 2), round(r["bank_cost"], 2),
-            round(r["net"], 2), _ratio(r["net"], r["sold"]), _ratio(r["net"], r["kg_sold"])]
+    """Gross is everything sold, the daily report's sales included; Not Yet
+    Paid is the part of it no invoice has paid. Net R/carton and R/kg are
+    over the cartons paid for, so unpaid sales don't water them down."""
+    return [round(r["gross"], 2), round(r["unpaid"], 2), round(r["commission"], 2), round(r["deductions"], 2),
+            round(r["bank_cost"], 2), round(r["net"], 2), _ratio(r["net"], r["paid_sold"]),
+            _ratio(r["net"], r["paid_kg_sold"])]
 
 
 @router.get("/market-summary")
@@ -847,8 +923,8 @@ def market_summary_report(period_start: date, period_end: date, supplier_id: Opt
                           session: Session = Depends(get_session)):
     """One row per receiver and market (Boeretrust / Local, AgriLink / USA Sea
     Freight...), the "2025 Totaal" sheet's totals, with a Total row."""
-    keys = ["pallets", "sent", "sold", "kg_sent", "kg_sold", "gross", "commission", "deductions", "bank_cost",
-            "net", "transport_cost"]
+    keys = ["pallets", "sent", "sold", "kg_sent", "kg_sold", "gross", "unpaid", "commission", "deductions",
+            "bank_cost", "net", "paid_sold", "paid_kg_sold", "transport_cost"]
     groups = {}
     for n in _market_notes(period_start, period_end, session):
         g = groups.setdefault((n["receiver"], n["market"]), dict({k: 0 for k in keys}, notes=0, entered=0))
@@ -904,7 +980,8 @@ def market_sales_report(period_start: date, period_end: date, supplier_id: Optio
     ] + _money(n) + [
         "; ".join(f"{pk['pack']}: {pk['sent']} sent, {pk['sold'] if pk['sold'] is not None else '-'} sold"
                   + (f" @ R{pk['price']:.2f}" if pk["price"] is not None else "") for pk in n["packs"]),
-        "Entered" if n["entered"] else "Not entered", n["notes"],
+        f"Daily report {n['daily']['report_date']}, not all paid" if n["provisional"]
+        else "Entered" if n["entered"] else "Not entered", n["notes"],
     ] for n in _market_notes(period_start, period_end, session)]
     return _xlsx_response(headers, rows, "Consignment Sales", f"Consignment_Sales_{period_start}_{period_end}.xlsx")
 

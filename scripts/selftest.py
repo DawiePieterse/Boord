@@ -1483,7 +1483,7 @@ def test_a_market_statement_sums_to_what_the_market_paid():
             # 18 x R100 sold; the 4.5kg line has a price but no sales yet.
             assert note["gross"] == 1800 and note["net"] == 1600 and note["sold"] == 18, note
             assert note["kg_sold"] == 36 and note["kg_sent"] == 76, note
-            assert reports._money(note)[5:] == [88.89, 44.44], "net R/carton and R/kg"
+            assert reports._money(note)[6:] == [88.89, 44.44], "net R/carton and R/kg"
     finally:
         reports.PACKHOUSE_DB_PATH = saved_path
         shutil.rmtree(tmp, ignore_errors=True)
@@ -1619,6 +1619,179 @@ BANK CHARGES            11.57        1.74      13.31  BANK CHARGES      13.31
                    ----------  ----------   --------  NETT AMOUNT    {nett}
 TOTAL SOLD      :    66
 """
+
+
+# Dapper's daily sales report as pypdf's layout mode reads it, the figures of
+# the one of 3 November 2026: three notes still at the market, one of them
+# numbered B-21352 by mistake for 1352, one product wrapping onto a second
+# line. {total_row_gross} breaks the second note's sums.
+_DAILY_SALES = """                                             DAPPER AGENCIES (PTY) LTD
+                                DAILY SALES REPORT 2026/11/03 - 2026/11/03
+            TO: BEKFONTEIN BOERDERY (EDMS) BPK (25142)
+
+
+
+      Summary per product
+                                                                                                                      Qty
+      Product                                              Sold         Price sold         Total sales            Unsold
+      LICH TM PTB005 CL 1 4                                  67             411.19           27 550.00                194
+      LICH TM BX020 CL 1 XL                                 103             160.78           16 560.00                  64
+      Total for LICH                                       170              259.47          44 110.00                 258
+
+      Total:                                               170                              44 110.00                 258
+
+                Codes for sale: 1 - Market sale                  2 - Overdraft sale              3 - Proxy sale (Agents card)
+                                4 - Shortage sale                5 - Salvage sale                6 - Discards
+
+Summary of D/Note: 1331 received on 2026/10/24 Market ref: 6438605
+Salesperson:  SOMEONE
+                                                     Qty           Qty           Qty            Grn                          Qty
+Grn nr        Product                         Received       Discards           Sold       Average          Gross        Unsold
+15718060      LICH TM PTB005 CL 1 4                 152              0             77       513.64     39 550.00              75
+Total:                                              152              0             77       513.64     39 550.00              75
+
+No sales
+
+Summary of D/Note: B-21352 received on 2026/10/31 Market ref: 6442880
+Salesperson:  SOMEONE
+                                                     Qty           Qty           Qty            Grn                          Qty
+Grn nr        Product                         Received       Discards           Sold       Average          Gross        Unsold
+15732215      LICH TM PTB005 CL 1 4                   81             0             49       461.22     22 600.00              32
+15732218      LICH TM BX020 CL 1                      16             0             16       160.00       2 560.00              0
+              XXL
+15732221      LICH TM BX020 CL 1 XL                 116              0           116        160.00     18 560.00               0
+Total:                                              213              0           181        241.55     {total_row_gross}              32
+
+Detail of sales                                                                                              Price
+Grn nr        Product                              Code          Detail        Sales           Sold       per unit         Total
+2026/11/03
+15732215      LICH TM PTB005 CL 1 4                    1         10 @         400.00          10 @         400.00      4 000.00
+15732221      LICH TM BX020 CL 1 XL                    1         23 @         160.00          23 @         160.00      3 680.00
+                                                                               Total:         33 @         232.73      7 680.00
+
+Summary of D/Note: B-21356 received on 2026/11/03 Market ref: 6444264
+Salesperson:  SOMEONE
+                                                     Qty           Qty           Qty            Grn                          Qty
+Grn nr        Product                         Received       Discards           Sold       Average          Gross        Unsold
+15736986      LICH TM PTB005 CL 1 4                 144              0             57       413.16     23 550.00              87
+15736991      LICH TM BX020 CL 1 XL                 144              0             80       161.00     12 880.00              64
+Total:                                              288              0           137        265.91     36 430.00            151
+
+Detail of sales                                                                                              Price
+Grn nr        Product                              Code          Detail        Sales           Sold       per unit         Total
+2026/11/03
+15736986      LICH TM PTB005 CL 1 4                    1         42 @         400.00
+                                                       1         15 @         450.00          57 @         413.16     23 550.00
+15736991      LICH TM BX020 CL 1 XL                    1         78 @         160.00
+                                                       1          2 @         200.00          80 @         161.00     12 880.00
+                                                                               Total:       137 @          265.91     36 430.00
+
+
+
+
+
+
+
+
+                                                                                                              Page 1 of
+"""
+
+
+def test_the_daily_sales_report_is_read_note_by_note():
+    import market_mail  # noqa: E402
+    notes, refused = market_mail.parse_daily_sales(_DAILY_SALES.format(total_row_gross="43 720.00"))
+    assert refused == [], refused
+    assert [(n["note_label"], n["note_no"], n["received"], n["sold"], n["unsold"], n["gross"]) for n in notes] == [
+        ("1331", "1331", 152, 77, 75, 39550.0), ("B-21352", "21352", 213, 181, 32, 43720.0),
+        ("B-21356", "21356", 288, 137, 151, 36430.0)], notes
+    assert str(notes[0]["report_date"]) == "2026-11-03" and str(notes[1]["received_on"]) == "2026-10-31"
+    assert notes[0]["agent"] == "DAPPER AGENCIES (PTY) LTD" and notes[1]["market_ref"] == "6442880"
+    # The wrapped description is put back together, and today's sales detail
+    # under a note is not read as more GRNs.
+    assert [ln["product"] for ln in notes[1]["lines"]] == [
+        "LICH TM PTB005 CL 1 4", "LICH TM BX020 CL 1 XXL", "LICH TM BX020 CL 1 XL"], notes[1]["lines"]
+    # A note that doesn't add up is refused on its own; the others still come in.
+    notes, refused = market_mail.parse_daily_sales(_DAILY_SALES.format(total_row_gross="43 730.00"))
+    assert [n["note_label"] for n in notes] == ["1331", "B-21356"] and [r[0] for r in refused] == ["B-21352"]
+
+
+def test_the_daily_sales_report_fills_the_markets_tab_until_the_invoice():
+    """What the office asked for: the daily report's sold and unsold on the
+    Markets tab, counted in the totals, but never as money paid. A later
+    report replaces an earlier one and never the other way; a Final Payment
+    invoice takes over; B-21352 finds note 1352."""
+    import json  # noqa: E402
+    import market_mail  # noqa: E402
+    from models import MarketProduct  # noqa: E402
+    from routers import reports  # noqa: E402
+
+    tmp = tempfile.mkdtemp()
+    saved_path = reports.PACKHOUSE_DB_PATH
+    try:
+        ph = sqlite3.connect(os.path.join(tmp, "packhouse.db"))
+        ph.execute("CREATE TABLE deliverynote (uuid TEXT, note_no INTEGER, receiver TEXT, transporter TEXT, "
+                   "loaded_on TEXT, pallets TEXT, removed INTEGER)")
+        pallet = {"market_name": "Local", "lines": [{"packaging_name": "Pre-pac", "carton_kg": 2.0, "cartons": 81},
+                                                    {"packaging_name": "1kg XL", "carton_kg": 1.1, "cartons": 132}]}
+        ph.execute("INSERT INTO deliverynote VALUES ('n1', 1352, 'Dapper', 'HFR', '2026-10-30', ?, 0)",
+                   (json.dumps([pallet]),))
+        ph.commit()
+        ph.close()
+        reports.PACKHOUSE_DB_PATH = os.path.join(tmp, "packhouse.db")
+
+        eng = create_engine(f"sqlite:///{os.path.join(tmp, 't.db')}")
+        run_migrations(eng, snapshot=False)
+        notes, _ = market_mail.parse_daily_sales(_DAILY_SALES.format(total_row_gross="43 720.00"))
+        day = datetime(2026, 10, 30).date()
+        with Session(eng) as s:
+            for sale in notes:
+                assert market_mail.save_daily_sale(sale, s)
+            s.merge(MarketProduct(product="LICH TM PTB005 CL 1 4", pack="Pre-pac"))
+            s.merge(MarketProduct(product="LICH TM BX020 CL 1 XL", pack="1kg XL"))
+            s.commit()
+            note = reports._market_notes(day, day, s)[0]
+            assert note["provisional"] and not note["entered"], note
+            assert (note["sent"], note["sold"], note["gross"]) == (213, 181, 43720.0), note
+            # Sold, but none of it paid: Net Paid stays nothing.
+            assert (note["unpaid"], note["net"]) == (43720.0, 0), note
+            assert note["daily"]["note_label"] == "B-21352", note["daily"]
+            # The XXL line isn't matched to a pack yet: it counts on its own.
+            assert {pk["pack"]: pk["sold"] for pk in note["packs"]} == {
+                "Pre-pac": 49, "1kg XL": 116, "LICH TM BX020 CL 1 XXL": 16}, note["packs"]
+
+            # An older report arriving late doesn't wind the note back.
+            older = dict(notes[1], report_date=datetime(2026, 11, 1).date(), sold=10)
+            assert not market_mail.save_daily_sale(older, s)
+            assert reports._market_notes(day, day, s)[0]["sold"] == 181
+
+            # Saving the transport from the greyed form keeps the market's
+            # figures, rather than freezing them as a typed statement.
+            reports.save_market_statement("n1", reports.MarketStatementIn(
+                lines=[{"pack": "Pre-pac", "sold": 49, "price": 461.22}], commission=99, transport_cost=1500,
+                keep_sales=True), s)
+            note = reports._market_notes(day, day, s)[0]
+            assert note["provisional"] and note["transport_cost"] == 1500 and note["commission"] == 0, note
+
+            # A part payment: paid money is the invoice's, the rest of the
+            # daily report's gross is still unpaid.
+            inv = market_mail.parse_invoice(_INVOICE.format(invoice="5800001/1", payment="Partial Payment #1",
+                                                            paid="1", nett="1,771.90"))
+            market_mail.save_invoice(dict(inv, note_no="21352"), s)
+            note = reports._market_notes(day, day, s)[0]
+            assert note["provisional"] and note["unpaid"] == round(43720 - inv["gross"], 2), note
+            assert note["net"] == inv["net"] and note["paid_sold"] == 3, note
+            assert round(note["gross"] - note["unpaid"] - note["commission"] - note["deductions"]
+                         - note["bank_cost"], 2) == note["net"], note
+
+            # The final invoice settles it: the daily figures stand down.
+            fin = market_mail.parse_invoice(_INVOICE.format(invoice="5800001/2", payment="Final Payment",
+                                                            paid="1", nett="1,771.90"))
+            market_mail.save_invoice(dict(fin, note_no="1352"), s)
+            note = reports._market_notes(day, day, s)[0]
+            assert not note["provisional"] and note["unpaid"] == 0 and note["sold"] == 6, note
+    finally:
+        reports.PACKHOUSE_DB_PATH = saved_path
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_a_boere_trust_account_sale_is_read_and_added_up():
@@ -2163,7 +2336,9 @@ def main():
                test_an_emailed_market_invoice_is_read_checked_and_added_up,
                test_onderbergs_juice_advice_is_one_invoice_per_load,
                test_a_boere_trust_account_sale_is_read_and_added_up,
-               test_one_bad_email_does_not_stop_the_inbox):
+               test_one_bad_email_does_not_stop_the_inbox,
+               test_the_daily_sales_report_is_read_note_by_note,
+               test_the_daily_sales_report_fills_the_markets_tab_until_the_invoice):
         check(fn.__name__, fn)
 
     section("Backups")

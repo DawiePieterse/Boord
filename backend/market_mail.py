@@ -31,6 +31,10 @@ invoice per juice load, filed against Packhouse's J- note.
 Boere Trust's account sales (parse_account_sale) come as a zip the office
 downloads from that agent's website and mails on from laughw.co.za.
 
+The agent's daily sales report (parse_daily_sales) comes the same way: for
+each delivery note still at the market, what has sold so far and for how
+much, before any invoice. Only the newest report per note is kept.
+
 senders is the trust check: mail from any other domain is skipped and listed
 on the Reports tab with who sent it, so a new agent can be added. Dapper's
 domain doesn't enforce SPF or DKIM, so Gmail's verdict can't be relied on.
@@ -53,7 +57,7 @@ from typing import Optional
 from sqlmodel import Session
 
 from db import DATA_DIR, engine
-from models import MarketInvoice
+from models import MarketDailySale, MarketInvoice
 
 CONFIG_PATH = os.path.join(DATA_DIR, "market_mail.txt")
 MAIL_DIR = os.path.join(DATA_DIR, "market_mail")
@@ -227,6 +231,113 @@ def parse_account_sale(text: str) -> dict:
     return inv
 
 
+# The daily sales report prints thousands with a space ("39 550.00"); its
+# columns are many spaces apart, so one space between digit groups is safe.
+_SP_NUM = r"\d{1,3}(?: \d{3})*"
+_DAILY_ROW = re.compile(
+    r"^(\d{6,})[ \t]+(\S.*?)[ \t]{2,}(" + _SP_NUM + r")[ \t]+(" + _SP_NUM + r")[ \t]+(" + _SP_NUM + r")[ \t]+"
+    r"(" + _SP_NUM + r"\.\d\d)[ \t]+(" + _SP_NUM + r"\.\d\d)[ \t]+(" + _SP_NUM + r")[ \t]*$", re.M)
+_DAILY_TOTAL = re.compile(
+    r"^Total:[ \t]+(" + _SP_NUM + r")[ \t]+(" + _SP_NUM + r")[ \t]+(" + _SP_NUM + r")[ \t]+"
+    r"(?:" + _SP_NUM + r"\.\d\d)[ \t]+(" + _SP_NUM + r"\.\d\d)[ \t]+(" + _SP_NUM + r")[ \t]*$", re.M)
+
+
+def _sp(s: str) -> float:
+    return float(s.replace(" ", ""))
+
+
+def note_digits(label: str) -> str:
+    """A delivery note number as Boord files it: "B-21352" and "LW-1335" are
+    21352 and 1335. Packhouse stores the number alone and works the prefix
+    out from the pallets, so the prefix can't be relied on to match."""
+    return re.sub(r"^[A-Za-z]+-?\s*", "", label.strip())
+
+
+def parse_daily_sales(text: str) -> tuple:
+    """The market agent's daily sales report (Dapper's, from the market's own
+    system) as (notes, refused). It lists every delivery note still on the
+    floor, each with its GRNs: received, discards, sold, average, gross and
+    unsold, all to date, so each day's report replaces the one before. Today's
+    sales detail under each note and the per-product summary at the top are
+    left alone: the running totals already include them.
+
+    Each note stands alone, like a batch of invoices: one whose lines don't
+    add up to its Total row, or whose received isn't discards + sold + unsold,
+    is refused (in `refused`, as (label, why)) without holding back the rest."""
+    agent = text.strip().splitlines()[0].strip()
+    m = re.search(r"DAILY SALES REPORT\s+\d{4}/\d\d/\d\d\s*-\s*(\d{4}/\d\d/\d\d)", text)
+    if not m:
+        raise ValueError("no report date on the daily sales report")
+    report_date = datetime.strptime(m.group(1), "%Y/%m/%d").date()
+    notes, refused = [], []
+    for section in re.split(r"(?m)^(?=Summary of D/Note:)", text)[1:]:
+        head = re.match(r"Summary of D/Note:\s*(\S+)(?:\s+received on\s+(\d{4}/\d\d/\d\d))?"
+                        r"(?:\s+Market ref:\s*(\S+))?", section)
+        label = head.group(1)
+        # Today's sales detail repeats the GRNs in another layout; only the
+        # summary above it is read.
+        summary = section.split("Detail of sales", 1)[0]
+        lines = []
+        body = summary.splitlines()
+        for i, line in enumerate(body):
+            row = _DAILY_ROW.match(line)
+            if not row:
+                continue
+            product = row.group(2).strip()
+            # A long description wraps onto a line of its own under the
+            # product column ("LICH TM BX020 CL 1" then "XXL").
+            nxt = body[i + 1] if i + 1 < len(body) else ""
+            if re.match(r"^[ \t]{8,}[A-Za-z0-9*]+(?: [A-Za-z0-9*]+){0,2}[ \t]*$", nxt):
+                product += " " + nxt.strip()
+            received, discards, sold, unsold = (int(_sp(row.group(k))) for k in (3, 4, 5, 8))
+            lines.append({"product": re.sub(r"\s+", " ", product), "received": received, "discards": discards,
+                          "sold": sold, "gross": _sp(row.group(7)), "unsold": unsold})
+        total = _DAILY_TOTAL.search(summary)
+        try:
+            if not lines or not total:
+                raise ValueError("no product lines or no Total row")
+            for ln in lines:
+                if ln["received"] != ln["discards"] + ln["sold"] + ln["unsold"]:
+                    raise ValueError(f"{ln['product']}: received isn't discards + sold + unsold")
+            t_received, t_discards, t_sold = (int(_sp(total.group(k))) for k in (1, 2, 3))
+            t_gross, t_unsold = _sp(total.group(4)), int(_sp(total.group(5)))
+            if (sum(ln["received"] for ln in lines), sum(ln["discards"] for ln in lines),
+                    sum(ln["sold"] for ln in lines), sum(ln["unsold"] for ln in lines)) != \
+                    (t_received, t_discards, t_sold, t_unsold):
+                raise ValueError("product lines don't add up to the Total row")
+            if abs(sum(ln["gross"] for ln in lines) - t_gross) > 0.01:
+                raise ValueError(f"product lines don't add up to the gross {t_gross:.2f}")
+        except ValueError as e:
+            refused.append((label, str(e)))
+            continue
+        notes.append({
+            "agent": agent, "note_no": note_digits(label), "note_label": label, "report_date": report_date,
+            "received_on": datetime.strptime(head.group(2), "%Y/%m/%d").date() if head.group(2) else None,
+            "market_ref": head.group(3) or "", "lines": lines,
+            "received": t_received, "sold": t_sold, "unsold": t_unsold, "gross": t_gross,
+        })
+    if not notes and not refused:
+        raise ValueError("no delivery notes on the daily sales report")
+    return notes, refused
+
+
+def save_daily_sale(sale: dict, session: Session, email_from: str = "", file: str = "") -> bool:
+    """Files one note's line of a daily sales report over the one before it.
+    False when the one already in is from a later day: a report that arrives
+    late, or is forwarded again, never winds a note back."""
+    old = session.get(MarketDailySale, (sale["agent"], sale["note_no"]))
+    if old and old.report_date > sale["report_date"]:
+        return False
+    session.merge(MarketDailySale(
+        agent=sale["agent"], note_no=sale["note_no"], note_label=sale["note_label"],
+        report_date=sale["report_date"], received_on=sale["received_on"], market_ref=sale["market_ref"],
+        lines=json.dumps(sale["lines"]), received=sale["received"], sold=sale["sold"], unsold=sale["unsold"],
+        gross=sale["gross"], file=file, email_from=email_from, imported_at=datetime.utcnow(),
+    ))
+    session.commit()
+    return True
+
+
 _R = r"R\s*([\d,]+\.\d\d)"
 # Juice is paid by the kg and has no Packhouse pack to be matched to.
 JUICE_PRODUCT = "LITCHI JUICE, KG"
@@ -367,6 +478,9 @@ def _handle_message(msg, cfg: dict, session: Session) -> list:
         if "PRODUCER DAILY SUMMARY" in text:
             out.append(f"Skipped {name}: a daily sales summary, not an invoice")
             continue
+        if "DAILY SALES REPORT" in text and "Summary of D/Note" in text:
+            out += _handle_daily_sales(name, data, text, sender, session)
+            continue
         if "PAYMENT SUMMARY" in text:
             out.append(f"Skipped {name}: a payment summary, its account sales carry the figures")
             continue
@@ -413,6 +527,31 @@ def _handle_message(msg, cfg: dict, session: Session) -> list:
             out.append(f"Imported invoice {inv['invoice_no']} for note {inv['note_no']} ({inv['payment']}): "
                        f"net R{inv['net']:,.2f}")
     return out or [f"Skipped \"{subject}\" from {sender}: no PDF attached"]
+
+
+def _handle_daily_sales(name: str, data: bytes, text: str, sender: str, session: Session) -> list:
+    """One daily sales report: each delivery note on it filed over the last
+    report's figures for that note, as log lines."""
+    try:
+        notes, refused = parse_daily_sales(text)
+    except ValueError as e:
+        return [f"Refused {name} from {sender}: {e}"]
+    out = [f"Refused note {label} on {name} from {sender}: {why}" for label, why in refused]
+    if not notes:
+        return out
+    os.makedirs(MAIL_DIR, exist_ok=True)
+    agent_slug = re.sub(r"[^a-z0-9]+", "_", notes[0]["agent"].lower()).strip("_")[:30]
+    file = f"daily_{agent_slug}_{notes[0]['report_date']}.pdf"
+    with open(os.path.join(MAIL_DIR, file), "wb") as f:
+        f.write(data)
+    for sale in notes:
+        if save_daily_sale(sale, session, sender, file):
+            out.append(f"Daily sales {sale['report_date']}: note {sale['note_label']} {sale['sold']} sold, "
+                       f"{sale['unsold']} unsold, gross R{sale['gross']:,.2f}")
+        else:
+            out.append(f"Daily sales {sale['report_date']}: note {sale['note_label']} skipped, "
+                       f"a later report is already in")
+    return out
 
 
 def fetch_once() -> dict:
