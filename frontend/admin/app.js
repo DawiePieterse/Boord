@@ -1432,8 +1432,8 @@ const REPORTS = [
     short: "Every pallet stacked in Packhouse",
     desc: "Every pallet stacked in Boord Packhouse's Pallet Stack in the range - number, barcode, supplier, market, cartons, kg, contents and the delivery note it went out on." },
   { key: "delivery-notes", label: "Afleweringsnotas / Delivery Notes", icon: "fa-file-lines", color: "text-slate-500", group: "packhouse",
-    short: "Notes loaded: pallets, cartons and kg",
-    desc: "Delivery notes loaded in the range - receiver, transporter, seal, cooled-to, pallets, cartons and kg. Not filtered by supplier." },
+    short: "Notes loaded: packs and sizes, cartons and kg",
+    desc: "Delivery notes loaded in the range, one row per pack on each note - receiver, transporter, seal, cooled-to, the pack, its packaging and size (2kg, XXL), pallets, cartons and kg. Not filtered by supplier." },
   // Markets & Transport: built from the delivery notes on the Markets tab.
   // By the date each note was loaded; never by supplier.
   { key: "market-summary", label: "Markte Opsomming / Market Summary", icon: "fa-store", color: "text-pink-600", group: "markets",
