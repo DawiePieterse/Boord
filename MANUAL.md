@@ -1890,9 +1890,43 @@ days that has a PDF attached, or a zip of PDFs. Each one it has dealt with gets 
 
 A note with invoices takes its sales, commission, deductions and net from
 them, all its part payments added up. Its form shows them without letting
-them be typed over. Transport is still typed. The daily sales summaries
-(`producer_daily`) are skipped for now: they show sales before payment, and
-the invoice is what counts.
+them be typed over. Transport is still typed. The market's own daily sales
+summaries (`producer_daily`) are skipped; the agent's daily sales report
+below carries the same figures per note.
+
+**The agent's daily sales report.** Dapper emails a **Daily Sales Report**
+every day: for each delivery note still at the market, the cartons received,
+sold and unsold so far, and the gross they sold for. Boord reads it the same
+way as an invoice (same email, same senders list) and keeps the newest report
+per note, so the Markets tab shows what has sold days or weeks before the
+invoice arrives:
+
+- **Sold** and **Unsold** come from the report, and count in the totals and
+  in every Markets report.
+- **Net Paid** shows the gross in amber, "R 43 720,00 not paid", because
+  nothing has been paid yet and commission and costs only come off on the
+  invoice. The total under Net Paid shows it on its own line, "+ R ... sold,
+  not yet paid", never in the paid figure. The spreadsheets have a **Gross
+  Not Yet Paid** column for it; Net R/carton and R/kg are worked out over the
+  cartons paid for only.
+- When a part-payment invoice comes in, its money is the paid part and the
+  rest of the report's gross stays "not paid". The **Final Payment** invoice
+  takes over the note completely.
+- The report is used only while it shows more sold than the invoices (or a
+  typed statement) do. A report that arrives late never replaces a newer one.
+- A note whose lines don't add up (received must be discards + sold +
+  unsold, and the lines must add up to the note's Total row) is refused on
+  its own; the other notes on the report still come in.
+- The report names the packs its own way again (`LICH TM BX020 CL 1 XL`), so
+  each new description shows up once under **Market invoices by email** to
+  be matched to a Packhouse pack, like an invoice's.
+- A few of 2026's notes went to the market with a 2 in front of the number
+  (B-21352 for note 1352). Boord matches a five-digit 2xxxx to note xxxx, for
+  the reports and for invoices.
+
+Reports that came before this was installed are already labelled
+**Boord-Done** in Gmail and are not read again. Only the newest report
+matters, so the next day's brings every note up to date.
 
 **Setting it up (once).**
 

@@ -2220,10 +2220,17 @@ let _marketNote = null;
 // sorting by market and then widening to the season keeps the market order.
 let _marketSort = { key: "loaded_on", dir: 1 };
 
+// Whether a note has any sales figures: a statement typed, an invoice in, or
+// the market's daily sales report (provisional: sold, not all paid yet).
+function marketHasSales(n) {
+  return n.entered || n.provisional;
+}
+
 // A note with nothing typed in yet has no sold, unsold or net: it sorts
 // below every entered one, whichever way round, rather than passing for zero.
 function marketSortValue(n, key) {
-  if ((key === "sold" || key === "unsold" || key === "net") && !n.entered) return null;
+  if ((key === "sold" || key === "unsold") && !marketHasSales(n)) return null;
+  if (key === "net" && !marketHasSales(n)) return null;
   return key === "unsold" ? n.sent - n.sold : n[key];
 }
 
@@ -2307,17 +2314,20 @@ function renderMarketNotes() {
       <td class="p-2">${esc(n.transporter)}</td>
       <td class="p-2">${n.pallets}</td>
       <td class="p-2">${n.sent}</td>
-      <td class="p-2">${n.entered ? n.sold : "-"}</td>
-      <td class="p-2">${n.entered ? n.sent - n.sold : "-"}</td>
-      <td class="p-2">${n.entered ? Boord.fmtRand(n.net) : '<span class="text-amber-600">Not entered</span>'}${n.invoices.length ? ` <i class="fa-solid fa-envelope text-slate-400" title="From ${n.invoices.length} emailed invoice(s)"></i>` : ""}</td>
+      <td class="p-2">${marketHasSales(n) ? n.sold : "-"}</td>
+      <td class="p-2">${marketHasSales(n) ? n.sent - n.sold : "-"}</td>
+      <td class="p-2">${marketNetCell(n)}</td>
       <td class="p-2">${n.transport_cost ? Boord.fmtRand(n.transport_cost) : "-"}</td>
-      <td class="p-2 whitespace-nowrap"><button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-note="${esc(n.uuid)}">${n.entered ? "Edit" : "Enter"}</button>
+      <td class="p-2 whitespace-nowrap"><button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-note="${esc(n.uuid)}">${marketHasSales(n) ? "Edit" : "Enter"}</button>
         <button class="px-3 py-1 bg-slate-200 rounded-lg text-xs" data-market-print="${esc(n.uuid)}" title="Print or save as PDF"><i class="fa-solid fa-print"></i> Print</button></td>
     </tr>
   `).join("") : `<tr><td colspan="12" class="p-3 text-sm text-slate-500">No delivery notes loaded in this period.</td></tr>`;
-  // Sold, Unsold and Net Paid add up only the notes with a statement in, the
-  // same notes their columns show figures for; the rest are still "-".
-  const sum = (f, only) => _marketNotes.reduce((s, n) => s + (!only || n.entered ? f(n) : 0), 0);
+  // Sold, Unsold and Net Paid add up only the notes with sales figures in,
+  // the same notes their columns show figures for; the rest are still "-".
+  // A note on the daily report counts its sales; its gross not yet paid is
+  // under Net Paid on a line of its own, never in it.
+  const sum = (f, only) => _marketNotes.reduce((s, n) => s + (!only || marketHasSales(n) ? f(n) : 0), 0);
+  const unpaid = sum((n) => n.unpaid || 0);
   document.getElementById("marketNotesFoot").innerHTML = _marketNotes.length ? `
     <tr class="font-semibold bg-slate-50">
       <td class="p-2" colspan="5">Total (${_marketNotes.length} notes)</td>
@@ -2325,7 +2335,7 @@ function renderMarketNotes() {
       <td class="p-2">${sum((n) => n.sent)}</td>
       <td class="p-2">${sum((n) => n.sold, true)}</td>
       <td class="p-2">${sum((n) => n.sent - n.sold, true)}</td>
-      <td class="p-2 whitespace-nowrap">${Boord.fmtRand(sum((n) => n.net, true))}</td>
+      <td class="p-2 whitespace-nowrap">${Boord.fmtRand(sum((n) => n.net, true))}${unpaid ? `<div class="text-xs font-normal text-amber-700">+ ${Boord.fmtRand(unpaid)} sold, not yet paid</div>` : ""}</td>
       <td class="p-2 whitespace-nowrap">${Boord.fmtRand(sum((n) => n.transport_cost || 0))}</td>
       <td></td>
     </tr>` : "";
@@ -2337,26 +2347,39 @@ function renderMarketNotes() {
   });
 }
 
+// The Net Paid cell: what was paid, and for a note on the market's daily
+// sales report the gross sold that no invoice has paid yet, in amber.
+function marketNetCell(n) {
+  const mail = n.invoices.length ? ` <i class="fa-solid fa-envelope text-slate-400" title="From ${n.invoices.length} emailed invoice(s)"></i>` : "";
+  if (n.provisional) {
+    const paid = n.entered && n.net ? `${Boord.fmtRand(n.net)}${mail}<br>` : "";
+    return `${paid}<span class="text-amber-700 whitespace-nowrap" title="${esc(`${n.daily.agent} daily sales report ${n.daily.report_date}: sold at the market, gross before commission and costs, not paid yet`)}"><i class="fa-solid fa-chart-line"></i> ${Boord.fmtRand(n.unpaid)} not paid</span>`;
+  }
+  return (n.entered ? Boord.fmtRand(n.net) : '<span class="text-amber-600">Not entered</span>') + mail;
+}
+
 // One note's statement on its own page, from the figures the list already
 // has, so the office can print it for the file or "Save as PDF" in the print
 // dialog to email it. A plain page with its own styles: Tailwind isn't loaded
 // in the new window, and nothing here is fetched again.
 function printMarketNote(n) {
   const r = (v) => Boord.fmtRand(v || 0);
-  const dash = (v) => (n.entered && v != null ? v : "-");
+  const has = marketHasSales(n);
+  const dash = (v) => (has && v != null ? v : "-");
   const rows = n.packs.map((pk) => `<tr><td>${esc(pk.pack)}</td><td>${pk.sent}</td><td>${dash(pk.sold)}</td>
-    <td>${n.entered && pk.sold != null ? pk.sent - pk.sold : "-"}</td><td>${pk.price != null ? r(pk.price) : "-"}</td>
-    <td>${n.entered ? r(pk.gross) : "-"}</td></tr>`).join("");
+    <td>${has && pk.sold != null ? pk.sent - pk.sold : "-"}</td><td>${pk.price != null ? r(pk.price) : "-"}</td>
+    <td>${has ? r(pk.gross) : "-"}</td></tr>`).join("");
   const line = (label, v) => `<tr><td>${label}</td><td>${v}</td></tr>`;
   printPage(`Delivery note ${n.note_no}`, `
     <h1>Bekfontein Boerdery - Delivery note ${esc(n.note_no)}</h1>
     <div class="meta">${[n.loaded_on, n.receiver, n.market, n.transporter, `${n.pallets} pallets`].filter(Boolean).map(esc).join(" · ")}</div>
     <table><thead><tr><th>Pack</th><th>Sent</th><th>Sold</th><th>Unsold</th><th>Price</th><th>Gross</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="6">No packs on this note.</td></tr>'}</tbody>
-      <tfoot><tr><th>Total</th><th>${n.sent}</th><th>${n.entered ? n.sold : "-"}</th><th>${n.entered ? n.sent - n.sold : "-"}</th><th></th><th>${n.entered ? r(n.gross) : "-"}</th></tr></tfoot></table>
-    ${n.entered ? `<table class="sum">
-      ${line("Gross sales", r(n.gross))}${line("Commission", r(n.commission))}${line("Deductions", r(n.deductions))}${line("Bank charges", r(n.bank_cost))}
-      <tr class="net"><td>Net paid</td><td>${r(n.net)}</td></tr></table>` : "<p><b>Market statement not entered yet.</b></p>"}
+      <tfoot><tr><th>Total</th><th>${n.sent}</th><th>${has ? n.sold : "-"}</th><th>${has ? n.sent - n.sold : "-"}</th><th></th><th>${has ? r(n.gross) : "-"}</th></tr></tfoot></table>
+    ${n.provisional ? `<p><b>Sold so far, from ${esc(n.daily.agent)}'s daily sales report of ${esc(n.daily.report_date)}</b> (their note ${esc(n.daily.note_label)}, market ref ${esc(n.daily.market_ref)}). ${r(n.unpaid)} of it is not paid yet: commission and costs come off when the invoice arrives.</p>` : ""}
+    ${has ? `<table class="sum">
+      ${line("Gross sales", r(n.gross))}${n.unpaid ? line("Not yet paid", r(n.unpaid)) : ""}${line("Commission", r(n.commission))}${line("Deductions", r(n.deductions))}${line("Bank charges", r(n.bank_cost))}
+      <tr class="net"><td>Net paid${n.provisional ? " so far" : ""}</td><td>${r(n.net)}</td></tr></table>` : "<p><b>Market statement not entered yet.</b></p>"}
     <table class="sum">
       ${line("Transport", n.transport_cost ? r(n.transport_cost) : "-")}${line("Waybill", esc(n.waybill_no || "-"))}${line("Transport invoice", esc(n.invoice_no || "-"))}</table>
     ${n.invoices.length ? `<p class="small">From emailed invoices: ${n.invoices.map((i) => `${esc(i.invoice_no)} (${esc(i.payment)}, ${esc(i.invoice_date)}, net ${r(i.net)})`).join("; ")}</p>` : ""}
@@ -2443,10 +2466,10 @@ function printMarketReport(kind, notes, d1, d2, w) {
       "Pallets", "Sent", "Sold", "Unsold", "Gross", "Net paid", "Transport"];
     const totals = (ns, label, tag) => `<tr class="sub"><${tag} colspan="4">${label}</${tag}>
       <${tag}>${ns.reduce((s, n) => s + n.pallets, 0)}</${tag}><${tag}>${ns.reduce((s, n) => s + n.sent, 0)}</${tag}>
-      <${tag}>${ns.reduce((s, n) => s + (n.entered ? n.sold : 0), 0)}</${tag}>
-      <${tag}>${ns.reduce((s, n) => s + (n.entered ? n.sent - n.sold : 0), 0)}</${tag}>
-      <${tag}>${r(ns.reduce((s, n) => s + (n.entered ? n.gross : 0), 0))}</${tag}>
-      <${tag}>${r(ns.reduce((s, n) => s + (n.entered ? n.net : 0), 0))}</${tag}>
+      <${tag}>${ns.reduce((s, n) => s + (marketHasSales(n) ? n.sold : 0), 0)}</${tag}>
+      <${tag}>${ns.reduce((s, n) => s + (marketHasSales(n) ? n.sent - n.sold : 0), 0)}</${tag}>
+      <${tag}>${r(ns.reduce((s, n) => s + (marketHasSales(n) ? n.gross : 0), 0))}</${tag}>
+      <${tag}>${r(ns.reduce((s, n) => s + (marketHasSales(n) ? n.net : 0), 0))}</${tag}>
       <${tag}>${r(ns.reduce((s, n) => s + (n.transport_cost || 0), 0))}</${tag}></tr>`;
     const groups = {};
     notes.forEach((n) => (groups[n[kind] || "(none)"] = groups[n[kind] || "(none)"] || []).push(n));
@@ -2456,8 +2479,8 @@ function printMarketReport(kind, notes, d1, d2, w) {
       <tr><td colspan="${cols.length}" class="grp">${esc(g)}</td></tr>
       ${groups[g].map((n) => `<tr><td>${esc(n.loaded_on)}</td><td>${esc(n.note_no)}</td>
         ${others.map((k) => `<td>${esc(n[k] || "")}</td>`).join("")}<td>${n.pallets}</td><td>${n.sent}</td>
-        <td>${n.entered ? n.sold : "-"}</td><td>${n.entered ? n.sent - n.sold : "-"}</td>
-        <td>${n.entered ? r(n.gross) : "-"}</td><td>${n.entered ? r(n.net) : "Not entered"}</td>
+        <td>${marketHasSales(n) ? n.sold : "-"}</td><td>${marketHasSales(n) ? n.sent - n.sold : "-"}</td>
+        <td>${marketHasSales(n) ? r(n.gross) : "-"}</td><td>${n.provisional ? `${r(n.net)}<br><span class="small">+ ${r(n.unpaid)} not paid (daily ${esc(n.daily.report_date)})</span>` : n.entered ? r(n.net) : "Not entered"}</td>
         <td>${n.transport_cost ? r(n.transport_cost) : "-"}</td></tr>`).join("")}
         ${totals(groups[g], `${esc(g)}: ${groups[g].length} note${groups[g].length === 1 ? "" : "s"}`, "td")}`).join("")}</tbody>
       <tfoot>${totals(notes, `Total, ${notes.length} notes`, "th")}</tfoot></table>`;
@@ -2468,8 +2491,8 @@ function printMarketReport(kind, notes, d1, d2, w) {
     title = sold ? "Sold" : "Unsold";
     const lines = [];
     notes.forEach((n) => n.packs.forEach((pk) => {
-      const out = pk.sent - (n.entered ? pk.sold || 0 : 0);
-      if (sold ? n.entered && pk.sold > 0 : out > 0) lines.push({ n, pk, out });
+      const out = pk.sent - (marketHasSales(n) ? pk.sold || 0 : 0);
+      if (sold ? marketHasSales(n) && pk.sold > 0 : out > 0) lines.push({ n, pk, out });
     }));
     const cols = ["Loaded", "Note", "Receiver", "Market", "Pack",
       ...(sold ? ["Sold", "Price", "Gross"] : ["Sent", "Sold", "Unsold"])];
@@ -2477,7 +2500,7 @@ function printMarketReport(kind, notes, d1, d2, w) {
     body = `<table>${head(cols)}<tbody>${lines.map(({ n, pk, out }) => `<tr><td>${esc(n.loaded_on)}</td>
       <td>${esc(n.note_no)}</td><td>${esc(n.receiver)}</td><td>${esc(n.market)}</td><td>${esc(pk.pack)}</td>
       ${sold ? `<td>${pk.sold}</td><td>${pk.price != null ? r(pk.price) : "-"}</td><td>${r(pk.gross)}</td>`
-        : `<td>${pk.sent}</td><td>${n.entered ? pk.sold || 0 : "Not entered"}</td><td>${out}</td>`}</tr>`).join("")
+        : `<td>${pk.sent}</td><td>${marketHasSales(n) ? pk.sold || 0 : "Not entered"}</td><td>${out}</td>`}</tr>`).join("")
       || `<tr><td colspan="8">Nothing ${sold ? "sold" : "unsold"} in this period.</td></tr>`}</tbody>
       ${lines.length ? `<tfoot><tr><th colspan="5">Total, ${lines.length} line${lines.length === 1 ? "" : "s"}</th>
         ${sold ? `<th>${sum((l) => l.pk.sold)}</th><th></th><th>${r(sum((l) => l.pk.gross))}</th>`
@@ -2503,6 +2526,12 @@ function updateMarketNet() {
   });
   // An invoiced note's figures are the invoices' own: multiplying the
   // averaged price back out would be a few rand off what was paid.
+  if (_marketNote && _marketNote.provisional) {
+    const n = _marketNote;
+    document.getElementById("marketNetLine").textContent =
+      `Gross ${Boord.fmtRand(n.gross)} - not yet paid ${Boord.fmtRand(n.unpaid)} - costs ${Boord.fmtRand(n.commission + n.deductions + n.bank_cost)} = net paid ${Boord.fmtRand(n.net)}`;
+    return;
+  }
   if (_marketNote && _marketNote.invoices.length) {
     const n = _marketNote;
     document.getElementById("marketNetLine").textContent =
@@ -2535,11 +2564,17 @@ function openMarketModal(note) {
   `).join("");
   // Once the market's invoice has come in by email its figures are the
   // statement, so the sales boxes only show them; transport stays typed.
-  const imported = note.invoices.length > 0;
+  // The same goes for the market's daily sales report, until a final invoice.
+  const imported = note.invoices.length > 0 || note.provisional;
+  const d = note.daily;
   const box = document.getElementById("marketInvoices");
   box.classList.toggle("hidden", !imported);
   box.innerHTML = imported ? `
-    <div class="font-semibold mb-1"><i class="fa-solid fa-envelope mr-1 text-slate-400"></i>From the market's emailed invoices</div>
+    ${note.provisional ? `
+      <div class="font-semibold mb-1"><i class="fa-solid fa-chart-line mr-1 text-amber-600"></i>Sold so far, from ${esc(d.agent)}'s daily sales report</div>
+      <div class="py-1">${esc(d.report_date)} · their note ${esc(d.note_label)} · market ref ${esc(d.market_ref)} · received ${d.received}, sold ${d.sold}, unsold ${d.unsold} · gross ${Boord.fmtRand(d.gross)}</div>
+      <div class="text-xs text-amber-700 mb-1">${Boord.fmtRand(note.unpaid)} of it is not paid yet: commission and costs come off when the invoice arrives.</div>` : ""}
+    ${note.invoices.length ? '<div class="font-semibold mb-1"><i class="fa-solid fa-envelope mr-1 text-slate-400"></i>From the market\'s emailed invoices</div>' : ""}
     ${note.invoices.map((i) => `
       <div class="flex items-center justify-between gap-2 py-1">
         <span>${esc(i.invoice_no)} · ${esc(i.payment)} · ${esc(i.invoice_date)} · net ${Boord.fmtRand(i.net)}</span>
@@ -2588,6 +2623,9 @@ async function saveMarketStatement() {
     waybill_no: document.getElementById("mkWaybill").value,
     invoice_no: document.getElementById("mkInvoice").value,
     notes: document.getElementById("mkNotes").value,
+    // Greyed-out sales boxes show the market's figures, not the office's:
+    // leave whatever was typed before as it was.
+    keep_sales: _marketNote.invoices.length > 0 || !!_marketNote.provisional,
   };
   try {
     await Boord.api(`/api/reports/market-notes/${encodeURIComponent(_marketNote.uuid)}`, { method: "PUT", body });
