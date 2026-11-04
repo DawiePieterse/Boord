@@ -1489,6 +1489,53 @@ def test_a_market_statement_sums_to_what_the_market_paid():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_the_delivery_notes_report_shows_each_pack_and_its_size():
+    """The office asked: the season's Delivery Notes sheet must say what went,
+    2kg XXL and Pre-pac, not just how many cartons. One row per pack per note,
+    the size in a column of its own so the sheet can be sorted by it."""
+    import json  # noqa: E402
+    from routers import reports  # noqa: E402
+
+    assert reports._pack_and_size("2kg XXL") == ("2kg", "XXL")
+    assert reports._pack_and_size("Rhino 4.5 kg XL") == ("Rhino 4.5 kg", "XL")
+    assert reports._pack_and_size("Pre-pac") == ("Pre-pac", "")
+
+    tmp = tempfile.mkdtemp()
+    saved_path, saved_response = reports.PACKHOUSE_DB_PATH, reports._xlsx_response
+    try:
+        ph = sqlite3.connect(os.path.join(tmp, "packhouse.db"))
+        ph.execute("CREATE TABLE deliverynote (uuid TEXT, note_no INTEGER, loaded_on TEXT, offloaded_on TEXT, "
+                   "receiver TEXT, transporter TEXT, seal_no TEXT, cooled_to REAL, target_receiver TEXT, "
+                   "pallets TEXT, made_by_name TEXT, removed INTEGER)")
+        p1 = {"uuid": "a", "pallet_ref": "101", "market_name": "Local",
+              "lines": [{"packaging_name": "2kg XXL", "carton_kg": 2.0, "cartons": 100},
+                        {"packaging_name": "Pre-pac", "carton_kg": 0.48, "cartons": 50}]}
+        p2 = {"uuid": "b", "pallet_ref": "102", "market_name": "Local",
+              "lines": [{"packaging_name": "2kg XXL", "carton_kg": 2.0, "cartons": 80}]}
+        ph.execute("INSERT INTO deliverynote VALUES ('n1', 7, '2026-10-20', '2026-10-21', 'Dapper\nJoburg', "
+                   "'HFR', '', 8, '', ?, 'Jan', 0)", (json.dumps([p1, p2]),))
+        ph.execute("INSERT INTO deliverynote VALUES ('j1', 1, '2026-10-20', '2026-10-21', 'Onderberg', "
+                   "'HFR', '', 8, '', '[]', 'Jan', 0)")
+        ph.commit()
+        ph.close()
+        reports.PACKHOUSE_DB_PATH = os.path.join(tmp, "packhouse.db")
+        got = {}
+        reports._xlsx_response = lambda headers, rows, *a: got.update(headers=headers, rows=rows)
+
+        day = datetime(2026, 10, 20).date()
+        reports.delivery_notes_report(day, day)
+        rows = [dict(zip(got["headers"], r)) for r in got["rows"]]
+        packs = [(r["Note No"], r["Packaging"], r["Size"], r["Pallets"], r["Cartons"], r["Kg"], r["Pallet Refs"])
+                 for r in rows]
+        # By load date, then note number: the juice note (1) comes first.
+        assert packs == [(1, "", "", 0, 0, 0, ""), (7, "2kg", "XXL", 2, 180, 360.0, "101, 102"),
+                         (7, "Pre-pac", "", 1, 50, 24.0, "101")], packs
+        assert rows[1]["Market"] == "Local" and rows[1]["Receiver"] == "Dapper, Joburg"
+    finally:
+        reports.PACKHOUSE_DB_PATH, reports._xlsx_response = saved_path, saved_response
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 # An invoice as pypdf's layout mode reads a Johannesburg market pps_invoice:
 # the same labels and spacing, made-up figures. {paid} and {nett} let a test
 # make a part-payment or break the arithmetic.
@@ -2112,6 +2159,7 @@ def main():
 
     section("Markets & Transport")
     for fn in (test_a_market_statement_sums_to_what_the_market_paid,
+               test_the_delivery_notes_report_shows_each_pack_and_its_size,
                test_an_emailed_market_invoice_is_read_checked_and_added_up,
                test_onderbergs_juice_advice_is_one_invoice_per_load,
                test_a_boere_trust_account_sale_is_read_and_added_up,

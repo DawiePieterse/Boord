@@ -546,25 +546,68 @@ def pallets_stacked_report(period_start: date, period_end: date, supplier_id: Op
     return _xlsx_response(headers, rows, "Pallets Stacked", f"Pallets_Stacked_{period_start}_{period_end}.xlsx")
 
 
+# The size words a pack's name carries (2kg XXL, Rhino 4.5 kg XL), as
+# Packhouse's export_forms.SIZES reads its Count. Packhouse keeps a pack as one
+# name, so the size is read back out of it here rather than stored anywhere.
+PACK_SIZES = ("XXXL", "XXL", "XL", "L", "M", "S", "MIX")
+
+
+def _pack_and_size(name: str) -> tuple:
+    """("2kg", "XXL") out of "2kg XXL": the pack's name with its size word
+    taken out, and the size word. A name without one keeps its whole name
+    and a blank size (Pre-pac)."""
+    words = (name or "").replace(",", " ").split()
+    size = next((w.upper() for w in words if w.upper() in PACK_SIZES), "")
+    if not size:
+        return (name or "").strip(), ""
+    return " ".join(w for w in words if w.upper() != size), size
+
+
 @router.get("/delivery-notes")
 def delivery_notes_report(period_start: date, period_end: date, supplier_id: Optional[int] = None):
-    """One row per delivery note loaded in the range. The supplier filter is
-    accepted but not applied: a note carries pallets of whatever suppliers
-    were stacked, and keeps only their names."""
+    """One row per pack on each delivery note loaded in the range: the note's
+    details, then the pack (2kg, XXL), its cartons and kg across every pallet
+    on that note. The office sorts and pivots this sheet by pack and size, so
+    the two are columns of their own, not words in a text cell. A note's
+    cartons and kg are the sum of its rows; its Pallets column counts the
+    pallets carrying that pack, so a mixed pallet counts under each of its
+    packs. A note with no pallet lines (a juice note) is one row with a blank
+    pack. The supplier filter is accepted but not applied: a note carries
+    pallets of whatever suppliers were stacked, and keeps only their names."""
     notes = _packhouse_rows("SELECT * FROM deliverynote WHERE removed = 0 AND loaded_on >= ? AND loaded_on <= ? "
                             "ORDER BY loaded_on, note_no", (period_start.isoformat(), period_end.isoformat()))
-    headers = ["Note No", "Loaded On", "Offloaded On", "Receiver", "Transporter", "Seal No", "Cooled To (°C)",
-               "Target Receiver", "Pallets", "Cartons", "Kg", "Pallet Refs", "Made By"]
+    headers = ["Note No", "Loaded On", "Offloaded On", "Market", "Receiver", "Transporter", "Seal No",
+               "Cooled To (°C)", "Target Receiver", "Pack", "Packaging", "Size", "Carton Kg", "Pallets",
+               "Cartons", "Kg", "Pallet Refs", "Made By"]
     rows = []
     for n in notes:
         pallets = json.loads(n["pallets"] or "[]")
-        stats = [_pallet_stats(p.get("lines", [])) for p in pallets]
-        rows.append([
-            n["note_no"], n["loaded_on"], n["offloaded_on"], n["receiver"].replace("\n", ", "), n["transporter"],
-            n["seal_no"], n["cooled_to"], n["target_receiver"].replace("\n", ", "), len(pallets),
-            sum(s[0] for s in stats), round(sum(s[1] for s in stats), 1),
-            ", ".join(p.get("pallet_ref", "") for p in pallets), n["made_by_name"],
-        ])
+        note_cols = [
+            n["note_no"], n["loaded_on"], n["offloaded_on"],
+            ", ".join(dict.fromkeys(p.get("market_name", "") for p in pallets if p.get("market_name"))),
+            (n["receiver"] or "").replace("\n", ", "), n["transporter"], n["seal_no"], n["cooled_to"],
+            (n["target_receiver"] or "").replace("\n", ", "),
+        ]
+        # Packs in the order they first appear on the note, so the rows read
+        # like the paper note does.
+        packs = {}
+        for p in pallets:
+            for ln in p.get("lines", []):
+                key = (ln.get("packaging_name") or "", ln.get("carton_kg") or 0)
+                pk = packs.setdefault(key, {"cartons": 0, "kg": 0.0, "refs": [], "pallets": set()})
+                pk["pallets"].add(p.get("uuid") or id(p))
+                pk["cartons"] += ln.get("cartons", 0)
+                pk["kg"] += ln.get("cartons", 0) * (ln.get("carton_kg") or 0)
+                ref = p.get("pallet_ref", "")
+                if ref and ref not in pk["refs"]:
+                    pk["refs"].append(ref)
+        if not packs:
+            rows.append(note_cols + ["", "", "", "", len(pallets), 0, 0,
+                                     ", ".join(p.get("pallet_ref", "") for p in pallets), n["made_by_name"]])
+        for (name, carton_kg), pk in packs.items():
+            packaging, size = _pack_and_size(name)
+            rows.append(note_cols + [name, packaging, size, carton_kg, len(pk["pallets"]), pk["cartons"],
+                                     round(pk["kg"], 1), ", ".join(pk["refs"]), n["made_by_name"]])
     return _xlsx_response(headers, rows, "Delivery Notes", f"Delivery_Notes_{period_start}_{period_end}.xlsx")
 
 
