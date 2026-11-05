@@ -1,5 +1,14 @@
 @echo off
 setlocal EnableDelayedExpansion
+:: --unattended: Boord Monitor's Update button (and the owner's deploy.sh,
+:: through it) runs this from its "Boord Update" scheduled task, as SYSTEM,
+:: with nobody at the screen. It then never stops at a pause for a key
+:: that nobody will press, and never asks UAC for rights: SYSTEM has them,
+:: and a prompt nobody can answer would hang it. Everything it checks -
+:: above all the release signature - it checks exactly as before. Run by
+:: hand, nothing changes.
+set "UNATTENDED="
+for %%A in (%*) do if /i "%%~A"=="--unattended" set "UNATTENDED=1"
 :: Boord - double-click this file to update to the newest signed release
 :: from GitHub, install any new dependencies, and restart the server so the
 :: update actually takes effect.
@@ -37,6 +46,10 @@ net session >nul 2>&1
 if %errorLevel% neq 0 (
     echo This needs administrator rights to restart the server - requesting them now...
     echo If Windows shows a User Account Control prompt, click "Yes".
+    if defined UNATTENDED (
+        echo Run unattended without administrator rights - stopping. Boord Monitor runs it as SYSTEM.
+        exit /b 1
+    )
     powershell -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
     exit /b
 )
@@ -67,7 +80,7 @@ if not exist "%FPR_FILE%" (
     echo.
     echo The server has NOT been restarted and is still running whatever it
     echo was running before.
-    if not defined CHECK_ONLY pause
+    if not defined CHECK_ONLY if not defined UNATTENDED pause
     exit /b 1
 )
 for /f "usebackq eol=# tokens=1 delims= " %%F in ("%FPR_FILE%") do (
@@ -76,7 +89,7 @@ for /f "usebackq eol=# tokens=1 delims= " %%F in ("%FPR_FILE%") do (
 if not defined RELEASE_FPR (
     echo %FPR_FILE% is empty - expected a 40-character key fingerprint.
     echo Not updating. See MANUAL.md chapter 2, "Trusting the release key".
-    if not defined CHECK_ONLY pause
+    if not defined CHECK_ONLY if not defined UNATTENDED pause
     exit /b 1
 )
 echo     Only releases signed by !RELEASE_FPR! will be accepted.
@@ -102,7 +115,7 @@ if errorlevel 1 (
     echo     git config --global gpg.program "C:/Program Files/GnuPG/bin/gpg.exe"
     echo.
     echo Re-running install.bat does both of these for you.
-    if not defined CHECK_ONLY pause
+    if not defined CHECK_ONLY if not defined UNATTENDED pause
     exit /b 1
 )
 
@@ -126,7 +139,7 @@ if %errorLevel% neq 0 (
     echo Fetch failed - check the error above ^(no internet, or this folder
     echo isn't a git checkout^). The server has NOT been restarted, so it's
     echo still running whatever it was before.
-    if not defined CHECK_ONLY pause
+    if not defined CHECK_ONLY if not defined UNATTENDED pause
     exit /b 1
 )
 
@@ -140,7 +153,7 @@ if not defined NEWTAG (
     echo.
     echo No release tags ^(v*^) found in this repository. Nothing to update to.
     echo The server has NOT been restarted.
-    if not defined CHECK_ONLY pause
+    if not defined CHECK_ONLY if not defined UNATTENDED pause
     exit /b 1
 )
 
@@ -202,7 +215,7 @@ if "!CURTAG!"=="!NEWTAG!" (
             echo the tag out by hand - find out why it failed first.
             if defined CHECK_ONLY call :write_check_result failed false
         )
-        if not defined CHECK_ONLY pause
+        if not defined CHECK_ONLY if not defined UNATTENDED pause
         exit /b 1
     )
     echo     Signature OK.
@@ -223,7 +236,7 @@ if "!CURTAG!"=="!NEWTAG!" (
         echo.
         echo Checkout failed - check the error above. The server has NOT been
         echo restarted, so it's still running whatever it was before.
-        if not defined CHECK_ONLY pause
+        if not defined CHECK_ONLY if not defined UNATTENDED pause
         exit /b 1
     )
 )
@@ -274,7 +287,7 @@ if errorlevel 1 (
     echo once the machine is online:
     echo     update_server.bat
     echo.
-    if not defined CHECK_ONLY pause
+    if not defined CHECK_ONLY if not defined UNATTENDED pause
     exit /b 1
 )
 
@@ -303,7 +316,7 @@ if %errorLevel% equ 0 (
         echo message above for what holds the port, stop it, and run this
         echo again.
         echo.
-        if not defined CHECK_ONLY pause
+        if not defined CHECK_ONLY if not defined UNATTENDED pause
         exit /b 1
     )
 
@@ -333,7 +346,7 @@ if %errorLevel% equ 0 (
         echo The database itself was copied before anything touched it - look
         echo for the newest pre_migration_*.db in data\backups\.
         echo.
-        if not defined CHECK_ONLY pause
+        if not defined CHECK_ONLY if not defined UNATTENDED pause
         exit /b 1
     )
 
@@ -351,7 +364,7 @@ echo     app fully closed and reopened ^(not just backgrounded^) to pick up
 echo     the new version - see MANUAL.md chapter 12 if a device still shows
 echo     an old version.
 echo.
-if not defined CHECK_ONLY pause
+if not defined CHECK_ONLY if not defined UNATTENDED pause
 exit /b 0
 
 
