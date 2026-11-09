@@ -566,6 +566,21 @@ def test_a_locked_database_refuses_to_migrate():
 # answer.
 # ---------------------------------------------------------------------------
 
+def test_the_updater_starts_the_new_file_after_the_checkout():
+    """cmd reads a batch file off the disk as it runs, so once the checkout has
+    replaced the updater it must start the new file from the top, as the last
+    thing in that block: anything after it would be read at a stale byte of
+    the new file (Boord Packhouse v0.66 ended "failed" that way, the server never restarted)."""
+    with open(os.path.join(BACKEND_DIR, "..", "update_server.bat"), encoding="utf-8") as fh:
+        text = fh.read()
+    assert re.search(r'git checkout --force "!NEWTAG!"\n.*?\n    "%~f0" %\* --checked-out\n\)\n\n'
+                     r':: The run that checked out is gone', text, re.S), "the updater does not restart itself after its checkout"
+    # ...a second time round stops, rather than checking out for ever...
+    assert '"%%~A"=="--checked-out"' in text
+    # ...and the rollback advice still names the release that was running.
+    assert "HEAD@{1}" in text
+
+
 def test_the_version_regex_still_matches_the_constant():
     """backend/version.py reads Boord.VERSION out of api.js with the same
     anchored expression scripts/release.sh greps with. Reformat that line -
@@ -2380,6 +2395,10 @@ def main():
                test_planner_tables_are_built_from_the_same_derived_figures,
                test_planner_preorders_fill_what_was_not_typed):
         check(fn.__name__, fn)
+
+    section("Updater")
+    check(test_the_updater_starts_the_new_file_after_the_checkout.__name__,
+          test_the_updater_starts_the_new_file_after_the_checkout)
 
     section("Setup state")
     for fn in (test_setup_not_required_on_a_configured_farm,
