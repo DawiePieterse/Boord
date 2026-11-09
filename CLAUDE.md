@@ -99,6 +99,7 @@ There is no pytest and no CI. `scripts/selftest.py` is the test suite on purpose
 - **Releases are signed tags; merging to `main` deploys nothing.**
   - `update_server.bat` picks the newest `v*` tag and verifies it against `data\release_key.fpr`.
   - It stops the server with `stop_server.ps1`, migrates, and restarts.
+  - **The updater starts itself again after its checkout** (`"%~f0" %* --checked-out`, the last line of that block): cmd reads a batch file off the disk as it runs, so a release that changed the updater left the old run carrying on at a stale byte of the new file (Boord Packhouse v0.66 ended "failed" that way, the code checked out but the server never restarted). The new run finds itself on the newest tag, skips the checkout and does the rest; `--checked-out` stops a second lap. Keep that line last in the block (the test checks it), and the lines just before it able to run outside the block.
   - `setup_update_check.bat` registers a daily `--check` that only reports.
 - **Tag only from an up-to-date `main`, and never move a released tag.** `release.sh` refuses a tag whose `VERSION` disagrees, but it can't know your clone is stale: Boord Notes' `v2.16` was signed in a stale clone and points at a months-old commit. Run `git pull --ff-only origin main` first. A wrong tag is fixed with a new release, never by re-pointing it.
 - **`stop_server.ps1`, never a bare `schtasks /end`.**
