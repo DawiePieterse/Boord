@@ -14,14 +14,14 @@ up as undone.
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func
 from sqlmodel import Session, select
 
 from db import get_session
 from models import (Block, Device, HarvestRecord, RateSetting, SetupState,
                     Supplier, SystemSetting, Worker)
-from security import require_admin_client
+from security import is_dashboard_only, require_admin_client
 
 # Every endpoint here is admin-only.
 router = APIRouter(prefix="/api/setup", tags=["setup"], dependencies=[Depends(require_admin_client)])
@@ -134,8 +134,10 @@ def build_setup_state(session: Session) -> dict:
 
 
 @router.get("/state")
-def setup_state(session: Session = Depends(get_session)):
-    return build_setup_state(session)
+def setup_state(request: Request, session: Session = Depends(get_session)):
+    # dashboard_only rides on the Admin app's first call, so the page knows
+    # which tabs to show before it draws any (security.is_dashboard_only).
+    return {**build_setup_state(session), "dashboard_only": is_dashboard_only(request)}
 
 
 @router.post("/start")

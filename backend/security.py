@@ -104,10 +104,9 @@ def _asks_for_a_tailnet_site(request: Request) -> bool:
     return False
 
 
-def is_admin_client(request: Request) -> bool:
-    """True when this request may see admin data. Usable as a dependency in
-    its own right for endpoints that serve everybody but serve the admin more
-    - see master_data.list_workers."""
+def is_tailnet_client(request: Request) -> bool:
+    """True when this request arrived over Tailscale: it may load the Admin
+    app's pages. What it may see once there is is_admin_client's question."""
     address = _peer_address(request)
     if address is None:
         return False
@@ -120,9 +119,74 @@ def is_admin_client(request: Request) -> bool:
     return False
 
 
+# Dashboard-only devices: one Tailscale IP per line (# starts a comment), in a
+# file the farm keeps and no release touches. A device listed here opens the
+# Admin app but gets the Dashboard tab and nothing else - a farm manager who
+# should see the harvest, not the payroll.
+#
+# By IP rather than by Tailscale's identity headers on purpose: uvicorn also
+# answers the tailnet directly on port 8000, where `tailscale serve` adds no
+# headers, so "no header" would have to mean "full admin" and the direct port
+# would be the way round. The peer address is the same on both paths.
+#
+# It lists the RESTRICTED devices, so it fails open: a tailnet device not in
+# the file is the admin, as it always was. The other way round, one wrong line
+# locks the office out of Admin. Under signal (2) above (no X-Forwarded-For)
+# the peer is loopback, no line matches, and everyone is the admin again.
+DASHBOARD_ONLY_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "dashboard_only.txt")
+
+DASHBOARD_ONLY_MESSAGE = "This device has dashboard-only access to the Admin app"
+
+
+def _dashboard_only_addresses() -> set:
+    # ponytail: read on every admin request, no cache. A handful of lines and
+    # one office's traffic; cache on the file's mtime if that ever changes.
+    try:
+        with open(DASHBOARD_ONLY_FILE, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return set()
+    found = set()
+    for line in lines:
+        try:
+            found.add(ipaddress.ip_address(line.split("#")[0].strip()))
+        except ValueError:
+            pass  # blank, comment, or a typo: a line that restricts nobody
+    return found
+
+
+def is_dashboard_only(request: Request) -> bool:
+    address = _peer_address(request)
+    return address is not None and address in _dashboard_only_addresses()
+
+
+# The admin-only calls the Dashboard tab makes; everything else it loads is
+# open to every device. Exact pairs, not a prefix: a new dashboard endpoint
+# stays closed to these devices until somebody adds it here on purpose.
+_DASHBOARD_ONLY_ROUTES = {
+    ("GET", "/api/setup/state"),       # the page's first call; says "hide the tabs"
+    ("GET", "/api/dashboard/summary"),
+}
+
+
+def _dashboard_only_may(request: Request) -> bool:
+    """Whether a dashboard-only device may make this admin-only request."""
+    return (request.method, request.url.path) in _DASHBOARD_ONLY_ROUTES
+
+
+def is_admin_client(request: Request) -> bool:
+    """True when this request may see admin data. Usable as a dependency in
+    its own right for endpoints that serve everybody but serve the admin more
+    - see master_data.list_workers, where a dashboard-only device gets what a
+    field tablet gets."""
+    return is_tailnet_client(request) and not is_dashboard_only(request)
+
+
 def require_admin_client(request: Request) -> None:
     """Admin-only endpoints depend on this. 403 rather than 401: there are no
     credentials to go and fetch, so "try again with a token" would be a lie -
     this request came in on the wrong network and always will."""
-    if not is_admin_client(request):
+    if not is_tailnet_client(request):
         raise HTTPException(status.HTTP_403_FORBIDDEN, ADMIN_ONLY_MESSAGE)
+    if is_dashboard_only(request) and not _dashboard_only_may(request):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, DASHBOARD_ONLY_MESSAGE)

@@ -13,7 +13,7 @@ from version import prime as prime_version
 from routers import (backups, dashboard, devices, harvest_records, master_data, lots,
                       payments, planner, processing, receiving, reports, setup, suppliers, sync,
                       version, weather)
-from security import ADMIN_ONLY_MESSAGE, is_admin_client
+from security import ADMIN_ONLY_MESSAGE, is_tailnet_client
 
 app = FastAPI(title="Boord Harvest & Receiving")
 
@@ -58,7 +58,7 @@ async def admin_app_is_not_on_the_farm_wifi(request: Request, call_next):
     redirects it to "/admin/", and a redirect is a perfectly good way in.
     """
     path = request.url.path
-    if (path == "/admin" or path.startswith("/admin/")) and not is_admin_client(request):
+    if (path == "/admin" or path.startswith("/admin/")) and not is_tailnet_client(request):
         return PlainTextResponse(ADMIN_ONLY_MESSAGE, status_code=403)
     return await call_next(request)
 

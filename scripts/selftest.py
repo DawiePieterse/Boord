@@ -1002,6 +1002,84 @@ def test_a_request_with_no_peer_is_not_the_admin():
         assert not is_admin_client(_request_from("not-an-ip-address"))
 
 
+def _dashboard_only_file(text):
+    """Point security.py at a throwaway dashboard_only.txt for one check."""
+    import tempfile  # noqa: E402
+    import security  # noqa: E402
+
+    class _Swap:
+        def __enter__(self):
+            self.old = security.DASHBOARD_ONLY_FILE
+            f = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+            f.write(text)
+            f.close()
+            security.DASHBOARD_ONLY_FILE = f.name
+
+        def __exit__(self, *exc):
+            os.unlink(security.DASHBOARD_ONLY_FILE)
+            security.DASHBOARD_ONLY_FILE = self.old
+
+    return _Swap()
+
+
+def _admin_call(host, method, path):
+    """None when require_admin_client lets the call through, else the status."""
+    from fastapi import HTTPException, Request  # noqa: E402
+    from security import require_admin_client  # noqa: E402
+
+    scope = {"type": "http", "method": method, "path": path, "headers": [],
+             "client": (host, 54321)}
+    try:
+        require_admin_client(Request(scope))
+    except HTTPException as e:
+        return e.status_code
+    return None
+
+
+MANAGER, OFFICE = "100.101.102.103", "100.64.0.1"
+MANAGER_FILE = f"# the farm manager's phone\n{MANAGER}  # iPhone\nnot-an-ip\n\n"
+
+
+def test_a_dashboard_only_device_gets_the_dashboard_and_nothing_else():
+    """The whole guarded route list, both ways: what the Dashboard tab needs
+    answers, and every other admin-only endpoint - payments, exports, Settings,
+    every write - is refused. Asserted against ADMIN_ONLY_ROUTES so a new
+    admin endpoint is closed to the manager unless somebody opens it."""
+    from security import is_admin_client, is_tailnet_client  # noqa: E402
+
+    needed = {("GET", "/api/setup/state"), ("GET", "/api/dashboard/summary")}
+    with _without_dev_loopback(), _dashboard_only_file(MANAGER_FILE):
+        manager = _request_from(MANAGER)
+        assert is_tailnet_client(manager), "the manager could not load the Admin page"
+        assert not is_admin_client(manager), \
+            "the manager got the admin's worker list, contact details included"
+        for method, path in sorted(needed):
+            assert _admin_call(MANAGER, method, path) is None, \
+                f"the Dashboard tab needs {method} {path} and it was refused"
+        for method, path in sorted(ADMIN_ONLY_ROUTES):
+            if method != "GET":
+                assert _admin_call(MANAGER, method, path) == 403, \
+                    f"a dashboard-only device was allowed to {method} {path}"
+        for path in ("/api/payments", "/api/workers/export", "/api/backups",
+                     "/api/reports/litchi-wages", "/api/devices"):
+            assert _admin_call(MANAGER, "GET", path) == 403, \
+                f"a dashboard-only device read {path}"
+
+
+def test_the_dashboard_only_list_restricts_nobody_else():
+    """It lists the restricted devices, so everything not on it - the office,
+    and every device when the file is missing - is still the full admin."""
+    from security import is_admin_client  # noqa: E402
+
+    with _without_dev_loopback():
+        with _dashboard_only_file(MANAGER_FILE):
+            assert is_admin_client(_request_from(OFFICE))
+            assert _admin_call(OFFICE, "PUT", "/api/system-settings") is None
+            # Being on the list is not a way in from the farm wifi.
+            assert _admin_call("192.168.68.50", "GET", "/api/dashboard/summary") == 403
+        assert is_admin_client(_request_from(MANAGER)), \
+            "with no dashboard_only.txt the manager's address should be an ordinary admin"
+
 
 # ---------------------------------------------------------------------------
 # Frontend app shell
@@ -2364,7 +2442,9 @@ def main():
                test_loopback_alone_is_not_the_admin_any_more,
                test_loopback_carrying_a_tailnet_host_still_gets_in,
                test_the_dev_escape_hatch_is_opt_in_and_off_by_default,
-               test_a_request_with_no_peer_is_not_the_admin):
+               test_a_request_with_no_peer_is_not_the_admin,
+               test_a_dashboard_only_device_gets_the_dashboard_and_nothing_else,
+               test_the_dashboard_only_list_restricts_nobody_else):
         check(fn.__name__, fn)
 
     section("Planner")

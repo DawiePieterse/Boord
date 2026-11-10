@@ -46,3 +46,5 @@ heartbeat_url.txt
 NEXT_STEPS.md
 # Working file for the admin training deck - the PDFs are what ship.
 Boord_Admin_Training.pptx
+# The Tailscale IPs of dashboard-only devices (security.py). This farm's, not the code's.
+data/dashboard_only.txt

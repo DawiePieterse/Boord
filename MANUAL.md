@@ -864,6 +864,35 @@ season is over), go back to `login.tailscale.com/admin/machines`, find
 their device under the server's sharing settings, and remove it - this
 revokes their access immediately without affecting anyone else.
 
+### Dashboard-only devices (a farm manager's phone)
+
+Every device on Tailscale is the full admin: Settings, Payments, exports and
+all. To give somebody the **Dashboard tab only**:
+
+1. Add their device to Tailscale as usual and note its Tailscale IP
+   (`100.x.y.z`, on `login.tailscale.com/admin/machines`).
+2. On the server, put that IP on a line of its own in
+   `C:\Boord\data\dashboard_only.txt` (make the file if it is not there).
+   Text after a `#` is a note:
+
+   ```
+   100.101.102.103   # Jan's phone
+   ```
+
+3. That's all - no restart. The device now opens the Admin app with the
+   Dashboard tab alone, and the server refuses it everything else: no
+   Payments, Reports, Planner or Settings, no edits, and no worker contact
+   details. Remove the line to make it a full admin again.
+
+Three things to know:
+
+- It is **per device**. A second phone for the same person is a full admin
+  until its IP is in the file too.
+- It covers **Boord only**. Boord Owner, Labour, Packhouse and Monitor are
+  other ports on the same server; close those to that device with a Tailscale
+  access rule that allows it port 443 alone.
+- Updates never touch the file.
+
 ### Enabling the QR camera scanner (HTTPS via Tailscale - required for Field devices)
 
 Android's and iOS's browsers only allow a page to use the camera if it's

@@ -78,6 +78,7 @@ async function fetchSetupState() {
 // therefore has to run under _appBound, or every button in the app would be
 // bound twice and fire twice.
 let _appBound = false;
+let _dashboardOnly = false;
 
 async function showApp() {
   // A database nobody has claimed yet gets the wizard instead of the tabs.
@@ -92,6 +93,13 @@ async function showApp() {
 
   document.getElementById("setupWizardScreen").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
+
+  // A dashboard-only device (the server's data/dashboard_only.txt) gets the
+  // Dashboard tab alone. Hiding the rest is tidiness, not the lock: the
+  // server refuses those tabs' requests whatever this page shows.
+  _dashboardOnly = !!(setup && setup.dashboard_only);
+  document.querySelectorAll('.tab-btn:not([data-tab="dashboard"]), #labourLink')
+    .forEach((el) => { el.style.display = _dashboardOnly ? "none" : ""; });  // .tab-btn's own display beats .hidden
 
   if (!_appBound) {
     _appBound = true;
@@ -944,7 +952,7 @@ async function exportFile(path, filename) {
 // only looks right after the next refresh.
 async function loadAllMasterData() {
   await Promise.all([loadSuppliers(), loadTeams()]);
-  await Promise.all([loadWorkers(), loadBlocks(), loadDevices()]);
+  await Promise.all([loadWorkers(), loadBlocks(), ...(_dashboardOnly ? [] : [loadDevices()])]);
 }
 
 // Workers
@@ -3062,7 +3070,9 @@ async function loadSettingsForm() {
   // Independent reads - fetched together rather than one round trip at a time.
   const [settings, rate] = await Promise.all([
     Boord.api("/api/system-settings"), Boord.api("/api/rate-settings/current"),
-    loadServerCard(), loadBackupsList(), loadOffsiteStatus(),
+    // Admin-only reads for the Settings tab, which a dashboard-only device
+    // never sees and would be refused.
+    ...(_dashboardOnly ? [] : [loadServerCard(), loadBackupsList(), loadOffsiteStatus()]),
   ]);
   _systemSettings = settings;
   if (settings) {
