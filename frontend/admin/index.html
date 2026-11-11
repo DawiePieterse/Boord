@@ -586,6 +586,10 @@
               <label class="text-xs text-slate-500 block">Filter by supplier</label>
               <select id="workerSupplierFilter" class="w-full border border-slate-300 rounded-lg p-2 text-sm"></select>
             </div>
+            <div class="flex-1 min-w-[10rem] md:flex-none md:w-64">
+              <label class="text-xs text-slate-500 block" for="workerSearch">Search</label>
+              <input type="search" id="workerSearch" placeholder="Emp nr, name or supplier" class="w-full border border-slate-300 rounded-lg p-2 text-sm">
+            </div>
             <button data-action="new-worker" class="md-btn boord-btn-primary"><i class="fa-solid fa-plus"></i> Add Worker</button>
           </div>
           <div class="md-actions">
@@ -603,12 +607,13 @@
           </div>
           <div class="bg-white rounded-xl shadow overflow-x-auto">
             <table class="w-full text-sm">
-              <thead><tr class="text-left border-b">
+              <!-- Click a heading to sort by it; click again to reverse. -->
+              <thead id="workersHead"><tr class="text-left border-b">
                 <th class="p-2"><input type="checkbox" id="selectAllWorkers" class="w-4 h-4"></th>
                 <th class="p-2">Photo</th>
-                <th class="p-2">Emp Nr</th><th class="p-2">First Name</th><th class="p-2">Last Name</th>
-                <th class="p-2">Supplier</th>
-                <th class="p-2">Active</th><th></th>
+                <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="id">Emp Nr</th><th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="first_name">First Name</th><th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="last_name">Last Name</th>
+                <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="supplier">Supplier</th>
+                <th class="p-2 cursor-pointer select-none whitespace-nowrap" data-sort="active">Active</th><th></th>
               </tr></thead>
               <tbody id="workersTable"></tbody>
             </table>

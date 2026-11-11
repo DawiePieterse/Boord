@@ -897,6 +897,14 @@ function bindMasterData() {
     importFile(e, `/api/blocks/import?replace=${replace}`, loadBlocks);
   });
   document.getElementById("workerSupplierFilter").addEventListener("change", renderWorkersTable);
+  document.getElementById("workerSearch").addEventListener("input", renderWorkersTable);
+  document.querySelectorAll("#workersHead [data-sort]").forEach((th) => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      _workerSort = { key, dir: _workerSort.key === key ? -_workerSort.dir : 1 };
+      renderWorkersTable();
+    });
+  });
   document.getElementById("cameraCancelBtn").addEventListener("click", closeCameraModal);
   document.getElementById("cameraCaptureBtn").addEventListener("click", captureCameraPhoto);
 }
@@ -966,11 +974,37 @@ async function loadWorkers() {
   renderWorkersTable();
 }
 
+let _workerSort = { key: null, dir: 1 };
+
 function renderWorkersTable() {
   const workers = window._workersCache || [];
   const suppliers = new Map((window._suppliersCache || []).map((s) => [s.id, s.name]));
   const filterVal = document.getElementById("workerSupplierFilter")?.value || "";
-  const filtered = filterVal ? workers.filter((w) => String(w.supplier_id ?? "") === filterVal) : workers;
+  // What each heading sorts by, as the row shows it: the supplier's name not
+  // its id, and Active before Inactive on the first click.
+  const sortVal = (w, key) => key === "supplier" ? (suppliers.get(w.supplier_id) || "")
+    : key === "last_name" ? (w.last_name || w.name || "")
+    : key === "active" ? (w.active ? "0" : "1")
+    : String(w[key] ?? "");
+  // Every word typed must be somewhere in the row, so "jan mok" finds Jan
+  // Mokoena whichever column each half is in.
+  const words = (document.getElementById("workerSearch")?.value || "").toLowerCase().split(/\s+/).filter(Boolean);
+  const filtered = workers.filter((w) => {
+    if (filterVal && String(w.supplier_id ?? "") !== filterVal) return false;
+    const hay = ["id", "first_name", "last_name", "supplier"].map((k) => sortVal(w, k)).join(" ").toLowerCase();
+    return words.every((word) => hay.includes(word));
+  });
+  // Until a heading is clicked the list stays in the order the server sent.
+  // numeric: true so 99 comes before 100, and names ignore case.
+  const { key, dir } = _workerSort;
+  if (key) filtered.sort((a, b) => dir * sortVal(a, key).localeCompare(sortVal(b, key), undefined, { numeric: true, sensitivity: "base" }));
+  document.querySelectorAll("#workersHead [data-sort]").forEach((th) => {
+    const on = th.dataset.sort === key;
+    th.querySelector("i")?.remove();
+    th.setAttribute("aria-sort", on ? (dir > 0 ? "ascending" : "descending") : "none");
+    th.insertAdjacentHTML("beforeend", ` <i class="fa-solid ${on ? (dir > 0 ? "fa-sort-up" : "fa-sort-down") : "fa-sort text-slate-300"} text-xs"></i>`);
+  });
+  // Print badges > Filtered prints exactly this list: searched, and in this order.
   window._workersFiltered = filtered;
 
   document.getElementById("workersTable").innerHTML = filtered.map((w) => `
