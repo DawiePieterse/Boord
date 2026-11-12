@@ -346,10 +346,13 @@ def parse_bt_sales(text: str) -> tuple:
     summary covers: the 06:25 run for yesterday already counts this morning's
     sales, and its summary's unsold doesn't. So the run's date is the
     report's date, and stock on hand isn't checked against the summary."""
-    m = re.search(r"RUN ON\s*:\s*(\d{1,2} [A-Za-z]{3} \d{4})", text)
+    m = re.search(r"RUN ON\s*:\s*(\d{1,2} [A-Za-z]{3} \d{4}) (\d\d:\d\d)", text)
     if not m:
         raise ValueError("no RUN ON date on the sales details")
     report_date = datetime.strptime(m.group(1), "%d %b %Y").date()
+    # Two runs a day (06:25 and later) share the date; each line carries its
+    # run so the later one wins whichever email is read first.
+    run = f"{report_date} {m.group(2)}"
     total = re.search(r"(?m)^[ \t]*TOTAL[ \t]+(\d+)[ \t]+[\d,]+\.\d\d[ \t]+([\d,]+\.\d\d)[ \t]+\d+[ \t]*$", text)
     if not total:
         raise ValueError("no TOTAL row on the sales details")
@@ -370,7 +373,7 @@ def parse_bt_sales(text: str) -> tuple:
         note = by_note.setdefault(label, {"lines": [], "received_on": None, "market_ref": head.group(1)})
         note["received_on"] = min(filter(None, [note["received_on"],
                                                 datetime.strptime(head.group(2), "%d %b %Y").date()]))
-        note["lines"].append({"product": product, "grn": head.group(1), "received": received,
+        note["lines"].append({"product": product, "grn": head.group(1), "run": run, "received": received,
                               "discards": discards, "sold": sold, "gross": _amount(cum.group(2)),
                               "unsold": unsold, "_cum_sold": int(cum.group(1))})
     if not by_note:
@@ -395,18 +398,24 @@ def parse_bt_sales(text: str) -> tuple:
     return notes, refused
 
 
-def save_daily_sale(sale: dict, session: Session, email_from: str = "", file: str = "") -> bool:
-    """Files one note's line of a daily sales report over the one before it.
-    False when the one already in is from a later day: a report that arrives
-    late, or is forwarded again, never winds a note back."""
+def save_daily_sale(sale: dict, session: Session, email_from: str = "", file: str = "") -> Optional[dict]:
+    """Files one note's line of a daily sales report over the one before it,
+    and returns what was filed (merged, for Boere Trust). None when the one
+    already in is from a later day: a report that arrives late, or is
+    forwarded again, never winds a note back."""
     old = session.get(MarketDailySale, (sale["agent"], sale["note_no"]))
     if old and old.report_date > sale["report_date"]:
-        return False
+        return None
     if old and sale["lines"] and "grn" in sale["lines"][0]:
         # Boere Trust leaves out a pack that sold out on an earlier day; its
-        # last figures stand, or the note's sold would drop.
-        seen = {ln["grn"] for ln in sale["lines"]}
-        lines = sale["lines"] + [ln for ln in json.loads(old.lines) if ln.get("grn") and ln["grn"] not in seen]
+        # last figures stand, or the note's sold would drop. Per consignment
+        # the latest run wins, so the day's 06:25 run read after its 11:06
+        # one doesn't wind the note back.
+        by_grn = {ln["grn"]: ln for ln in json.loads(old.lines) if ln.get("grn")}
+        for ln in sale["lines"]:
+            if ln.get("run", "") >= by_grn.get(ln["grn"], {}).get("run", ""):
+                by_grn[ln["grn"]] = ln
+        lines = list(by_grn.values())
         sale = dict(sale, lines=lines, gross=round(sum(ln["gross"] for ln in lines), 2),
                     **{k: sum(ln[k] for ln in lines) for k in ("received", "sold", "unsold")})
     session.merge(MarketDailySale(
@@ -416,7 +425,7 @@ def save_daily_sale(sale: dict, session: Session, email_from: str = "", file: st
         gross=sale["gross"], file=file, email_from=email_from, imported_at=datetime.utcnow(),
     ))
     session.commit()
-    return True
+    return sale
 
 
 _R = r"R\s*([\d,]+\.\d\d)"
@@ -632,7 +641,9 @@ def _handle_daily_sales(name: str, data: bytes, text: str, sender: str, session:
     with open(os.path.join(MAIL_DIR, file), "wb") as f:
         f.write(data)
     for sale in notes:
-        if save_daily_sale(sale, session, sender, file):
+        filed = save_daily_sale(sale, session, sender, file)
+        if filed:
+            sale = filed
             out.append(f"Daily sales {sale['report_date']}: note {sale['note_label']} {sale['sold']} sold, "
                        f"{sale['unsold']} unsold, gross R{sale['gross']:,.2f}")
         else:

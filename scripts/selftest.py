@@ -1797,7 +1797,7 @@ def test_the_daily_sales_report_is_read_note_by_note():
 # 007144 runs of 12 Nov 2026: {total} is the summary's sold and value, and
 # {extra} a second consignment on the note.
 _BT_SALES = """    FARMER NO. : 007144              FROM    : BOERE TRUST
-    BEKFONTEIN BDY                   RUN ON  : {run} 2026 06:25
+    BEKFONTEIN BDY                   RUN ON  : {run}
 FARMER : 007144 BEKFONTEIN BDY - SALES DETAILS    2026/11/12 06:25:09 PAGE 1
 PAID SALES SUMMARY FOR 11 Nov 2026  TO  11 Nov 2026      Run on 12/11/2026 06:25:38 AM
 PRODUCT                                     SOLD    SOLD   SALES VALUE  UNSOLD
@@ -1829,7 +1829,7 @@ def test_boere_trust_sales_details_fill_the_note_and_keep_sold_out_packs():
     import market_mail  # noqa: E402
     from models import MarketDailySale  # noqa: E402
 
-    text = _BT_SALES.format(run="12 Nov", total="7  400.00       2800.00", extra=_BT_EXTRA.format(sold=0, onh=47))
+    text = _BT_SALES.format(run="12 Nov 2026 06:25", total="7  400.00       2800.00", extra=_BT_EXTRA.format(sold=0, onh=47))
     notes, refused = market_mail.parse_bt_sales(text)
     assert refused == [] and len(notes) == 1, (notes, refused)
     n = notes[0]
@@ -1838,7 +1838,7 @@ def test_boere_trust_sales_details_fill_the_note_and_keep_sold_out_packs():
     assert (n["received"], n["sold"], n["unsold"], n["gross"]) == (59, 12, 47, 4880.0), n
     assert [ln["product"] for ln in n["lines"]] == ["LITCHI MAURITIUS NJ 1KG T1", "LITCHI MAURITIUS B7 1.8KG T1"]
     try:
-        market_mail.parse_bt_sales(_BT_SALES.format(run="12 Nov", total="8  400.00       3200.00", extra=""))
+        market_mail.parse_bt_sales(_BT_SALES.format(run="12 Nov 2026 06:25", total="8  400.00       3200.00", extra=""))
         raise AssertionError("a day that doesn't add up must be refused")
     except ValueError:
         pass
@@ -1851,13 +1851,19 @@ def test_boere_trust_sales_details_fill_the_note_and_keep_sold_out_packs():
             assert market_mail.save_daily_sale(n, s)
             # The next run: the NJ pack sold out yesterday and isn't listed;
             # the B7 pack sold 5. Its consignment block is the only one.
-            later = _BT_SALES.format(run="13 Nov", total="0  0.00  0.00", extra="")
-            later = later.split("CONSIGNO")[0] + _BT_EXTRA.format(sold=5, onh=42)
-            (n2,), _ = market_mail.parse_bt_sales(later)
-            assert market_mail.save_daily_sale(n2, s)
+            def run(when, sold, onh):
+                text = _BT_SALES.format(run=when, total="0  0.00  0.00", extra="")
+                (sale,), _ = market_mail.parse_bt_sales(text.split("CONSIGNO")[0] + _BT_EXTRA.format(sold=sold, onh=onh))
+                return sale
+            assert market_mail.save_daily_sale(run("13 Nov 2026 11:06", 5, 42), s)
             row = s.get(MarketDailySale, ("Boere Trust", "21364"))
             assert (row.sold, row.unsold, row.received) == (17, 42, 59), (row.sold, row.unsold)
             assert len(json.loads(row.lines)) == 2
+            # That day's 06:25 run read after its 11:06 one (Gmail's order)
+            # must not wind the B7 pack back to 2 sold.
+            assert market_mail.save_daily_sale(run("13 Nov 2026 06:25", 2, 45), s)
+            row = s.get(MarketDailySale, ("Boere Trust", "21364"))
+            assert (row.sold, row.unsold) == (17, 42), (row.sold, row.unsold)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
