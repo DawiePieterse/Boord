@@ -869,14 +869,20 @@ revokes their access immediately without affecting anyone else.
 Every device on Tailscale is the full admin: Settings, Payments, exports and
 all. To give somebody the **Dashboard tab only**:
 
-1. Add their device to Tailscale as usual and note its Tailscale IP
-   (`100.x.y.z`, on `login.tailscale.com/admin/machines`).
-2. On the server, put that IP on a line of its own in
-   `C:\Boord\data\dashboard_only.txt` (make the file if it is not there).
+1. Add their device to Tailscale as usual and note **both** its Tailscale
+   addresses, the IPv4 (`100.x.y.z`) and the IPv6 (`fd7a:115c:a1e0:…`), from
+   the device's page on `login.tailscale.com/admin/machines`. A phone
+   (iPhones especially) usually connects over IPv6, so a file with only the
+   IPv4 leaves it a full admin.
+2. On the server, put each address on a line of its own in
+   `C:\Boord\data\dashboard_only.txt`. To make or open it, in a Command
+   Prompt: `notepad C:\Boord\data\dashboard_only.txt` (made in Explorer, it
+   can end up as `dashboard_only.txt.txt`, which Boord doesn't see).
    Text after a `#` is a note:
 
    ```
-   100.101.102.103   # Jan's phone
+   100.101.102.103                          # Jan's phone
+   fd7a:115c:a1e0::1234:5678                # Jan's phone, IPv6
    ```
 
 3. That's all - no restart. The device now opens the Admin app with the
@@ -890,7 +896,10 @@ Three things to know:
   until its IP is in the file too.
 - It covers **Boord only**. Boord Owner, Labour, Packhouse and Monitor are
   other ports on the same server; close those to that device with a Tailscale
-  access rule that allows it port 443 alone.
+  access rule that allows it port 443 alone. Write that rule for the
+  manager's device or login only: a rule that also matches the owner's login
+  cuts the owner's Mac off Monitor, and with it the Update button and
+  `scripts/deploy.sh`.
 - Updates never touch the file.
 
 ### Enabling the QR camera scanner (HTTPS via Tailscale - required for Field devices)
