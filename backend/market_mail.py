@@ -42,6 +42,7 @@ The real guard is that an invoice must parse, add up and name a note number.
 Every import is listed with its invoice number and can be removed.
 """
 import email
+import hashlib
 import imaplib
 import io
 import json
@@ -321,6 +322,79 @@ def parse_daily_sales(text: str) -> tuple:
     return notes, refused
 
 
+_BT_CUM = re.compile(r"CUM TOTAL\s+(\d+)\s+(?:[\d,]+\.\d\d\s+)?([\d,]+\.\d\d)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)")
+
+
+def parse_bt_sales(text: str) -> tuple:
+    """Boere Trust's "Sales Details" report (Tshwane market) as (notes,
+    refused), the same shape as parse_daily_sales so it is filed the same way.
+    Boere Trust's website mails one per farmer number (the farm has three:
+    007144, 097120, 007594) after each run, and the office forwards them.
+
+    One block per consignment (CONSIGNO, one pack on one note), each ending
+    in its running total: sold, average, value, delivered, sold, discarded,
+    on hand. REFNO is our note, typed at the market's gate, so it comes as
+    "B21361", "B-21358" or "3054*B-21351" (3054 being the farm's code there).
+
+    The report only lists a consignment that sold that day or still has stock,
+    so a note's line for a pack that sold out earlier can be missing; each
+    line carries its consignment number ("grn") and save_daily_sale keeps the
+    missing ones from the report before. The day's sales per consignment must
+    add up to the summary's TOTAL row, or the whole report is refused.
+
+    The running totals are as at the run (RUN ON), not the end of the day the
+    summary covers: the 06:25 run for yesterday already counts this morning's
+    sales, and its summary's unsold doesn't. So the run's date is the
+    report's date, and stock on hand isn't checked against the summary."""
+    m = re.search(r"RUN ON\s*:\s*(\d{1,2} [A-Za-z]{3} \d{4})", text)
+    if not m:
+        raise ValueError("no RUN ON date on the sales details")
+    report_date = datetime.strptime(m.group(1), "%d %b %Y").date()
+    total = re.search(r"(?m)^[ \t]*TOTAL[ \t]+(\d+)[ \t]+[\d,]+\.\d\d[ \t]+([\d,]+\.\d\d)[ \t]+\d+[ \t]*$", text)
+    if not total:
+        raise ValueError("no TOTAL row on the sales details")
+    by_note, refused, day_sold, day_value = {}, [], 0, 0.0
+    for block in re.split(r"(?m)^(?=CONSIGNO\s*:)", text)[1:]:
+        head = re.match(r"CONSIGNO\s*:\s*(\d+)\s+(\d{1,2} [A-Za-z]{3} \d{4})\s+REFNO:\s*(\S+)", block)
+        if not head:
+            raise ValueError("a consignment without its number, date or REFNO")
+        label = head.group(3).rsplit("*", 1)[-1]
+        product = re.sub(r"\s+", " ", block.splitlines()[1]).strip()
+        days = re.search(r"DAYS TOTAL\s+(\d+)\s+[\d,]+\.\d\d\s+([\d,]+\.\d\d)", block)
+        cum = _BT_CUM.search(block)
+        if not days or not cum:
+            raise ValueError(f"consignment {head.group(1)} without its DAYS TOTAL or CUM TOTAL")
+        day_sold += int(days.group(1))
+        day_value += _amount(days.group(2))
+        received, sold, discards, unsold = (int(cum.group(k)) for k in (3, 4, 5, 6))
+        note = by_note.setdefault(label, {"lines": [], "received_on": None, "market_ref": head.group(1)})
+        note["received_on"] = min(filter(None, [note["received_on"],
+                                                datetime.strptime(head.group(2), "%d %b %Y").date()]))
+        note["lines"].append({"product": product, "grn": head.group(1), "received": received,
+                              "discards": discards, "sold": sold, "gross": _amount(cum.group(2)),
+                              "unsold": unsold, "_cum_sold": int(cum.group(1))})
+    if not by_note:
+        raise ValueError("no consignments on the sales details")
+    if (day_sold, round(day_value, 2)) != (int(total.group(1)), _amount(total.group(2))):
+        raise ValueError("the day's sales per consignment don't add up to the TOTAL row")
+    notes = []
+    for label, note in by_note.items():
+        bad = [ln for ln in note["lines"] if (ln.pop("_cum_sold"), ln["sold"])[0] != ln["sold"]
+               or ln["received"] != ln["discards"] + ln["sold"] + ln["unsold"]]
+        if bad:
+            refused.append((label, f"{bad[0]['product']}: delivered isn't sold + discarded + on hand"))
+            continue
+        lines = note["lines"]
+        notes.append({
+            "agent": "Boere Trust", "note_no": note_digits(label), "note_label": label,
+            "report_date": report_date, "received_on": note["received_on"], "market_ref": note["market_ref"],
+            "lines": lines, "received": sum(ln["received"] for ln in lines),
+            "sold": sum(ln["sold"] for ln in lines), "unsold": sum(ln["unsold"] for ln in lines),
+            "gross": round(sum(ln["gross"] for ln in lines), 2),
+        })
+    return notes, refused
+
+
 def save_daily_sale(sale: dict, session: Session, email_from: str = "", file: str = "") -> bool:
     """Files one note's line of a daily sales report over the one before it.
     False when the one already in is from a later day: a report that arrives
@@ -328,6 +402,13 @@ def save_daily_sale(sale: dict, session: Session, email_from: str = "", file: st
     old = session.get(MarketDailySale, (sale["agent"], sale["note_no"]))
     if old and old.report_date > sale["report_date"]:
         return False
+    if old and sale["lines"] and "grn" in sale["lines"][0]:
+        # Boere Trust leaves out a pack that sold out on an earlier day; its
+        # last figures stand, or the note's sold would drop.
+        seen = {ln["grn"] for ln in sale["lines"]}
+        lines = sale["lines"] + [ln for ln in json.loads(old.lines) if ln.get("grn") and ln["grn"] not in seen]
+        sale = dict(sale, lines=lines, gross=round(sum(ln["gross"] for ln in lines), 2),
+                    **{k: sum(ln[k] for ln in lines) for k in ("received", "sold", "unsold")})
     session.merge(MarketDailySale(
         agent=sale["agent"], note_no=sale["note_no"], note_label=sale["note_label"],
         report_date=sale["report_date"], received_on=sale["received_on"], market_ref=sale["market_ref"],
@@ -479,7 +560,10 @@ def _handle_message(msg, cfg: dict, session: Session) -> list:
             out.append(f"Skipped {name}: a daily sales summary, not an invoice")
             continue
         if "DAILY SALES REPORT" in text and "Summary of D/Note" in text:
-            out += _handle_daily_sales(name, data, text, sender, session)
+            out += _handle_daily_sales(name, data, text, sender, session, parse_daily_sales)
+            continue
+        if "SALES DETAILS" in text and "CONSIGNO" in text:
+            out += _handle_daily_sales(name, data, text, sender, session, parse_bt_sales)
             continue
         if "PAYMENT SUMMARY" in text:
             out.append(f"Skipped {name}: a payment summary, its account sales carry the figures")
@@ -529,11 +613,12 @@ def _handle_message(msg, cfg: dict, session: Session) -> list:
     return out or [f"Skipped \"{subject}\" from {sender}: no PDF attached"]
 
 
-def _handle_daily_sales(name: str, data: bytes, text: str, sender: str, session: Session) -> list:
-    """One daily sales report: each delivery note on it filed over the last
-    report's figures for that note, as log lines."""
+def _handle_daily_sales(name: str, data: bytes, text: str, sender: str, session: Session, parse) -> list:
+    """One daily sales report (Dapper's, or Boere Trust's sales details):
+    each delivery note on it filed over the last report's figures for that
+    note, as log lines."""
     try:
-        notes, refused = parse_daily_sales(text)
+        notes, refused = parse(text)
     except ValueError as e:
         return [f"Refused {name} from {sender}: {e}"]
     out = [f"Refused note {label} on {name} from {sender}: {why}" for label, why in refused]
@@ -541,7 +626,9 @@ def _handle_daily_sales(name: str, data: bytes, text: str, sender: str, session:
         return out
     os.makedirs(MAIL_DIR, exist_ok=True)
     agent_slug = re.sub(r"[^a-z0-9]+", "_", notes[0]["agent"].lower()).strip("_")[:30]
-    file = f"daily_{agent_slug}_{notes[0]['report_date']}.pdf"
+    # Boere Trust sends one report per farmer number on the same day, so the
+    # content's hash keeps them from overwriting each other.
+    file = f"daily_{agent_slug}_{notes[0]['report_date']}_{hashlib.sha1(data).hexdigest()[:8]}.pdf"
     with open(os.path.join(MAIL_DIR, file), "wb") as f:
         f.write(data)
     for sale in notes:

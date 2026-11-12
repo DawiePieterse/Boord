@@ -1953,6 +1953,22 @@ invoice arrives:
   (B-21352 for note 1352). Boord matches a five-digit 2xxxx to note xxxx, for
   the reports and for invoices.
 
+**Boere Trust's Sales Details.** Boere Trust (Tshwane market) sends its own
+version: a **Sales Details** PDF per farmer number (007144, 097120 and
+007594), forwarded from `andre@laughw.co.za`. Boord reads it the same way as
+Dapper's report and files it under the agent "Boere Trust":
+
+- The note is the **REFNO** typed at the market gate. `B21361`, `B-21358` and
+  `3054*B-21351` all work (3054 is the farm's code there). A REFNO typed
+  wrong at the gate, like `B921364` for 21364, matches no note; ask Boere
+  Trust to correct it.
+- Sold and unsold are the running totals at the time the report was run,
+  so the report counts as from its **RUN ON** date.
+- The report leaves out a pack that sold out on an earlier day. Boord keeps
+  that pack's last figures, so a note's sold never drops because of it.
+- If the day's sales per consignment don't add up to the summary's TOTAL
+  row, the whole report is refused.
+
 Reports that came before this was installed are already labelled
 **Boord-Done** in Gmail and are not read again. Only the newest report
 matters, so the next day's brings every note up to date.

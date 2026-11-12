@@ -1793,6 +1793,75 @@ def test_the_daily_sales_report_is_read_note_by_note():
     assert [n["note_label"] for n in notes] == ["1331", "B-21356"] and [r[0] for r in refused] == ["B-21352"]
 
 
+# Boere Trust's Sales Details as pypdf's layout mode reads it, shaped on the
+# 007144 runs of 12 Nov 2026: {total} is the summary's sold and value, and
+# {extra} a second consignment on the note.
+_BT_SALES = """    FARMER NO. : 007144              FROM    : BOERE TRUST
+    BEKFONTEIN BDY                   RUN ON  : {run} 2026 06:25
+FARMER : 007144 BEKFONTEIN BDY - SALES DETAILS    2026/11/12 06:25:09 PAGE 1
+PAID SALES SUMMARY FOR 11 Nov 2026  TO  11 Nov 2026      Run on 12/11/2026 06:25:38 AM
+PRODUCT                                     SOLD    SOLD   SALES VALUE  UNSOLD
+LITCHI MAURITIUS  NJ 1KG T1                    7  400.00       2800.00       0
+TOTAL                                         {total}       250
+CONSIGNO : 20552101    07 Nov 2026  REFNO: 3054*B-21364 SALESMAN: 205 FRANCO / MARK
+             LITCHI MAURITIUS  NJ 1KG T1
+ DATE         SALES        PRICE        VALUE QTYDEL  QTYSLD  QTYDIS  QTYONH
+ 11 Nov 2026      7       400.00      2800.00
+ DAYS TOTAL       7       400.00      2800.00
+ CUM TOTAL       12       406.67      4880.00     12      12       0       0
+  REMARK : X4PKT
+{extra}"""
+_BT_EXTRA = """CONSIGNO : 20552103    07 Nov 2026  REFNO: 3054*B-21364 SALESMAN: 205 FRANCO / MARK
+             LITCHI MAURITIUS  B7 1.8KG T1
+ DATE         SALES        PRICE        VALUE QTYDEL  QTYSLD  QTYDIS  QTYONH
+              -----     --------     --------
+ DAYS TOTAL       0         0.00         0.00
+ CUM TOTAL        {sold}                      0.00     47       {sold}       0      {onh}
+"""
+
+
+def test_boere_trust_sales_details_fill_the_note_and_keep_sold_out_packs():
+    """B21361 never reached the Markets tab: Boere Trust's Sales Details
+    wasn't read at all. REFNO with the farm's code in front finds the note,
+    the run's date is the report's, a day that doesn't add up is refused, and
+    a pack the next run leaves out (sold out) keeps its figures."""
+    import json  # noqa: E402
+    import market_mail  # noqa: E402
+    from models import MarketDailySale  # noqa: E402
+
+    text = _BT_SALES.format(run="12 Nov", total="7  400.00       2800.00", extra=_BT_EXTRA.format(sold=0, onh=47))
+    notes, refused = market_mail.parse_bt_sales(text)
+    assert refused == [] and len(notes) == 1, (notes, refused)
+    n = notes[0]
+    assert (n["agent"], n["note_label"], n["note_no"], str(n["report_date"])) == (
+        "Boere Trust", "B-21364", "21364", "2026-11-12"), n
+    assert (n["received"], n["sold"], n["unsold"], n["gross"]) == (59, 12, 47, 4880.0), n
+    assert [ln["product"] for ln in n["lines"]] == ["LITCHI MAURITIUS NJ 1KG T1", "LITCHI MAURITIUS B7 1.8KG T1"]
+    try:
+        market_mail.parse_bt_sales(_BT_SALES.format(run="12 Nov", total="8  400.00       3200.00", extra=""))
+        raise AssertionError("a day that doesn't add up must be refused")
+    except ValueError:
+        pass
+
+    tmp = tempfile.mkdtemp()
+    try:
+        eng = create_engine(f"sqlite:///{os.path.join(tmp, 't.db')}")
+        run_migrations(eng, snapshot=False)
+        with Session(eng) as s:
+            assert market_mail.save_daily_sale(n, s)
+            # The next run: the NJ pack sold out yesterday and isn't listed;
+            # the B7 pack sold 5. Its consignment block is the only one.
+            later = _BT_SALES.format(run="13 Nov", total="0  0.00  0.00", extra="")
+            later = later.split("CONSIGNO")[0] + _BT_EXTRA.format(sold=5, onh=42)
+            (n2,), _ = market_mail.parse_bt_sales(later)
+            assert market_mail.save_daily_sale(n2, s)
+            row = s.get(MarketDailySale, ("Boere Trust", "21364"))
+            assert (row.sold, row.unsold, row.received) == (17, 42, 59), (row.sold, row.unsold)
+            assert len(json.loads(row.lines)) == 2
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_the_daily_sales_report_fills_the_markets_tab_until_the_invoice():
     """What the office asked for: the daily report's sold and unsold on the
     Markets tab, counted in the totals, but never as money paid. A later
@@ -2416,6 +2485,7 @@ def main():
                test_a_boere_trust_account_sale_is_read_and_added_up,
                test_one_bad_email_does_not_stop_the_inbox,
                test_the_daily_sales_report_is_read_note_by_note,
+               test_boere_trust_sales_details_fill_the_note_and_keep_sold_out_packs,
                test_the_daily_sales_report_fills_the_markets_tab_until_the_invoice):
         check(fn.__name__, fn)
 
