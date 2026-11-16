@@ -2900,7 +2900,7 @@ async function loadServerCard() {
 
 // --- Settings > Devices: the admin PIN and paired devices (backend/pairing.py)
 
-const PAIRED_ROLE_LABEL = { admin: "Everything (admin)", owner: "Everything, plus Owner and Notes",
+const PAIRED_ROLE_LABEL = { admin: "Admin (not Owner or Notes)", owner: "Everything, plus Owner and Notes",
                             dashboard: "Dashboard only", field: "Field and Pack House" };
 
 async function loadPairedDevices() {
@@ -2911,6 +2911,9 @@ async function loadPairedDevices() {
   // Disabled as well as hidden: older iPhones still list a hidden option.
   const ownerOption = document.getElementById("pairOwnerOption");
   ownerOption.hidden = ownerOption.disabled = !state.can_pair_owner;
+  // The PIN is the owner's to change (routers/auth.py), by the same rule, so
+  // an admin is not shown a box the server would refuse.
+  document.getElementById("adminPinRow").classList.toggle("hidden", !state.can_pair_owner);
   document.getElementById("adminPinState").textContent = state.pin_set ? "(set - type a new one to change it)" : "(not set yet)";
   document.getElementById("pairedDevicesTable").innerHTML = devices.length ? devices.map((d) => `
     <tr class="border-b">
