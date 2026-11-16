@@ -2383,11 +2383,11 @@ def test_a_field_pairing_opens_field_and_pack_house_and_never_admin():
 
     with _PairingSandbox(), _without_dev_loopback():
         try:
-            pairing.new_pairing_code("admin", "sneaky")
+            pairing.new_pairing_code("root", "sneaky")
         except ValueError:
             pass
         else:
-            raise AssertionError("a pairing code was issued for the admin role")
+            raise AssertionError("a pairing code was issued for a role that does not exist")
 
         code = pairing.new_pairing_code("field", "Station 2 tablet")
         # Opening the link pairs nothing: WhatsApp fetches it for a preview.
@@ -2429,6 +2429,33 @@ def test_a_dashboard_pairing_is_the_farm_managers_view_and_nothing_else():
             assert status == 403 and "dashboard-only" in text, (method, path, status)
         status, _, text = _call("GET", "/api/auth/state", VIA_TUNNEL, cookie=manager)
         assert '"role":"dashboard"' in text.replace(" ", "") and '"admin":false' in text.replace(" ", "")
+
+
+def test_an_admin_link_makes_an_admin_and_only_an_admin_can_make_one():
+    """The office person's phone is added by link, so they never learn the
+    PIN. The link gives exactly what the PIN gives - full Admin, and no way
+    to make an owner - and a field or dashboard device cannot ask for one."""
+    import json  # noqa: E402
+    import pairing  # noqa: E402
+
+    with _PairingSandbox(), _without_dev_loopback():
+        ask = {"role": "admin", "label": "Office phone"}
+        for lesser in ("field", "dashboard"):
+            assert _call("POST", "/api/auth/pairings", VIA_TUNNEL, body=ask, cookie=_signed(lesser))[0] in (401, 403)
+        assert _call("POST", "/api/auth/pairings", VIA_TUNNEL, body=ask)[0] in (401, 403)
+
+        status, _, text = _call("POST", "/api/auth/pairings", VIA_TUNNEL, body=ask, cookie=_signed("admin"))
+        assert status == 200
+        code = json.loads(text)["code"]
+        office = _cookie_from(_call("POST", "/api/auth/pair", VIA_TUNNEL, body={"code": code})[1])
+        assert pairing.paired_devices()[0]["role"] == "admin"
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=office)[0] == 200
+        assert _call("GET", "/api/auth/devices", VIA_TUNNEL, cookie=office)[0] == 200
+        # Still not the owner, and still unable to make one.
+        owner_ask = {"role": "owner", "label": "x"}
+        assert _call("POST", "/api/auth/pairings", VIA_TUNNEL, body=owner_ask, cookie=office)[0] == 403
+        # The link is spent: forwarded on, it pairs nobody else.
+        assert _call("POST", "/api/auth/pair", VIA_TUNNEL, body={"code": code})[0] == 403
 
 
 def test_only_an_owner_can_make_an_owner():
@@ -2904,6 +2931,7 @@ def main():
                test_the_admin_pin_signs_a_device_in_once,
                test_wrong_pins_shut_the_door_for_everybody_for_a_while,
                test_a_field_pairing_opens_field_and_pack_house_and_never_admin,
+               test_an_admin_link_makes_an_admin_and_only_an_admin_can_make_one,
                test_a_dashboard_pairing_is_the_farm_managers_view_and_nothing_else,
                test_only_an_owner_can_make_an_owner,
                test_a_cookie_is_believed_only_when_this_farm_signed_it,

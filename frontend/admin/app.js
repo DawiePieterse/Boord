@@ -2900,7 +2900,7 @@ async function loadServerCard() {
 
 // --- Settings > Devices: the admin PIN and paired devices (backend/pairing.py)
 
-const PAIRED_ROLE_LABEL = { admin: "Everything (admin)", owner: "Everything, plus Owner and Notes",
+const PAIRED_ROLE_LABEL = { admin: "Admin (not Owner or Notes)", owner: "Everything, plus Owner and Notes",
                             dashboard: "Dashboard only", field: "Field and Pack House" };
 
 async function loadPairedDevices() {

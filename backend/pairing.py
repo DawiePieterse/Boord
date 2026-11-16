@@ -44,9 +44,13 @@ from db import DATA_DIR
 os.environ.setdefault(device_auth.AUTH_DIR_ENV, DATA_DIR)
 
 ROLES = ("admin", "owner", "dashboard", "field")
-# What a pairing code may stand for. Not "admin": an admin signs in by
-# knowing the PIN.
-PAIRABLE_ROLES = ("owner", "dashboard", "field")
+# What a pairing code may stand for: every role. "admin" was left out at
+# first, on the grounds that an admin signs in by knowing the PIN - but the
+# farm wanted to add the office person's phone without telling them the PIN
+# (and without them typing it where somebody can watch). Only an admin or an
+# owner can make a code at all (routers/auth.py), so an admin link hands
+# nobody more than its maker already had.
+PAIRABLE_ROLES = ("admin", "owner", "dashboard", "field")
 
 PIN_FILE = "admin_pin.txt"
 PAIRED_FILE = "device_paired.txt"
@@ -163,9 +167,10 @@ def check_pin(pin: str, now: Optional[float] = None) -> bool:
 
 def new_pairing_code(role: str, label: str, now: Optional[float] = None) -> str:
     """A one-time code the office hands to a device, as a QR or a link. The
-    PIN is not offered this way: an admin signs in by knowing it."""
+    PIN itself is never in it: an admin link makes an admin device, and the
+    PIN stays with whoever knows it."""
     if role not in PAIRABLE_ROLES:
-        raise ValueError("A pairing code is for a field, dashboard or owner device")
+        raise ValueError("A pairing code is for a field, dashboard, admin or owner device")
     now = time.time() if now is None else now
     code = secrets.token_urlsafe(24)
     with _lock:
