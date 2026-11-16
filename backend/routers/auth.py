@@ -28,6 +28,7 @@ class PairingIn(SQLModel):
 
 
 OWNER_ONLY_MESSAGE = "Only the owner can add or remove an owner's device"
+PIN_OWNER_ONLY_MESSAGE = "Only the owner can change the admin PIN"
 
 
 def _kind_of_device(request: Request) -> str:
@@ -86,7 +87,14 @@ def pair_device(body: CodeIn, request: Request, response: Response):
 
 
 @router.put("/pin", dependencies=[Depends(require_admin_client)])
-def set_pin(body: PinIn):
+def set_pin(body: PinIn, request: Request):
+    # The owner's to change, by the rule that guards an owner's pairing
+    # (may_pair_an_owner: an owner's device, or one on Tailscale, which is
+    # also how a farm sets its first PIN before anybody is paired). A device
+    # that is admin only because it knows the PIN, or was handed an admin
+    # link, could otherwise change it and lock the rest of the office out.
+    if not may_pair_an_owner(request):
+        raise HTTPException(403, PIN_OWNER_ONLY_MESSAGE)
     try:
         pairing.set_pin(body.pin)
     except ValueError as e:

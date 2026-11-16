@@ -709,7 +709,7 @@
         <div class="font-semibold">Devices</div>
         <div class="text-xs text-slate-500">Who can open Boord without the Tailscale app. The office signs in once with the admin PIN, or is added below as Admin. Every other device - field or pack house, the farm manager's phone - is added with a one-time code and never needs the PIN.</div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+        <div id="adminPinRow" class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
           <div>
             <label for="adminPinInput" class="text-xs text-slate-500 block">Admin PIN <span id="adminPinState" class="text-slate-400"></span></label>
             <input id="adminPinInput" type="password" autocomplete="new-password" placeholder="At least 4 characters" class="w-full border border-slate-300 rounded-lg p-2">

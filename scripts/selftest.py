@@ -2451,7 +2451,13 @@ def test_an_admin_link_makes_an_admin_and_only_an_admin_can_make_one():
         assert pairing.paired_devices()[0]["role"] == "admin"
         assert _call("GET", "/admin/", VIA_TUNNEL, cookie=office)[0] == 200
         assert _call("GET", "/api/auth/devices", VIA_TUNNEL, cookie=office)[0] == 200
-        # Still not the owner, and still unable to make one.
+        # Still not the owner: it can neither change the PIN (and lock the
+        # office out) nor make an owner. Nor can a device that typed the PIN.
+        for admin in (office, _signed("admin")):
+            status, _, text = _call("PUT", "/api/auth/pin", VIA_TUNNEL, cookie=admin, body={"pin": "mine-now-123"})
+            assert status == 403 and "Only the owner" in text
+        assert _call("PUT", "/api/auth/pin", VIA_TUNNEL, cookie=_signed("owner"), body={"pin": "owners-new-1"})[0] == 200
+        assert _call("PUT", "/api/auth/pin", body={"pin": "from-tailscale"}, peer=("100.64.0.1", 54321))[0] == 200
         owner_ask = {"role": "owner", "label": "x"}
         assert _call("POST", "/api/auth/pairings", VIA_TUNNEL, body=owner_ask, cookie=office)[0] == 403
         # The link is spent: forwarded on, it pairs nobody else.
