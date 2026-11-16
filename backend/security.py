@@ -29,6 +29,19 @@ TWO SIGNALS, because only one of them is certain:
      device on the farm wifi cannot reach this branch: it can forge a Host
      header trivially, but it cannot make its peer address loopback.
 
+A SECOND WAY IN, beside Tailscale: a paired device (device_auth.py, and
+pairing.py for how one is made). An admin who signed in with the farm's PIN,
+an owner, or a farm manager whose phone was paired "dashboard only", carries a signed
+cookie and is admitted on whatever network it arrives - which is what lets
+the office reach Admin through the Cloudflare Tunnel without the Tailscale
+app. Either is enough; Tailscale works exactly as it did.
+
+And one road that is never Tailscale: a request carrying Cloudflare's headers
+came in from the internet through the tunnel, whose connector is on loopback
+too. Everything signal (1) and (2) read there is a stranger's to type, so such
+a request is judged by its cookie alone. Through the tunnel even Field and
+Pack House need one (main.py) - the farm wifi is a fence; the internet is not.
+
 The Field and Pack House screens are NOT behind any of this. They are phones
 and tablets in an orchard and on a receiving bay, they have never had
 credentials, and uvicorn still binds 0.0.0.0 for them - see install.ps1.
@@ -40,6 +53,8 @@ import os
 from typing import Optional, Union
 
 from fastapi import HTTPException, Request, status
+
+import device_auth
 
 _IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 
@@ -67,6 +82,17 @@ DEV_LOOPBACK_ENV = "BOORD_ALLOW_LOOPBACK_ADMIN"
 ADMIN_ONLY_MESSAGE = (
     "The Admin app is only reachable over Tailscale - open the secure "
     "https://...ts.net/ address, not the farm wifi one and not localhost"
+)
+
+
+# What a device reaching Admin through the tunnel without a pairing is told.
+SIGN_IN_MESSAGE = "Sign in with the farm's admin PIN to open the Admin app"
+
+# And what any other screen says there. Not the Tailscale message: that would
+# send somebody looking for an app this road exists to spare them.
+NOT_PAIRED_MESSAGE = (
+    "This device is not paired with the farm yet - ask the office to add it "
+    "from Admin > Settings > Devices"
 )
 
 
@@ -104,9 +130,33 @@ def _asks_for_a_tailnet_site(request: Request) -> bool:
     return False
 
 
+# Cloudflare puts these on every request it passes to us, and a visitor
+# cannot take them off again - which is the whole use of them here.
+_CLOUDFLARE_HEADERS = ("cf-ray", "cf-connecting-ip")
+
+
+def came_through_cloudflare(request: Request) -> bool:
+    """Whether this request came in from the internet through the Cloudflare
+    Tunnel. A tailnet device that adds these headers itself only locks itself
+    out of the Tailscale check; nobody can use them to get in."""
+    return any(header in request.headers for header in _CLOUDFLARE_HEADERS)
+
+
+def paired_device(request: Request) -> Optional[dict]:
+    """The cookie payload of a device this farm paired, or None. Any role:
+    what the role may do is the caller's question."""
+    return device_auth.verify(request.cookies.get(device_auth.COOKIE_NAME, ""))
+
+
+def _paired_role(request: Request) -> Optional[str]:
+    device = paired_device(request)
+    return device["role"] if device else None
+
+
 def is_tailnet_client(request: Request) -> bool:
-    """True when this request arrived over Tailscale: it may load the Admin
-    app's pages. What it may see once there is is_admin_client's question."""
+    """True when this request arrived over Tailscale."""
+    if came_through_cloudflare(request):
+        return False
     address = _peer_address(request)
     if address is None:
         return False
@@ -155,9 +205,32 @@ def _dashboard_only_addresses() -> set:
     return found
 
 
+def may_open_admin(request: Request) -> bool:
+    """True when this request may load the Admin app's pages: it arrived over
+    Tailscale, or it is a device paired as admin or dashboard. What it may
+    see once there is is_admin_client's question. A field tablet's pairing is
+    not on this list - it is what Field and Pack House need through the
+    tunnel, and no more a key to Admin than being on the farm wifi is."""
+    return is_tailnet_client(request) or _paired_role(request) in ("admin", "owner", "dashboard")
+
+
+def may_pair_an_owner(request: Request) -> bool:
+    """Whether this request may hand out (or take away) an owner's pairing.
+    An owner may, and so may a tailnet device - Tailscale has always opened
+    Boord Owner and Boord Notes, so nothing is given away there. A device
+    that only signed in with the PIN may not: the office knows the PIN, and
+    one click in Settings must not turn that into the owner's notebook."""
+    return is_tailnet_client(request) or _paired_role(request) == "owner"
+
+
 def is_dashboard_only(request: Request) -> bool:
-    address = _peer_address(request)
-    return address is not None and address in _dashboard_only_addresses()
+    """A tailnet device is restricted by the address file, as it always was.
+    Any other device is what its pairing says it is - and that one fails
+    closed: a second phone has nothing until the office pairs it."""
+    if is_tailnet_client(request):
+        address = _peer_address(request)
+        return address is not None and address in _dashboard_only_addresses()
+    return _paired_role(request) == "dashboard"
 
 
 # The admin-only calls the Dashboard tab makes; everything else it loads is
@@ -179,14 +252,19 @@ def is_admin_client(request: Request) -> bool:
     its own right for endpoints that serve everybody but serve the admin more
     - see master_data.list_workers, where a dashboard-only device gets what a
     field tablet gets."""
-    return is_tailnet_client(request) and not is_dashboard_only(request)
+    return may_open_admin(request) and not is_dashboard_only(request)
 
 
 def require_admin_client(request: Request) -> None:
     """Admin-only endpoints depend on this. 403 rather than 401: there are no
     credentials to go and fetch, so "try again with a token" would be a lie -
     this request came in on the wrong network and always will."""
-    if not is_tailnet_client(request):
+    if not may_open_admin(request):
+        if came_through_cloudflare(request):
+            # 401 here, where it is true: through the tunnel there IS
+            # something to go and fetch, and the Admin app sends the browser
+            # to the sign-in page when it sees one.
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, SIGN_IN_MESSAGE)
         raise HTTPException(status.HTTP_403_FORBIDDEN, ADMIN_ONLY_MESSAGE)
     if is_dashboard_only(request) and not _dashboard_only_may(request):
         raise HTTPException(status.HTTP_403_FORBIDDEN, DASHBOARD_ONLY_MESSAGE)

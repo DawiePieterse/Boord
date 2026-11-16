@@ -82,6 +82,9 @@ There is no pytest and no CI. `scripts/selftest.py` is the test suite on purpose
 - **No accounts.** `security.py` admits the Admin app only on a request that arrived over Tailscale. That includes the server's own console, because AnyDesk is how the PC is usually reached.
   - It trusts `X-Forwarded-For` only from loopback (`tailscale serve`), with a `.ts.net` Host as the fallback.
   - `run_preview.py` sets `BOORD_ALLOW_LOOPBACK_ADMIN=1` for local development. The farm's launcher never does.
+  - **A paired device is the second way in** (`device_auth.py`, `pairing.py`, `routers/auth.py`; not yet in a release). Boord is the one app that pairs: the office signs in at `/login/` with the admin PIN (set in Admin > Settings > Devices), and a field or dashboard-only device opens a one-time `/pair/?code=` link or QR made there. Each gets a signed `boord_device` cookie with a role (`admin`, `dashboard`, `field`); the other apps only check it. `device_auth.py` is the same file in every app.
+  - The secret, the PIN's hash, the paired and revoked lists and the optional cookie domain (`device_cookie_domain.txt`, so one sign-in covers every app on the farm's domain) are text files in `data/`, never in Git. No table and no migration, on purpose.
+  - A request carrying Cloudflare's headers (`cf-ray`, `cf-connecting-ip`) came through the tunnel: it is never treated as Tailscale, and without a cookie it gets only `/login/`, `/pair/`, `/shared/` and three `/api/auth` calls. On the farm wifi Field and Pack House stay open as before.
   - The server binds 127.0.0.1. Never bind 0.0.0.0.
 - **Schema changes are Alembic migrations** (`backend/migrations/versions/`, run by `migrate.py` at startup and by the updater).
   - A pre-Alembic database is caught up and stamped at the baseline, not replayed.

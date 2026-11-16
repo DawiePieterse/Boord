@@ -2,7 +2,7 @@ import os
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from backup import start_backup_scheduler
@@ -10,10 +10,12 @@ from db import PHOTOS_DIR, seed_defaults
 from market_mail import start_market_mail_scheduler
 from migrate import run_migrations
 from version import prime as prime_version
-from routers import (backups, dashboard, devices, harvest_records, master_data, lots,
+from routers import (auth, backups, dashboard, devices, harvest_records, master_data, lots,
                       payments, planner, processing, receiving, reports, setup, suppliers, sync,
                       version, weather)
-from security import ADMIN_ONLY_MESSAGE, is_tailnet_client
+import device_auth
+from security import (ADMIN_ONLY_MESSAGE, NOT_PAIRED_MESSAGE, came_through_cloudflare,
+                      may_open_admin, paired_device)
 
 app = FastAPI(title="Boord Harvest & Receiving")
 
@@ -24,6 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(devices.router)
 app.include_router(master_data.router)
 app.include_router(lots.router)
@@ -58,9 +61,44 @@ async def admin_app_is_not_on_the_farm_wifi(request: Request, call_next):
     redirects it to "/admin/", and a redirect is a perfectly good way in.
     """
     path = request.url.path
-    if (path == "/admin" or path.startswith("/admin/")) and not is_tailnet_client(request):
+    device = paired_device(request)
+    through_tunnel = came_through_cloudflare(request)
+    wants_a_page = request.method == "GET" and not path.startswith("/api/")
+
+    # From the internet, nothing answers an unpaired device except the two
+    # pages that pair one. On the farm wifi the Field and Pack House screens
+    # have always been open, because getting onto that wifi takes standing on
+    # the farm; the tunnel is reachable by anybody with the address, so there
+    # the pairing cookie is what the wifi password was.
+    if through_tunnel and device is None and not _open_to_the_internet(path):
+        if wants_a_page:
+            return RedirectResponse("/login/", status_code=303)
+        return PlainTextResponse(NOT_PAIRED_MESSAGE, status_code=403)
+
+    if (path == "/admin" or path.startswith("/admin/")) and not may_open_admin(request):
+        if through_tunnel:
+            return RedirectResponse("/login/", status_code=303)
         return PlainTextResponse(ADMIN_ONLY_MESSAGE, status_code=403)
-    return await call_next(request)
+
+    response = await call_next(request)
+    # A device still in use is remembered for another full term, so no tablet
+    # is logged out in the middle of a season for having been paired a year ago.
+    if device is not None and device_auth.needs_renewal(device):
+        device_auth.renew(response, device)
+    return response
+
+
+# What an unpaired device may fetch through the tunnel: the sign-in and
+# pairing pages, the shared styles and scripts they are drawn with (nothing
+# in shared/ is a secret - it is the same code every tablet already has), and
+# the three calls those pages make. Exact names and prefixes with their
+# slash, so "/login-anything" is not a way round.
+_OPEN_PREFIXES = ("/login/", "/pair/", "/shared/")
+_OPEN_PATHS = {"/login", "/pair", "/api/auth/state", "/api/auth/login", "/api/auth/pair"}
+
+
+def _open_to_the_internet(path: str) -> bool:
+    return path in _OPEN_PATHS or path.startswith(_OPEN_PREFIXES)
 
 
 @app.on_event("startup")

@@ -48,3 +48,11 @@ NEXT_STEPS.md
 Boord_Admin_Training.pptx
 # The Tailscale IPs of dashboard-only devices (security.py). This farm's, not the code's.
 data/dashboard_only.txt
+# Paired devices (backend/pairing.py): the signing secret, the admin PIN's
+# hash, what has been paired and revoked, and the farm's cookie domain. This
+# farm's, not the code's - and the repo is public.
+data/device_auth_secret.txt
+data/admin_pin.txt
+data/device_paired.txt
+data/device_revoked.txt
+data/device_cookie_domain.txt

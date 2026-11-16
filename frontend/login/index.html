@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0A2F6B">
+<title>Boord - Sign in</title>
+<!-- Where a device with no pairing lands when it reaches the farm from the
+     internet (backend/main.py). Deliberately no service worker and no
+     manifest: this page is only ever useful online, and a cached copy of a
+     sign-in page is one more thing to go stale on somebody's phone. -->
+<script src="../shared/tailwind.js"></script>
+<link rel="stylesheet" href="../shared/styles.css">
+<script src="../shared/api.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen flex items-center justify-center p-4">
+
+<div class="bg-white rounded-2xl shadow p-6 w-full max-w-sm">
+  <div class="text-center mb-6">
+    <div class="text-2xl font-bold" style="color: var(--boord-blue)">Boord</div>
+    <div class="text-sm text-slate-500">Admin sign-in</div>
+  </div>
+  <form id="pinForm">
+    <label for="pin" class="block text-sm font-medium text-slate-700 mb-1">Admin PIN</label>
+    <input id="pin" type="password" autocomplete="current-password" required
+           class="w-full border border-slate-300 rounded-lg p-3 mb-2 text-lg">
+    <div class="text-xs text-slate-400 mb-4">Only needed once on this device - it is remembered after that.</div>
+    <button id="signInBtn" class="w-full boord-btn-primary rounded-lg py-3 font-semibold">Sign in</button>
+  </form>
+  <div id="loginError" class="text-red-600 text-sm mt-3 hidden" role="alert"></div>
+  <div class="text-xs text-slate-500 mt-6 pt-4 border-t border-slate-200">
+    <b>Field or Pack House device?</b> It does not use the PIN. Ask the office
+    to add it from Admin &gt; Settings &gt; Devices, then scan the code they show you.
+  </div>
+</div>
+
+<script>
+const errorBox = document.getElementById("loginError");
+function showError(text) {
+  errorBox.textContent = text;
+  errorBox.classList.remove("hidden");
+}
+
+// A device that is already the admin has nothing to do here - somebody
+// followed an old bookmark. A field or dashboard device stays: it may be the
+// office signing in on a tablet that was only ever paired for the orchard.
+Boord.api("/api/auth/state").then((state) => {
+  if (state.admin) location.replace("/admin/");
+  else if (!state.pin_set) showError("No admin PIN has been set yet. Set one in Admin > Settings > Devices.");
+}).catch(() => { /* the form still works; the server will say what is wrong */ });
+
+document.getElementById("pinForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = document.getElementById("signInBtn");
+  button.disabled = true;
+  errorBox.classList.add("hidden");
+  try {
+    await Boord.api("/api/auth/login", { method: "POST", body: { pin: document.getElementById("pin").value } });
+    location.replace("/admin/");
+  } catch (e) {
+    showError(Boord.isNetworkError(e) ? "No connection - try again" : Boord.errorDetail(e, "Could not sign in"));
+    button.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

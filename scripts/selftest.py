@@ -777,6 +777,10 @@ ADMIN_ONLY_ROUTES = {
     ("DELETE", "/api/suppliers/{supplier_id}"),
     ("DELETE", "/api/teams/{team_id}"),
     ("DELETE", "/api/workers/{worker_id}"),
+    ("DELETE", "/api/auth/devices/{device_id}"),
+    ("GET", "/api/auth/devices"),
+    ("POST", "/api/auth/pairings"),
+    ("PUT", "/api/auth/pin"),
     ("GET", "/api/backups"),
     ("GET", "/api/backups/offsite"),
     ("GET", "/api/backups/{filename}/download"),
@@ -2175,6 +2179,361 @@ def test_the_boot_guard_is_actually_in_the_shared_library():
 
 
 # ---------------------------------------------------------------------------
+# Paired devices: the second way in (backend/device_auth.py, pairing.py).
+#
+# A device the office has paired carries a signed cookie and no longer needs
+# Tailscale, and the Cloudflare Tunnel is the road it arrives by. Two things
+# are held down here. That the cookie opens exactly what its role says and
+# nothing more. And that the tunnel - whose connector reaches us over
+# loopback, as `tailscale serve` does - did not turn the Tailscale check's own
+# signals into something a stranger on the internet can type.
+#
+# Everything is driven through the real app (middleware included) from a
+# chosen peer, against a throwaway folder: the farm's own secret, PIN and
+# device list are never read or written.
+# ---------------------------------------------------------------------------
+VIA_TUNNEL = {"cf-ray": "8a1b2c3d4e5f-JNB", "cf-connecting-ip": "41.13.200.7"}
+FARM_WIFI = ("192.168.68.20", 54321)
+TUNNEL_PEER = ("127.0.0.1", 54321)   # the connector runs on the farm PC
+
+
+class _PairingSandbox:
+    """A farm that has paired nothing yet, in a temporary folder."""
+
+    def __enter__(self):
+        import os, tempfile  # noqa: E402
+        import device_auth, pairing  # noqa: E402
+        self.os, self.pairing, self.name = os, pairing, device_auth.AUTH_DIR_ENV
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old = os.environ.get(self.name)
+        os.environ[self.name] = self.tmp.name
+        self._reset()
+        return self.tmp.name
+
+    def _reset(self):
+        self.pairing._codes.clear()
+        self.pairing._wrong_pins = 0
+        self.pairing._locked_until = 0.0
+
+    def __exit__(self, *exc):
+        self._reset()
+        if self.old is None:
+            self.os.environ.pop(self.name, None)
+        else:
+            self.os.environ[self.name] = self.old
+        self.tmp.cleanup()
+
+
+def _call(method, path, headers=None, peer=TUNNEL_PEER, body=None, cookie=None):
+    """One request through the whole app. Returns (status, headers, text)."""
+    import asyncio, json  # noqa: E402
+    import main  # noqa: E402
+
+    raw = json.dumps(body).encode() if body is not None else b""
+    sent = dict(headers or {})
+    if body is not None:
+        sent["content-type"] = "application/json"
+    if cookie:
+        sent["cookie"] = cookie
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+             "method": method, "path": path, "raw_path": path.encode(), "query_string": b"",
+             "root_path": "", "scheme": "https", "server": ("boord.example", 443),
+             "headers": [(k.lower().encode(), v.encode()) for k, v in sent.items()]}
+    if peer is not None:
+        scope["client"] = peer
+    messages = []
+
+    async def receive():
+        return {"type": "http.request", "body": raw, "more_body": False}
+
+    async def send(message):
+        messages.append(message)
+
+    asyncio.run(main.app(scope, receive, send))
+    start = next(m for m in messages if m["type"] == "http.response.start")
+    got = {}
+    for key, value in start["headers"]:
+        got[key.decode().lower()] = value.decode()
+    text = b"".join(m.get("body", b"") for m in messages if m["type"] == "http.response.body")
+    return start["status"], got, text.decode("utf-8", "replace")
+
+
+def _cookie_from(headers):
+    """The Cookie header a browser would send back after this response."""
+    return headers["set-cookie"].split(";")[0]
+
+
+def _signed(role, **extra):
+    """A cookie this (sandboxed) farm signed, without going through pairing."""
+    import time  # noqa: E402
+    import device_auth, pairing  # noqa: E402
+
+    payload = dict({"id": "dev-" + role, "role": role, "exp": int(time.time()) + 10 * 24 * 3600}, **extra)
+    return device_auth.COOKIE_NAME + "=" + device_auth.sign(payload, pairing._secret())
+
+
+def test_the_internet_gets_nothing_without_a_pairing():
+    """On the farm wifi Field and Pack House are open; getting onto that wifi
+    takes standing on the farm. The tunnel is reachable by anybody with the
+    address, so there an unpaired device gets the two pairing pages and what
+    draws them - not a crate, not a worker's name, not the device list."""
+    with _PairingSandbox():
+        for page in ("/", "/field/", "/packhouse/", "/admin/", "/photos/x.jpg", "/login-not-really/"):
+            status, headers, _ = _call("GET", page, VIA_TUNNEL)
+            assert (status, headers.get("location")) == (303, "/login/"), (page, status)
+        for method, path in (("GET", "/api/devices/setup-options"), ("POST", "/api/sync"),
+                             ("GET", "/api/workers"), ("GET", "/api/auth/devices"),
+                             ("GET", "/api/version")):
+            status, _, text = _call(method, path, VIA_TUNNEL)
+            assert status == 403 and "not paired" in text, (method, path, status, text)
+        for page in ("/login/", "/pair/", "/shared/api.js", "/shared/styles.css"):
+            assert _call("GET", page, VIA_TUNNEL)[0] == 200, page
+        assert _call("GET", "/api/auth/state", VIA_TUNNEL)[0] == 200
+
+
+def test_the_farm_wifi_is_exactly_as_it_was():
+    """No cookie, no Cloudflare headers: Field still opens, Admin is still
+    refused with the Tailscale message. Nothing was taken away."""
+    with _PairingSandbox(), _without_dev_loopback():
+        assert _call("GET", "/field/", peer=FARM_WIFI)[0] == 200
+        status, _, text = _call("GET", "/admin/", peer=FARM_WIFI)
+        assert status == 403 and "Tailscale" in text
+        assert _call("GET", "/admin/", peer=("100.64.0.1", 54321))[0] == 200
+
+
+def test_the_tunnel_is_not_a_way_round_the_tailscale_check():
+    """The forgery this section exists for. From loopback a .ts.net name is
+    what `tailscale serve` looks like, and a tailnet peer address is what
+    uvicorn makes of X-Forwarded-For - and through the tunnel a stranger
+    chooses both. Neither opens Admin, and the dev escape hatch does not
+    reach through either."""
+    import os  # noqa: E402
+    from security import DEV_LOOPBACK_ENV  # noqa: E402
+
+    with _PairingSandbox(), _without_dev_loopback():
+        for forged in ({"host": "boord.example.ts.net"}, {"x-forwarded-host": "boord.example.ts.net"}):
+            assert _call("GET", "/admin/", dict(VIA_TUNNEL, **forged))[0] == 303, forged
+            assert _call("GET", "/api/payments", dict(VIA_TUNNEL, **forged))[0] == 403, forged
+        assert _call("GET", "/admin/", VIA_TUNNEL, peer=("100.64.0.1", 54321))[0] == 303
+        os.environ[DEV_LOOPBACK_ENV] = "1"
+        try:
+            assert _call("GET", "/admin/", VIA_TUNNEL)[0] == 303
+        finally:
+            del os.environ[DEV_LOOPBACK_ENV]
+
+
+def test_the_admin_pin_signs_a_device_in_once():
+    import pairing  # noqa: E402
+
+    with _PairingSandbox() as folder, _without_dev_loopback():
+        # Before a PIN exists nothing signs in, and nothing has been written:
+        # a farm that never uses this has no secret lying in data/.
+        status, _, text = _call("POST", "/api/auth/login", VIA_TUNNEL, body={"pin": "anything"})
+        assert status == 403 and "No admin PIN" in text
+        assert os.listdir(folder) == []
+
+        try:
+            pairing.set_pin("123")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a three-character PIN was accepted")
+        pairing.set_pin("1234")       # four is the least the office may choose
+        pairing.set_pin("litchi-2026")
+        assert "litchi" not in open(os.path.join(folder, pairing.PIN_FILE)).read(), "the PIN is stored in the clear"
+
+        assert _call("POST", "/api/auth/login", VIA_TUNNEL, body={"pin": "wrong-pin"})[0] == 403
+        status, headers, _ = _call("POST", "/api/auth/login", VIA_TUNNEL, body={"pin": "litchi-2026"})
+        assert status == 200
+        for attribute in ("HttpOnly", "Secure", "SameSite=lax", "Max-Age=34560000"):
+            assert attribute in headers["set-cookie"], attribute
+        admin = _cookie_from(headers)
+
+        # And that cookie is the admin, from the internet, with no Tailscale.
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=admin)[0] == 200
+        status, _, text = _call("GET", "/api/auth/devices", VIA_TUNNEL, cookie=admin)
+        assert status == 200 and '"this_device":true' in text.replace(" ", "")
+        assert _call("GET", "/api/auth/state", VIA_TUNNEL, cookie=admin)[2].count('"admin":true') == 1
+
+
+def test_wrong_pins_shut_the_door_for_everybody_for_a_while():
+    """Counted for the farm, not per address: there is one PIN, and the
+    internet has as many addresses as an attacker cares to use. While it is
+    shut even the right PIN is refused - otherwise the lock would only slow
+    down the guesses that were wrong anyway."""
+    import pairing  # noqa: E402
+
+    with _PairingSandbox():
+        pairing.set_pin("litchi-2026")
+        for _ in range(pairing.MAX_WRONG_PINS):
+            assert not pairing.check_pin("guess", now=1000.0)
+        assert not pairing.check_pin("litchi-2026", now=1001.0)
+        assert pairing.seconds_locked_out(now=1001.0) > 0
+        assert pairing.check_pin("litchi-2026", now=1000.0 + pairing.LOCKOUT_SECONDS + 1)
+
+        pairing._locked_until = 0.0
+        for _ in range(pairing.MAX_WRONG_PINS):
+            _call("POST", "/api/auth/login", VIA_TUNNEL, body={"pin": "guess"})
+        status, _, text = _call("POST", "/api/auth/login", VIA_TUNNEL, body={"pin": "litchi-2026"})
+        assert status == 429 and "Too many" in text
+
+
+def test_a_field_pairing_opens_field_and_pack_house_and_never_admin():
+    import pairing  # noqa: E402
+
+    with _PairingSandbox(), _without_dev_loopback():
+        try:
+            pairing.new_pairing_code("admin", "sneaky")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a pairing code was issued for the admin role")
+
+        code = pairing.new_pairing_code("field", "Station 2 tablet")
+        # Opening the link pairs nothing: WhatsApp fetches it for a preview.
+        assert _call("GET", "/pair/", VIA_TUNNEL)[0] == 200
+        assert pairing._codes, "the code was spent by a GET"
+
+        status, headers, _ = _call("POST", "/api/auth/pair", VIA_TUNNEL, body={"code": code})
+        assert status == 200
+        field = _cookie_from(headers)
+        # Once. The same link forwarded on pairs nobody else.
+        assert _call("POST", "/api/auth/pair", VIA_TUNNEL, body={"code": code})[0] == 403
+
+        for page in ("/", "/field/", "/packhouse/"):
+            assert _call("GET", page, VIA_TUNNEL, cookie=field)[0] == 200, page
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=field)[0] == 303
+        status, _, text = _call("GET", "/api/payments", VIA_TUNNEL, cookie=field)
+        assert status == 401 and "PIN" in text
+        assert _call("PUT", "/api/auth/pin", VIA_TUNNEL, cookie=field, body={"pin": "mine-now-123"})[0] == 401
+        assert [d["label"] for d in pairing.paired_devices()] == ["Station 2 tablet"]
+
+        # A code nobody used in time is nobody's.
+        stale = pairing.new_pairing_code("field", "", now=0.0)
+        assert pairing.redeem_pairing_code(stale, now=pairing.PAIRING_CODE_SECONDS + 1.0) is None
+
+
+def test_a_dashboard_pairing_is_the_farm_managers_view_and_nothing_else():
+    """The same guarded route list as the Tailscale dashboard-only file, both
+    ways - but decided by the pairing, so it fails closed: this phone has the
+    dashboard because the office gave it that, not because a line is missing
+    from a file."""
+    from security import _DASHBOARD_ONLY_ROUTES  # noqa: E402
+
+    with _PairingSandbox(), _without_dev_loopback():
+        manager = _signed("dashboard")
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=manager)[0] == 200
+        for method, path in sorted(ADMIN_ONLY_ROUTES - _DASHBOARD_ONLY_ROUTES):
+            concrete = path.replace("{", "").replace("}", "")
+            status, _, text = _call(method, concrete, VIA_TUNNEL, cookie=manager)
+            assert status == 403 and "dashboard-only" in text, (method, path, status)
+        status, _, text = _call("GET", "/api/auth/state", VIA_TUNNEL, cookie=manager)
+        assert '"role":"dashboard"' in text.replace(" ", "") and '"admin":false' in text.replace(" ", "")
+
+
+def test_only_an_owner_can_make_an_owner():
+    """The owner's pairing opens Boord Owner and Boord Notes, which the admin
+    PIN deliberately does not. So a device that merely knows the PIN must not
+    be able to mint one in Settings, or to take the owner's away. Tailscale
+    can: it has always opened both apps, so nothing is given away there."""
+    import json  # noqa: E402
+    import pairing  # noqa: E402
+
+    office_on_tailscale = ("100.64.0.1", 54321)
+    with _PairingSandbox(), _without_dev_loopback():
+        admin = _signed("admin")
+        ask = {"role": "owner", "label": "Andre's phone"}
+        status, _, text = _call("POST", "/api/auth/pairings", VIA_TUNNEL, body=ask, cookie=admin)
+        assert status == 403 and "Only the owner" in text
+        assert '"can_pair_owner":false' in _call("GET", "/api/auth/state", VIA_TUNNEL, cookie=admin)[2].replace(" ", "")
+
+        status, _, text = _call("POST", "/api/auth/pairings", body=ask, peer=office_on_tailscale)
+        assert status == 200
+        headers = _call("POST", "/api/auth/pair", VIA_TUNNEL, body={"code": json.loads(text)["code"]})[1]
+        owner = _cookie_from(headers)
+
+        # The owner is everything the admin is, from the internet...
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=owner)[0] == 200
+        status, _, text = _call("GET", "/api/auth/devices", VIA_TUNNEL, cookie=owner)
+        assert status == 200 and json.loads(text)[0]["role"] == "owner"
+        # ...and can bring in the next owner without Tailscale.
+        assert _call("POST", "/api/auth/pairings", VIA_TUNNEL, body=ask, cookie=owner)[0] == 200
+
+        owner_id = pairing.paired_devices()[0]["id"]
+        status, _, text = _call("DELETE", "/api/auth/devices/" + owner_id, VIA_TUNNEL, cookie=admin)
+        assert status == 403 and "Only the owner" in text
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=owner)[0] == 200
+        assert _call("DELETE", "/api/auth/devices/" + owner_id, VIA_TUNNEL, cookie=owner)[0] == 200
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=owner)[0] == 303
+
+
+def test_a_cookie_is_believed_only_when_this_farm_signed_it():
+    import time  # noqa: E402
+    import device_auth, pairing  # noqa: E402
+
+    with _PairingSandbox() as folder, _without_dev_loopback():
+        good = _signed("admin")
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=good)[0] == 200
+        name = device_auth.COOKIE_NAME + "="
+        expired = name + device_auth.sign({"id": "x", "role": "admin", "exp": int(time.time()) - 1}, pairing._secret())
+        other_farm = name + device_auth.sign({"id": "x", "role": "admin", "exp": int(time.time()) + 999}, b"y" * 40)
+        promoted = name + _signed("admin").split("=", 1)[1].split(".")[0] + "." + _signed("field").split(".")[1]
+        for label, bad in (("expired", expired), ("another farm's", other_farm), ("edited", promoted),
+                           ("junk", name + "a.b"), ("empty", name)):
+            assert _call("GET", "/admin/", VIA_TUNNEL, cookie=bad)[0] == 303, label
+
+        # An emptied secret file must sign nothing: HMAC under "" is a
+        # signature anybody can make for themselves.
+        open(os.path.join(folder, device_auth.SECRET_FILE), "w").close()
+        forged = name + device_auth.sign({"id": "x", "role": "admin", "exp": int(time.time()) + 999}, b"")
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=forged)[0] == 303
+
+
+def test_a_lost_phone_is_removed_alone():
+    import pairing  # noqa: E402
+
+    with _PairingSandbox(), _without_dev_loopback():
+        cookies = {}
+        for label in ("Station 1", "Station 2"):
+            code = pairing.new_pairing_code("field", label)
+            cookies[label] = _cookie_from(_call("POST", "/api/auth/pair", VIA_TUNNEL, body={"code": code})[1])
+        lost = next(d for d in pairing.paired_devices() if d["label"] == "Station 1")
+
+        status, _, _ = _call("DELETE", "/api/auth/devices/" + lost["id"], cookie=_signed("admin"), headers=VIA_TUNNEL)
+        assert status == 200
+        assert _call("GET", "/field/", VIA_TUNNEL, cookie=cookies["Station 1"])[0] == 303
+        assert _call("GET", "/field/", VIA_TUNNEL, cookie=cookies["Station 2"])[0] == 200
+        assert [d["label"] for d in pairing.paired_devices()] == ["Station 2"]
+        assert _call("DELETE", "/api/auth/devices/" + lost["id"], cookie=_signed("admin"), headers=VIA_TUNNEL)[0] == 404
+
+
+def test_one_sign_in_covers_the_farms_whole_domain_and_is_renewed_in_use():
+    """The Domain comes from a file the farm writes once, never from the Host
+    header, and is carried signed so any app can renew it. A cookie a month
+    old gets a full term again; a fresh one is left alone."""
+    import time  # noqa: E402
+    import device_auth, pairing  # noqa: E402
+
+    with _PairingSandbox() as folder:
+        assert "Domain" not in _call("POST", "/api/auth/pair", VIA_TUNNEL, body={
+            "code": pairing.new_pairing_code("field", "")})[1]["set-cookie"]
+
+        with open(os.path.join(folder, pairing.COOKIE_DOMAIN_FILE), "w") as f:
+            f.write(".Bekfontein.example   # the farm's own domain\n")
+        headers = _call("POST", "/api/auth/pair", dict(VIA_TUNNEL, host="evil.example"),
+                        body={"code": pairing.new_pairing_code("field", "")})[1]
+        assert "Domain=bekfontein.example" in headers["set-cookie"]
+
+        fresh = _cookie_from(headers)
+        assert "set-cookie" not in _call("GET", "/field/", VIA_TUNNEL, cookie=fresh)[1]
+        ageing = _signed("field", dom="bekfontein.example")       # ten days left
+        renewed = _call("GET", "/field/", VIA_TUNNEL, cookie=ageing)[1]["set-cookie"]
+        assert "Domain=bekfontein.example" in renewed
+        payload = device_auth.verify(renewed.split(";")[0].split("=", 1)[1])
+        assert payload["id"] == "dev-field" and payload["exp"] > time.time() + 399 * 24 * 3600
+
+
+# ---------------------------------------------------------------------------
 # Planner arithmetic (backend/planner.py): weeks, seasons, the spread of a
 # block's kg over its picking days, and the short-or-surplus balance. All
 # plain numbers; the database and the sibling apps' files never come into it.
@@ -2521,6 +2880,20 @@ def main():
                test_a_request_with_no_peer_is_not_the_admin,
                test_a_dashboard_only_device_gets_the_dashboard_and_nothing_else,
                test_the_dashboard_only_list_restricts_nobody_else):
+        check(fn.__name__, fn)
+
+    section("Paired devices")
+    for fn in (test_the_internet_gets_nothing_without_a_pairing,
+               test_the_farm_wifi_is_exactly_as_it_was,
+               test_the_tunnel_is_not_a_way_round_the_tailscale_check,
+               test_the_admin_pin_signs_a_device_in_once,
+               test_wrong_pins_shut_the_door_for_everybody_for_a_while,
+               test_a_field_pairing_opens_field_and_pack_house_and_never_admin,
+               test_a_dashboard_pairing_is_the_farm_managers_view_and_nothing_else,
+               test_only_an_owner_can_make_an_owner,
+               test_a_cookie_is_believed_only_when_this_farm_signed_it,
+               test_a_lost_phone_is_removed_alone,
+               test_one_sign_in_covers_the_farms_whole_domain_and_is_renewed_in_use):
         check(fn.__name__, fn)
 
     section("Planner")

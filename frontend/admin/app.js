@@ -2795,6 +2795,29 @@ function bindSettings() {
   document.getElementById("pickMapBtn").addEventListener("click", () => openMapModal("setGpsLat", "setGpsLon"));
   bindMapModal();
   document.getElementById("runBackupBtn").addEventListener("click", runBackupNow);
+  document.getElementById("saveAdminPinBtn").addEventListener("click", saveAdminPin);
+  document.getElementById("newPairingBtn").addEventListener("click", showPairingCode);
+  document.getElementById("copyPairingLinkBtn").addEventListener("click", async () => {
+    const link = document.getElementById("pairingLink");
+    try {
+      await navigator.clipboard.writeText(link.value);
+      Boord.toast("Link copied");
+    } catch (_) {
+      link.select();   // no clipboard permission: leave it selected to copy by hand
+    }
+  });
+  document.getElementById("pairedDevicesTable").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-revoke]");
+    if (!button) return;
+    if (!confirm(`Remove "${button.dataset.label}"? It will have to be added again to open Boord.`)) return;
+    try {
+      await Boord.api(`/api/auth/devices/${encodeURIComponent(button.dataset.revoke)}`, { method: "DELETE" });
+      Boord.toast("Device removed");
+      await loadPairedDevices();
+    } catch (e) {
+      Boord.toast(Boord.errorDetail(e, "Could not remove the device"));
+    }
+  });
   document.getElementById("setSeasonMonth").addEventListener("change", updateSeasonYearLabel);
   document.getElementById("setSeasonDay").addEventListener("input", updateSeasonYearLabel);
 }
@@ -2872,6 +2895,63 @@ async function loadServerCard() {
   } else if (info.state === "unknown" && info.git_error) {
     warn.classList.remove("hidden");
     showWarning(`The server cannot read its own version from git: ${info.git_error}`, "amber");
+  }
+}
+
+// --- Settings > Devices: the admin PIN and paired devices (backend/pairing.py)
+
+const PAIRED_ROLE_LABEL = { admin: "Everything (admin)", owner: "Everything, plus Owner and Notes",
+                            dashboard: "Dashboard only", field: "Field and Pack House" };
+
+async function loadPairedDevices() {
+  const [state, devices] = await Promise.all([Boord.api("/api/auth/state"), Boord.api("/api/auth/devices")]);
+  // Only an owner can add an owner (backend/security.py), so the choice is
+  // not offered to anybody the server would refuse - and neither is Remove
+  // on an owner's line.
+  // Disabled as well as hidden: older iPhones still list a hidden option.
+  const ownerOption = document.getElementById("pairOwnerOption");
+  ownerOption.hidden = ownerOption.disabled = !state.can_pair_owner;
+  document.getElementById("adminPinState").textContent = state.pin_set ? "(set - type a new one to change it)" : "(not set yet)";
+  document.getElementById("pairedDevicesTable").innerHTML = devices.length ? devices.map((d) => `
+    <tr class="border-b">
+      <td class="p-2">${esc(d.label || "No name")}${d.this_device ? ' <span class="text-xs text-slate-400">(this device)</span>' : ""}</td>
+      <td class="p-2">${esc(PAIRED_ROLE_LABEL[d.role] || d.role)}</td>
+      <td class="p-2">${Boord.fmtDateTime(d.paired_at)}</td>
+      <td class="p-2 text-right">${d.role === "owner" && !state.can_pair_owner ? "" : `<button class="text-red-700 text-xs" data-revoke="${esc(d.id)}" data-label="${esc(d.label || "No name")}">Remove</button>`}</td>
+    </tr>`).join("") : '<tr><td class="p-2 text-slate-400" colspan="4">No devices added yet. Devices on Tailscale are not listed here.</td></tr>';
+}
+
+async function saveAdminPin() {
+  const input = document.getElementById("adminPinInput");
+  try {
+    await Boord.api("/api/auth/pin", { method: "PUT", body: { pin: input.value } });
+    input.value = "";
+    Boord.toast("Admin PIN saved");
+    await loadPairedDevices();
+  } catch (e) {
+    Boord.toast(Boord.errorDetail(e, "Could not save the PIN"));
+  }
+}
+
+async function showPairingCode() {
+  try {
+    const pairing = await Boord.api("/api/auth/pairings", { method: "POST", body: {
+      role: document.getElementById("pairRoleSelect").value,
+      label: document.getElementById("pairLabelInput").value,
+    } });
+    // The link is to wherever this Admin app is open, because that is the
+    // address the new device will use too: make the code from the farm's
+    // own address, not the Tailscale one, for a device that has no Tailscale.
+    const link = `${location.origin}/pair/?code=${encodeURIComponent(pairing.code)}`;
+    document.getElementById("pairingLink").value = link;
+    document.getElementById("pairingHours").textContent = pairing.valid_hours;
+    QRCode.toString(link, { errorCorrectionLevel: "M", margin: 1 }, (err, svg) => {
+      document.getElementById("pairingQr").innerHTML = err ? "" : svg;
+    });
+    document.getElementById("pairingCode").classList.remove("hidden");
+    document.getElementById("pairLabelInput").value = "";
+  } catch (e) {
+    Boord.toast(Boord.errorDetail(e, "Could not make a pairing code"));
   }
 }
 
@@ -3106,7 +3186,7 @@ async function loadSettingsForm() {
     Boord.api("/api/system-settings"), Boord.api("/api/rate-settings/current"),
     // Admin-only reads for the Settings tab, which a dashboard-only device
     // never sees and would be refused.
-    ...(_dashboardOnly ? [] : [loadServerCard(), loadBackupsList(), loadOffsiteStatus()]),
+    ...(_dashboardOnly ? [] : [loadServerCard(), loadBackupsList(), loadOffsiteStatus(), loadPairedDevices()]),
   ]);
   _systemSettings = settings;
   if (settings) {
