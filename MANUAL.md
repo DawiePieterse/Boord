@@ -1581,7 +1581,9 @@ what's happening right now, all scoped to a shared filter bar at the top.
 - **Supplier** - narrow everything below to one supplier, or leave on
   "All suppliers"
 - **Period start / Period end**, plus quick-fill buttons **Today**,
-  **This Week**, **Season**. The season is a recurring start date (a month
+  **Week 47** (the current week's number), **Season**. The week is the
+  ISO week today falls in, Monday to Sunday, the same week numbers the
+  Planner uses. The season is a recurring start date (a month
   and a day) set in [Settings](#12-admin---settings); **Season** fills the
   twelve months from that date, and the season is labelled by the year it
   starts in. Or set custom dates directly. Whichever preset matches the
@@ -1863,7 +1865,7 @@ The list then shows the net paid. Notes still waiting for a statement show
 "Not entered".
 
 Under the list, **Print (or save as PDF) by** gives five quick reports of
-the notes listed, for the dates at the top (Today, This Week, Season or your
+the notes listed, for the dates at the top (Today, the week, Season or your
 own). Each opens a page and the print dialog, set to landscape. To make a PDF to email, choose
 **Save as PDF** as the printer. At the top of the page (none of it is printed):
 
