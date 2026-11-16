@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0A2F6B">
+<title>Boord - Add this device</title>
+<!-- Where a pairing QR or link from Admin > Settings > Devices opens. The
+     code in the address does nothing until the button is pressed: WhatsApp
+     and its like fetch a link to draw a preview, and a code that paired on
+     arrival would be spent before the person it was sent to opened it. -->
+<script src="../shared/tailwind.js"></script>
+<link rel="stylesheet" href="../shared/styles.css">
+<script src="../shared/api.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen flex items-center justify-center p-4">
+
+<div class="bg-white rounded-2xl shadow p-6 w-full max-w-sm">
+  <div class="text-center mb-6">
+    <div class="text-2xl font-bold" style="color: var(--boord-blue)">Boord</div>
+    <div class="text-sm text-slate-500">Add this device</div>
+  </div>
+  <div id="pairIntro" class="text-sm text-slate-600 mb-4">
+    The office has invited this device. Add it once and it is remembered -
+    there is nothing to type and no other app to install.
+  </div>
+  <button id="pairBtn" class="w-full boord-btn-primary rounded-lg py-3 font-semibold">Add this device</button>
+  <div id="pairError" class="text-red-600 text-sm mt-3 hidden" role="alert"></div>
+</div>
+
+<script>
+const code = new URLSearchParams(location.search).get("code") || "";
+const button = document.getElementById("pairBtn");
+const errorBox = document.getElementById("pairError");
+function showError(text) {
+  errorBox.textContent = text;
+  errorBox.classList.remove("hidden");
+}
+if (!code) {
+  button.disabled = true;
+  showError("This link has no pairing code. Ask the office for a new one.");
+}
+
+button.addEventListener("click", async () => {
+  button.disabled = true;
+  errorBox.classList.add("hidden");
+  try {
+    const paired = await Boord.api("/api/auth/pair", { method: "POST", body: { code } });
+    // The farm manager goes to the dashboard. A field or pack house device
+    // goes to the setup page, which asks which station it is and sends it on.
+    location.replace(paired.role === "dashboard" ? "/admin/" : "/");
+  } catch (e) {
+    showError(Boord.isNetworkError(e) ? "No connection - try again" : Boord.errorDetail(e, "Could not add this device"));
+    button.disabled = Boord.isAuthError(e);   // a spent code will not work on a second press
+  }
+});
+</script>
+</body>
+</html>

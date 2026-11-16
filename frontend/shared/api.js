@@ -8,7 +8,7 @@ const Boord = {
   // actually up to date - especially useful given the service workers'
   // cache-first strategy (see field/packhouse/admin service-worker.js).
   // Reset to 2.0 on 2026-08-26 for the Boord rename and clean reinstall.
-  VERSION: "3.64",
+  VERSION: "3.65",
 
   getDeviceId() { return localStorage.getItem("boord_device_id"); },
   // Re-pointing a tablet at a different device slot has to drop the picking
@@ -237,6 +237,16 @@ const Boord = {
       throw e;
     }
     Boord.setOffline(false);
+    // 401 means one thing only: this device reached Admin from the internet
+    // (the Cloudflare Tunnel) and is not signed in, or its sign-in was
+    // removed in Settings > Devices. The Admin shell is cached, so without
+    // this it would open as usual and then fail every request with no way
+    // forward. Everywhere else the server still answers 403, which is not
+    // something a sign-in page can fix. Admin only: a capture screen must
+    // never be navigated away from under a picker's hands.
+    if (res.status === 401 && location.pathname.startsWith("/admin")) {
+      location.replace("/login/");
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       // e.status and e.detail carry the rejection in usable form; the
