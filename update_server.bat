@@ -239,6 +239,24 @@ if "!CURTAG!"=="!NEWTAG!" (
         if not defined CHECK_ONLY if not defined UNATTENDED pause
         exit /b 1
     )
+    rem That checkout may have replaced this very file, and cmd reads a batch
+    rem file off the disk as it goes: after this block it would carry on at
+    rem the same byte of the new file, which is some other line. Installing
+    rem Kudde v0.12 ended that way (and Packhouse v0.66 before it), with the
+    rem tag checked out and the server never restarted. So start the file now
+    rem on disk from its top: it finds itself on the newest tag, skips this
+    rem block and does the rest. There is no call, so this run ends here. Keep
+    rem these lines the last in the block and able to run outside it: an
+    rem updater from before them carries on in the middle of them.
+    for %%A in (%*) do if /i "%%~A"=="--checked-out" (
+        echo.
+        echo Checked out !NEWTAG! twice and still not on it - stopping rather
+        echo than going round again. The server has NOT been restarted.
+        if not defined CHECK_ONLY if not defined UNATTENDED pause
+        exit /b 1
+    )
+    echo ==^> Carrying on in the updater !NEWTAG! brought...
+    "%~f0" %* --checked-out
 )
 
 :: Leave a note of the tag that is now checked out, for the version endpoint
@@ -263,8 +281,12 @@ if "!CURTAG!"=="!NEWTAG!" (
 
 echo.
 echo ==^> Installing any new dependencies...
-call "%~dp0backend\.venv\Scripts\activate.bat"
-pip install --quiet --disable-pip-version-check -r "%~dp0backend\requirements.txt"
+:: python -m pip, not Scripts\pip.exe: that stub is generated with the venv
+:: and is an unsigned executable, which Windows Application Control blocks on
+:: a machine that enforces one (the farm PC said "blocked by your
+:: organization's Device Guard policy" installing Kudde v0.12). The venv's
+:: python.exe is a copy of the signed PSF binary and runs fine.
+"%~dp0backend\.venv\Scripts\python.exe" -m pip install --quiet --disable-pip-version-check -r "%~dp0backend\requirements.txt"
 if %errorLevel% neq 0 (
     echo Warning: dependency install reported a problem - see the error above.
     echo Checking whether the server can still start before going any further...

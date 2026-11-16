@@ -2801,6 +2801,20 @@ def test_planner_preorders_fill_what_was_not_typed():
     assert receiver_group({"name": "Boeretrust", "market": "Tshwane Mark"}) == "local"
 
 
+def test_the_updater_starts_the_new_file_after_the_checkout():
+    """cmd reads a batch file off the disk as it runs, so once the checkout has
+    replaced the updater it must start the new file from the top, as the last
+    thing in that block: anything after it would be read at a stale byte of
+    the new file (Kudde v0.12 ended "failed" that way, the server never
+    restarted). And pip runs through the venv's python, because Scripts\\pip.exe
+    is blocked on the farm PC."""
+    with open(os.path.join(BACKEND_DIR, "..", "update_server.bat"), encoding="utf-8") as fh:
+        text = fh.read()
+    assert re.search(r'git checkout --force "!NEWTAG!"\n.*?\n    "%~f0" %\* --checked-out\n\)\n', text, re.S)
+    assert '"%%~A"=="--checked-out"' in text, "a second time round must stop"
+    assert not re.search(r"^pip install", text, re.M)
+
+
 def main():
     print("Boord self-test")
     print("=" * 60)
@@ -2821,7 +2835,8 @@ def main():
     for fn in (test_the_version_regex_still_matches_the_constant,
                test_the_declared_version_matches_the_checked_out_tag,
                test_version_info_survives_without_git,
-               test_the_reported_alembic_head_is_the_real_head):
+               test_the_reported_alembic_head_is_the_real_head,
+               test_the_updater_starts_the_new_file_after_the_checkout):
         check(fn.__name__, fn)
 
     section("Master data imports")
