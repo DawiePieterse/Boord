@@ -31,7 +31,7 @@ TWO SIGNALS, because only one of them is certain:
 
 A SECOND WAY IN, beside Tailscale: a paired device (device_auth.py, and
 pairing.py for how one is made). An admin who signed in with the farm's PIN,
-or a farm manager whose phone was paired "dashboard only", carries a signed
+an owner, or a farm manager whose phone was paired "dashboard only", carries a signed
 cookie and is admitted on whatever network it arrives - which is what lets
 the office reach Admin through the Cloudflare Tunnel without the Tailscale
 app. Either is enough; Tailscale works exactly as it did.
@@ -211,7 +211,16 @@ def may_open_admin(request: Request) -> bool:
     see once there is is_admin_client's question. A field tablet's pairing is
     not on this list - it is what Field and Pack House need through the
     tunnel, and no more a key to Admin than being on the farm wifi is."""
-    return is_tailnet_client(request) or _paired_role(request) in ("admin", "dashboard")
+    return is_tailnet_client(request) or _paired_role(request) in ("admin", "owner", "dashboard")
+
+
+def may_pair_an_owner(request: Request) -> bool:
+    """Whether this request may hand out (or take away) an owner's pairing.
+    An owner may, and so may a tailnet device - Tailscale has always opened
+    Boord Owner and Boord Notes, so nothing is given away there. A device
+    that only signed in with the PIN may not: the office knows the PIN, and
+    one click in Settings must not turn that into the owner's notebook."""
+    return is_tailnet_client(request) or _paired_role(request) == "owner"
 
 
 def is_dashboard_only(request: Request) -> bool:

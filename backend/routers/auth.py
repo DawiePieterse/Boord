@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlmodel import SQLModel
 
 import pairing
-from security import is_admin_client, paired_device, require_admin_client
+from security import is_admin_client, may_pair_an_owner, paired_device, require_admin_client
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -25,6 +25,9 @@ class CodeIn(SQLModel):
 class PairingIn(SQLModel):
     role: str
     label: str = ""
+
+
+OWNER_ONLY_MESSAGE = "Only the owner can add or remove an owner's device"
 
 
 def _kind_of_device(request: Request) -> str:
@@ -47,6 +50,7 @@ def auth_state(request: Request):
         "pin_set": pairing.pin_is_set(),
         "role": device["role"] if device else None,
         "admin": is_admin_client(request),
+        "can_pair_owner": may_pair_an_owner(request),
         "locked_for_seconds": pairing.seconds_locked_out(),
     }
 
@@ -91,7 +95,9 @@ def set_pin(body: PinIn):
 
 
 @router.post("/pairings", dependencies=[Depends(require_admin_client)])
-def create_pairing(body: PairingIn):
+def create_pairing(body: PairingIn, request: Request):
+    if body.role == "owner" and not may_pair_an_owner(request):
+        raise HTTPException(403, OWNER_ONLY_MESSAGE)
     try:
         code = pairing.new_pairing_code(body.role, body.label)
     except ValueError as e:
@@ -107,7 +113,12 @@ def list_paired_devices(request: Request):
 
 
 @router.delete("/devices/{device_id}", dependencies=[Depends(require_admin_client)])
-def revoke_paired_device(device_id: str):
+def revoke_paired_device(device_id: str, request: Request):
+    # The office cannot lock the owner out any more than it can let itself
+    # in: an owner's device is the owner's to remove.
+    owners = {d["id"] for d in pairing.paired_devices() if d.get("role") == "owner"}
+    if device_id in owners and not may_pair_an_owner(request):
+        raise HTTPException(403, OWNER_ONLY_MESSAGE)
     if not pairing.revoke(device_id):
         raise HTTPException(404, "No such paired device")
     return {"revoked": device_id}

@@ -5,9 +5,14 @@ what makes one: it keeps the farm's signing secret, the admin PIN, the
 one-time pairing codes and the list of what has been paired. Boord is the
 hub, so it is the one app with these screens - the others only check.
 
-Three kinds of device, one mechanism:
+Four kinds of device, one mechanism:
 
   admin      signs in with the farm's PIN, once per device.
+  owner      everything the admin has, and the two apps that are the owner's
+             alone: Boord Owner and Boord Notes. Paired by a link, never the
+             PIN - the office knows the PIN, and knowing it must not open
+             the owner's figures or a private notebook. Only an owner (or a
+             device on Tailscale, which could always open both) can make one.
   dashboard  the farm manager: opens a pairing link the office sent. Gets
              the Dashboard tab and nothing else (security.py).
   field      a tablet or phone in the orchard or the pack house: scans a
@@ -38,7 +43,10 @@ from db import DATA_DIR
 # or an unusual install that points it elsewhere still wins.
 os.environ.setdefault(device_auth.AUTH_DIR_ENV, DATA_DIR)
 
-ROLES = ("admin", "dashboard", "field")
+ROLES = ("admin", "owner", "dashboard", "field")
+# What a pairing code may stand for. Not "admin": an admin signs in by
+# knowing the PIN.
+PAIRABLE_ROLES = ("owner", "dashboard", "field")
 
 PIN_FILE = "admin_pin.txt"
 PAIRED_FILE = "device_paired.txt"
@@ -156,8 +164,8 @@ def check_pin(pin: str, now: Optional[float] = None) -> bool:
 def new_pairing_code(role: str, label: str, now: Optional[float] = None) -> str:
     """A one-time code the office hands to a device, as a QR or a link. The
     PIN is not offered this way: an admin signs in by knowing it."""
-    if role not in ("dashboard", "field"):
-        raise ValueError("A pairing code is for a field or a dashboard device")
+    if role not in PAIRABLE_ROLES:
+        raise ValueError("A pairing code is for a field, dashboard or owner device")
     now = time.time() if now is None else now
     code = secrets.token_urlsafe(24)
     with _lock:

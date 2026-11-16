@@ -2900,17 +2900,24 @@ async function loadServerCard() {
 
 // --- Settings > Devices: the admin PIN and paired devices (backend/pairing.py)
 
-const PAIRED_ROLE_LABEL = { admin: "Everything (admin)", dashboard: "Dashboard only", field: "Field and Pack House" };
+const PAIRED_ROLE_LABEL = { admin: "Everything (admin)", owner: "Everything, plus Owner and Notes",
+                            dashboard: "Dashboard only", field: "Field and Pack House" };
 
 async function loadPairedDevices() {
   const [state, devices] = await Promise.all([Boord.api("/api/auth/state"), Boord.api("/api/auth/devices")]);
+  // Only an owner can add an owner (backend/security.py), so the choice is
+  // not offered to anybody the server would refuse - and neither is Remove
+  // on an owner's line.
+  // Disabled as well as hidden: older iPhones still list a hidden option.
+  const ownerOption = document.getElementById("pairOwnerOption");
+  ownerOption.hidden = ownerOption.disabled = !state.can_pair_owner;
   document.getElementById("adminPinState").textContent = state.pin_set ? "(set - type a new one to change it)" : "(not set yet)";
   document.getElementById("pairedDevicesTable").innerHTML = devices.length ? devices.map((d) => `
     <tr class="border-b">
       <td class="p-2">${esc(d.label || "No name")}${d.this_device ? ' <span class="text-xs text-slate-400">(this device)</span>' : ""}</td>
       <td class="p-2">${esc(PAIRED_ROLE_LABEL[d.role] || d.role)}</td>
       <td class="p-2">${Boord.fmtDateTime(d.paired_at)}</td>
-      <td class="p-2 text-right"><button class="text-red-700 text-xs" data-revoke="${esc(d.id)}" data-label="${esc(d.label || "No name")}">Remove</button></td>
+      <td class="p-2 text-right">${d.role === "owner" && !state.can_pair_owner ? "" : `<button class="text-red-700 text-xs" data-revoke="${esc(d.id)}" data-label="${esc(d.label || "No name")}">Remove</button>`}</td>
     </tr>`).join("") : '<tr><td class="p-2 text-slate-400" colspan="4">No devices added yet. Devices on Tailscale are not listed here.</td></tr>';
 }
 

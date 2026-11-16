@@ -2431,6 +2431,42 @@ def test_a_dashboard_pairing_is_the_farm_managers_view_and_nothing_else():
         assert '"role":"dashboard"' in text.replace(" ", "") and '"admin":false' in text.replace(" ", "")
 
 
+def test_only_an_owner_can_make_an_owner():
+    """The owner's pairing opens Boord Owner and Boord Notes, which the admin
+    PIN deliberately does not. So a device that merely knows the PIN must not
+    be able to mint one in Settings, or to take the owner's away. Tailscale
+    can: it has always opened both apps, so nothing is given away there."""
+    import json  # noqa: E402
+    import pairing  # noqa: E402
+
+    office_on_tailscale = ("100.64.0.1", 54321)
+    with _PairingSandbox(), _without_dev_loopback():
+        admin = _signed("admin")
+        ask = {"role": "owner", "label": "Andre's phone"}
+        status, _, text = _call("POST", "/api/auth/pairings", VIA_TUNNEL, body=ask, cookie=admin)
+        assert status == 403 and "Only the owner" in text
+        assert '"can_pair_owner":false' in _call("GET", "/api/auth/state", VIA_TUNNEL, cookie=admin)[2].replace(" ", "")
+
+        status, _, text = _call("POST", "/api/auth/pairings", body=ask, peer=office_on_tailscale)
+        assert status == 200
+        headers = _call("POST", "/api/auth/pair", VIA_TUNNEL, body={"code": json.loads(text)["code"]})[1]
+        owner = _cookie_from(headers)
+
+        # The owner is everything the admin is, from the internet...
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=owner)[0] == 200
+        status, _, text = _call("GET", "/api/auth/devices", VIA_TUNNEL, cookie=owner)
+        assert status == 200 and json.loads(text)[0]["role"] == "owner"
+        # ...and can bring in the next owner without Tailscale.
+        assert _call("POST", "/api/auth/pairings", VIA_TUNNEL, body=ask, cookie=owner)[0] == 200
+
+        owner_id = pairing.paired_devices()[0]["id"]
+        status, _, text = _call("DELETE", "/api/auth/devices/" + owner_id, VIA_TUNNEL, cookie=admin)
+        assert status == 403 and "Only the owner" in text
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=owner)[0] == 200
+        assert _call("DELETE", "/api/auth/devices/" + owner_id, VIA_TUNNEL, cookie=owner)[0] == 200
+        assert _call("GET", "/admin/", VIA_TUNNEL, cookie=owner)[0] == 303
+
+
 def test_a_cookie_is_believed_only_when_this_farm_signed_it():
     import time  # noqa: E402
     import device_auth, pairing  # noqa: E402
@@ -2854,6 +2890,7 @@ def main():
                test_wrong_pins_shut_the_door_for_everybody_for_a_while,
                test_a_field_pairing_opens_field_and_pack_house_and_never_admin,
                test_a_dashboard_pairing_is_the_farm_managers_view_and_nothing_else,
+               test_only_an_owner_can_make_an_owner,
                test_a_cookie_is_believed_only_when_this_farm_signed_it,
                test_a_lost_phone_is_removed_alone,
                test_one_sign_in_covers_the_farms_whole_domain_and_is_renewed_in_use):

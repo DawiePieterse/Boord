@@ -46,9 +46,10 @@ button.addEventListener("click", async () => {
   errorBox.classList.add("hidden");
   try {
     const paired = await Boord.api("/api/auth/pair", { method: "POST", body: { code } });
-    // The farm manager goes to the dashboard. A field or pack house device
-    // goes to the setup page, which asks which station it is and sends it on.
-    location.replace(paired.role === "dashboard" ? "/admin/" : "/");
+    // A field or pack house device goes to the setup page, which asks which
+    // station it is and sends it on. The farm manager and the owner go to
+    // Admin, which shows each what their pairing allows.
+    location.replace(paired.role === "field" ? "/" : "/admin/");
   } catch (e) {
     showError(Boord.isNetworkError(e) ? "No connection - try again" : Boord.errorDetail(e, "Could not add this device"));
     button.disabled = Boord.isAuthError(e);   // a spent code will not work on a second press
