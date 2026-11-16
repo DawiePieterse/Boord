@@ -50,7 +50,7 @@ PAIRED_FILE = "device_paired.txt"
 # stick. Absent, the cookie belongs to the one address it was set on.
 COOKIE_DOMAIN_FILE = "device_cookie_domain.txt"
 
-MIN_PIN_LENGTH = 6
+MIN_PIN_LENGTH = 4
 _PBKDF2_ROUNDS = 600_000
 
 # A pairing link may be sent by WhatsApp to somebody who opens it tonight.

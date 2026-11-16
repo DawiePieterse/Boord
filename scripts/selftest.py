@@ -2333,11 +2333,12 @@ def test_the_admin_pin_signs_a_device_in_once():
         assert os.listdir(folder) == []
 
         try:
-            pairing.set_pin("12345")
+            pairing.set_pin("123")
         except ValueError:
             pass
         else:
-            raise AssertionError("a five-character PIN was accepted")
+            raise AssertionError("a three-character PIN was accepted")
+        pairing.set_pin("1234")       # four is the least the office may choose
         pairing.set_pin("litchi-2026")
         assert "litchi" not in open(os.path.join(folder, pairing.PIN_FILE)).read(), "the PIN is stored in the clear"
 
