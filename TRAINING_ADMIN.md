@@ -193,8 +193,8 @@ joins.
 ## Payments — calculating wages
 
 1. Payments tab.
-2. Set the Farm/Supplier filter and date range (or Today/This Week/
-   Season).
+2. Set the Farm/Supplier filter and date range (or Today, the week button
+   (Monday to Sunday, named by its week number) or Season).
 3. Tap **Calculate Wages** to see each worker's kg and amount due for
    that period, based on the current rate.
 4. Tap **Export Wage Sheet** to download it for payroll.

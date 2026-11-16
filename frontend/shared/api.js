@@ -8,7 +8,7 @@ const Boord = {
   // actually up to date - especially useful given the service workers'
   // cache-first strategy (see field/packhouse/admin service-worker.js).
   // Reset to 2.0 on 2026-08-26 for the Boord rename and clean reinstall.
-  VERSION: "3.65",
+  VERSION: "3.66",
 
   getDeviceId() { return localStorage.getItem("boord_device_id"); },
   // Re-pointing a tablet at a different device slot has to drop the picking
@@ -548,6 +548,21 @@ const Boord = {
     return d >= anchorThisYear ? d.getFullYear() : d.getFullYear() - 1;
   },
 
+  // The ISO 8601 week `d` falls in (farm-local): its number, and its Monday
+  // and Sunday. Week 1 is the week holding the year's first Thursday, so the
+  // number is counted from the Thursday of d's own week; the first days of
+  // January can belong to week 52 or 53, and the last of December to week 1.
+  // Counted in UTC from the local calendar date so a daylight-saving hour
+  // can never shift a day.
+  isoWeek(d = new Date()) {
+    const dow = (d.getDay() + 6) % 7; // Monday 0 ... Sunday 6
+    const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - dow);
+    const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() - dow + 6);
+    const thu = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate() - dow + 3);
+    const jan1 = Date.UTC(new Date(thu).getUTCFullYear(), 0, 1);
+    return { week: Math.floor((thu - jan1) / 86400000 / 7) + 1, start, end };
+  },
+
   // Wires a Today/Week/Season button group to a pair of date inputs: clicking
   // a button sets the inputs and highlights that button; editing a date input
   // directly clears the highlight since the selection no longer matches a preset.
@@ -563,12 +578,20 @@ const Boord = {
       startInput.value = t; endInput.value = t;
       setActive(todayBtn); if (onChange) onChange();
     });
+    // The week is the ISO week today falls in, Monday to Sunday, the same
+    // week the Planner and the pack house's date codes count in: the office
+    // talks about "week 47", not "the last seven days". Sunday may still be
+    // ahead; those days simply have nothing yet. The button carries the
+    // week's number, set again on each click so a screen left open over a
+    // Sunday night doesn't go on naming last week.
+    const nameWeek = () => { weekBtn.textContent = "Week " + Boord.isoWeek().week; };
     weekBtn.addEventListener("click", () => {
-      const end = new Date(); const start = new Date();
-      start.setDate(end.getDate() - 6);
-      startInput.value = Boord.localDateStr(start); endInput.value = Boord.localDateStr(end);
+      const w = Boord.isoWeek();
+      startInput.value = Boord.localDateStr(w.start); endInput.value = Boord.localDateStr(w.end);
+      nameWeek();
       setActive(weekBtn); if (onChange) onChange();
     });
+    nameWeek();
     seasonBtn.addEventListener("click", () => {
       const anchor = seasonAnchor ? seasonAnchor() : null;
       const month = anchor && anchor.month ? parseInt(anchor.month, 10) : 1;
