@@ -2954,10 +2954,12 @@ async function showPairingCode() {
       role: document.getElementById("pairRoleSelect").value,
       label: document.getElementById("pairLabelInput").value,
     } });
-    // The link is to wherever this Admin app is open, because that is the
-    // address the new device will use too: make the code from the farm's
-    // own address, not the Tailscale one, for a device that has no Tailscale.
-    const link = `${location.origin}/pair/?code=${encodeURIComponent(pairing.code)}`;
+    // The link goes to the farm's own address when the server knows one
+    // (pairing.link_origin), even if this Admin is open over Tailscale: a
+    // link to the Tailscale address is no use to a phone without Tailscale,
+    // and a phone with it would be paired where the other apps can't see it.
+    // A farm with no domain yet gets a link to wherever this Admin is open.
+    const link = `${pairing.link_origin || location.origin}/pair/?code=${encodeURIComponent(pairing.code)}`;
     document.getElementById("pairingLink").value = link;
     document.getElementById("pairingHours").textContent = pairing.valid_hours;
     QRCode.toString(link, { errorCorrectionLevel: "M", margin: 1 }, (err, svg) => {

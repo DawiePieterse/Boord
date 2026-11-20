@@ -2544,18 +2544,27 @@ def test_one_sign_in_covers_the_farms_whole_domain_and_is_renewed_in_use():
     """The Domain comes from a file the farm writes once, never from the Host
     header, and is carried signed so any app can renew it. A cookie a month
     old gets a full term again; a fresh one is left alone."""
-    import time  # noqa: E402
+    import json, time  # noqa: E402
     import device_auth, pairing  # noqa: E402
 
     with _PairingSandbox() as folder:
         assert "Domain" not in _call("POST", "/api/auth/pair", VIA_TUNNEL, body={
             "code": pairing.new_pairing_code("field", "")})[1]["set-cookie"]
+        # No domain yet: the link is left to wherever Admin is open.
+        ask = {"role": "field", "label": ""}
+        made = _call("POST", "/api/auth/pairings", VIA_TUNNEL, body=ask, cookie=_signed("admin"))
+        assert json.loads(made[2])["link_origin"] is None
 
         with open(os.path.join(folder, pairing.COOKIE_DOMAIN_FILE), "w") as f:
             f.write(".Bekfontein.example   # the farm's own domain\n")
         headers = _call("POST", "/api/auth/pair", dict(VIA_TUNNEL, host="evil.example"),
                         body={"code": pairing.new_pairing_code("field", "")})[1]
         assert "Domain=bekfontein.example" in headers["set-cookie"]
+        # ...and a pairing link is to the farm's address, whatever Host the
+        # office came in on: one made over Tailscale opened nowhere useful.
+        made = _call("POST", "/api/auth/pairings", dict(VIA_TUNNEL, host="server.tailnet.example"),
+                     body=ask, cookie=_signed("admin"))
+        assert json.loads(made[2])["link_origin"] == "https://boord.bekfontein.example"
 
         fresh = _cookie_from(headers)
         assert "set-cookie" not in _call("GET", "/field/", VIA_TUNNEL, cookie=fresh)[1]

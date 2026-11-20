@@ -198,6 +198,24 @@ def _cookie_domain() -> Optional[str]:
     return domain or None
 
 
+def link_origin() -> Optional[str]:
+    """Where a pairing link must open, when the farm has a domain of its own.
+
+    The link used to go to wherever Admin happened to be open. But an owner's
+    link can only be made by an owner's device or from Tailscale, so it was
+    made from Tailscale, and came out with the Tailscale address: a phone
+    without Tailscale could not find the server at all, and one with it paired
+    at an address where the cookie cannot be given the farm's domain, so
+    Owner and Notes went on refusing it (Bekfontein, 17 Nov 2026). The pairing
+    has to happen at the farm's address whichever way the office came in.
+
+    "boord." because that is the name every farm's tunnel gives this app - the
+    file holds the domain, not a hostname, since the cookie needs the domain.
+    None without the file: the caller falls back to its own address."""
+    domain = _cookie_domain()
+    return "https://boord." + domain if domain else None
+
+
 def pair(response, role: str, label: str) -> dict:
     """Remember a new device and hand its browser the cookie."""
     if role not in ROLES:

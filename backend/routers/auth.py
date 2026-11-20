@@ -110,7 +110,8 @@ def create_pairing(body: PairingIn, request: Request):
         code = pairing.new_pairing_code(body.role, body.label)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return {"code": code, "role": body.role, "valid_hours": pairing.PAIRING_CODE_SECONDS // 3600}
+    return {"code": code, "role": body.role, "valid_hours": pairing.PAIRING_CODE_SECONDS // 3600,
+            "link_origin": pairing.link_origin()}
 
 
 @router.get("/devices", dependencies=[Depends(require_admin_client)])
