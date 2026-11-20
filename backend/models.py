@@ -108,6 +108,16 @@ class Supplier(SQLModel, table=True):
     global_gap_number: str = ""  # GlobalG.A.P. Number (GGN) for this supplier
     packing_rate_per_kg: float = 0.0  # facility-use fee charged to this supplier
     packing_rate_per_crate: float = 0.0  # used instead of per_kg if per_kg is 0
+    # What Boord Packhouse prints for this supplier on its delivery notes and
+    # export papers, which it makes per supplier (it reads these columns from
+    # this table, read-only, and copes without them). All optional: a blank
+    # document_name prints `name`, and the pack house's own row left blank
+    # keeps what Packhouse has always printed for it.
+    document_name: str = ""     # the name on the documents (the company's registered name)
+    reg_number: str = ""        # the line under it on the letterhead: "(EDMS) BPK  Reg Nr 1992/002298/07"
+    document_contact: str = ""  # the letterhead's contact lines, one per line: "Tel: ...", "Email: ..."
+    document_address: str = ""  # the sender's postal address, one per line
+    note_prefix: str = ""       # in front of this supplier's delivery note numbers: "JB" prints JB-12
     active: bool = True
 
 
