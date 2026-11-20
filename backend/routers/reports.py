@@ -679,9 +679,8 @@ def _note_aliases(note: dict) -> list:
 def _market_notes(period_start: date, period_end: date, session: Session) -> list:
     """Every live delivery note loaded in the range, with what went out on it
     per pack and what the market sold and paid. Packs come from the note's own
-    copy of its pallets, so a pack retired in Packhouse since still shows. Not
-    filtered by supplier, like the Delivery Notes report: a note carries
-    whatever suppliers were stacked.
+    copy of its pallets, so a pack retired in Packhouse since still shows. The
+    pack house's own notes only: the market's invoices are the farm's.
 
     Sales come from whichever source has seen the most of the note: the
     market's emailed invoices (market_mail.py), all its part payments added
@@ -696,6 +695,13 @@ def _market_notes(period_start: date, period_end: date, session: Session) -> lis
     Transport is always typed."""
     notes = _packhouse_rows("SELECT * FROM deliverynote WHERE removed = 0 AND loaded_on >= ? AND loaded_on <= ? "
                             "ORDER BY loaded_on, note_no", (period_start.isoformat(), period_end.isoformat()))
+    # Only the pack house's own notes. Packhouse keeps a series of note numbers
+    # per supplier (its 0.73), and the market's papers are matched by the bare
+    # number: another supplier's note 1352 must not pick up the farm's invoice
+    # for B-1352. supplier_id is absent before that release and empty on a
+    # note older than it, and those are all the farm's own.
+    own_id = get_own_supplier_id(session)
+    notes = [n for n in notes if n.get("supplier_id") in (None, own_id)]
     uuids = [n["uuid"] for n in notes]
     statements = {s.note_uuid: s for s in session.exec(
         select(MarketStatement).where(MarketStatement.note_uuid.in_(uuids))).all()} if uuids else {}

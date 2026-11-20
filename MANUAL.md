@@ -1757,6 +1757,29 @@ Billing** panel on this same subtab - pick a supplier and date range,
 tap **Calculate**, and see how much facility-use fee that supplier owes
 for fruit actually received (not still in transit) in that period.
 
+A supplier also carries what **Boord Packhouse** prints for it. Packhouse's
+Pallet Stack, Delivery Note and Juice screens work one supplier at a time,
+and each supplier's delivery notes and export papers go out in its own name,
+with its own series of note numbers:
+
+- **Name on delivery notes and export papers** - the registered name. Left
+  blank, the supplier's name is printed.
+- **Registration line** - printed under that name on the delivery note.
+- **Contact lines** - the top right of the delivery note, one per line
+  (`Tel: 083 ...`, `Email: ...`).
+- **Postal address** - the sender's address on the delivery note and the
+  producer's address on the export consignment note, one line each.
+- **PUC** and **GlobalG.A.P. Number** - printed on the export papers in place
+  of the pack house's own.
+- **Delivery note prefix** - `JB` prints that supplier's notes as JB-12 and
+  its juice notes as JBJ-0001. A supplier without one prints S and its
+  number (S3-12).
+
+Your own row left blank prints what Packhouse has always printed for the
+farm, with its B-, LW- and J- note numbers; fill a field in to change it.
+Packhouse picks a change up within a minute, and a note already saved keeps
+what it was saved with until it is saved again.
+
 ### Pre-orders
 
 Cartons a target receiver books ahead from the export agent's schedule, like
@@ -2630,6 +2653,8 @@ keys below match `backend/models.py` exactly.
 | `contact_name` / `contact_phone` / `contact_email` | text | `"Piet Jansen"` / `"082-555-1234"` / — | All optional. |
 | `puc` | text | `"PUC1234567"` | Product Unit Code - the grower's registered production unit. Optional. |
 | `global_gap_number` | text | `"4049928123456"` | GlobalG.A.P. Number (GGN). Optional. |
+| `document_name` / `reg_number` / `document_contact` / `document_address` | text | `"Jansen Boerdery (Pty) Ltd"` | What Boord Packhouse prints for this supplier on its delivery notes and export papers. All optional. |
+| `note_prefix` | text | `"JB"` | In front of this supplier's delivery note numbers in Packhouse. Optional. |
 | `is_own_farm` | true/false | `false` | Exactly one supplier row in the whole system should ever have this set to `true` - that row represents the pack house's own fruit. |
 | `packing_rate_per_kg` | decimal | `1.50` | If greater than 0, this rate is used for Facility Billing; otherwise the per-crate rate below is used. |
 | `packing_rate_per_crate` | decimal | `25.00` | Only used when the per-kg rate is 0. |

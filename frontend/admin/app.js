@@ -782,6 +782,8 @@ function openEditModal(title, fields, initial, onSave) {
              <input data-key="${f.key}" type="file" accept="image/*" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-2">
              <button type="button" data-camera-for="${f.key}" title="Take photo with camera" class="px-3 border border-slate-300 rounded-lg bg-slate-50"><i class="fa-solid fa-camera"></i></button>
            </div>`
+        : f.type === "textarea"
+        ? `<textarea data-key="${f.key}" rows="3" class="w-full border border-slate-300 rounded-lg p-2"></textarea>`
         : `<input data-key="${f.key}" type="${f.type || "text"}" ${f.disabled ? "disabled" : ""} class="w-full border border-slate-300 rounded-lg p-2">`}
     </div>
   `).join("");
@@ -1263,6 +1265,16 @@ function editSupplier(supplier) {
     { key: "contact_email", label: "Contact Email" },
     { key: "puc", label: "PUC (Product Unit Code)" },
     { key: "global_gap_number", label: "GlobalG.A.P. Number (GGN)" },
+    // What Boord Packhouse prints for this supplier: its delivery notes and
+    // export papers are made per supplier, each with its own sender details
+    // and its own series of note numbers.
+    { key: "document_name", label: "Name on delivery notes and export papers (blank: the name above)" },
+    { key: "reg_number", label: "Registration line under that name, e.g. (PTY) LTD  Reg No 2001/012345/07" },
+    { key: "document_contact", label: "Contact lines on the delivery note, one per line (Tel: ..., Email: ...)", type: "textarea" },
+    { key: "document_address", label: "Postal address on the documents, one line each", type: "textarea" },
+    { key: "note_prefix", label: supplier && supplier.is_own_farm
+        ? "Delivery note prefix (leave blank to keep B-, LW- and J-)"
+        : "Delivery note prefix, e.g. JB prints JB-12 (juice notes JBJ-0001)" },
     { key: "packing_rate_per_kg", label: "Packing Rate (R/kg)", type: "number" },
     { key: "packing_rate_per_crate", label: "Packing Rate (R/crate, used if R/kg is 0)", type: "number" },
     { key: "active", label: "Active", type: "checkbox" },
