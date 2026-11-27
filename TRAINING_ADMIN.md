@@ -221,7 +221,7 @@ joins.
 | In Transit List | Dispatched but not yet received |
 | Pakhuis Ontvangstes / Pack House Receivables | Already received loads, matching the paper receiving slip — date/time, block, and rejected kg included |
 | Worker Harvest Report | Per-worker crates/kg/amount due |
-| Lietsjie Lone / Litchi Wages | Per-worker crates harvested, one column per date worked, plus a total — a whole pay period on one row |
+| Lietsjie Lone / Litchi Wages | Per-worker net kg harvested, one column per date worked, plus a total — a whole pay period on one row |
 | Block Harvest Report | Per-block crates/kg/averages |
 
 ### Markets & Transport

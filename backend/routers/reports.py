@@ -448,32 +448,36 @@ def worker_harvest_report(period_start: date, period_end: date, supplier_id: Opt
 @router.get("/litchi-wages")
 def litchi_wages_report(period_start: date, period_end: date, supplier_id: Optional[int] = None,
                          session: Session = Depends(get_session)):
-    """Lietsjie Lone / Litchi Wages: one row per worker, with the crates that
+    """Lietsjie Lone / Litchi Wages: one row per worker, with the kg that
     worker harvested broken out per day - one column per day worked, so the
-    wage clerk can read a whole pay period off a single row."""
+    wage clerk can read a whole pay period off a single row. Kg, not crates:
+    pickers are paid per kg, and it is net kg (weight less deductions), the
+    same figure routers/payments.py pays on, so this sheet agrees with the
+    wage run."""
     records = harvest_records_between(session, period_start, period_end, supplier_id)
 
     workers = {w.id: w for w in session.exec(select(Worker)).all()}
 
-    worker_days: dict = {}  # worker_id -> day -> crates harvested
+    worker_days: dict = {}  # worker_id -> day -> net kg harvested
     for r in records:
         if not r.worker_id:
             continue
         local_ts = to_local(r.timestamp)
         day = local_ts.date() if local_ts else date.min
         days_for_worker = worker_days.setdefault(r.worker_id, {})
-        days_for_worker[day] = days_for_worker.get(day, 0) + 1
+        days_for_worker[day] = days_for_worker.get(day, 0.0) + r.weight_kg - r.deduction_kg
 
     days = sorted({d for wd in worker_days.values() for d in wd})
     headers = ["Emp Nr", "Name & Surname"]
     headers += [d.isoformat() for d in days]
-    headers += ["Total Crates Harvested"]
+    headers += ["Total Kg Harvested"]
 
     rows = []
     for worker_id in sorted(worker_days.keys()):
         w = workers.get(worker_id)
         wd = worker_days[worker_id]
-        rows.append([worker_id, w.name if w else "", *(wd.get(d, 0) for d in days), sum(wd.values())])
+        rows.append([worker_id, w.name if w else "", *(round(wd.get(d, 0.0), 1) for d in days),
+                     round(sum(wd.values()), 1)])
 
     return _xlsx_response(headers, rows, "Litchi Wages", f"Litchi_Wages_{period_start}_{period_end}.xlsx")
 
