@@ -1849,7 +1849,7 @@ Dashboard (Farm/Supplier + date range):
 | In Transit List | Dispatched, not-yet-received loads |
 | Pakhuis Ontvangstes / Pack House Receivables | Received loads, matching the pack house's paper "Packhouse Receipt Lists" slip - slip number, date/time split out, the receiving block, farm/supplier, team, driver, crates, kg, and rejected (waste) kg |
 | Worker Harvest Report | Per-worker crates/kg/amount-due/avg-kg-per-crate |
-| Lietsjie Lone / Litchi Wages | One row per worker, with the crates that worker harvested broken out per day - one column per date worked, plus a total - so a whole pay period reads off a single row |
+| Lietsjie Lone / Litchi Wages | One row per worker, with the net kg (weight less deductions) that worker harvested broken out per day - one column per date worked, plus a total - so a whole pay period reads off a single row |
 | Block Harvest Report | Per-block crates/kg/avg-kg-per-crate/avg-kg-per-tree |
 
 **Traceability columns.** The reports that follow a load through the pack
